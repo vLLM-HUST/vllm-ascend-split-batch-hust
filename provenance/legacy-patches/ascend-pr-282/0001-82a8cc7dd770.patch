@@ -1,0 +1,4101 @@
+From 82a8cc7dd7702b162af1d1f06b0d9e95bad2718b Mon Sep 17 00:00:00 2001
+From: Raing5Days <M202574102@hust.edu.cn>
+Date: Sun, 30 Aug 2026 15:52:55 +0000
+Subject: [PATCH] feat(ascend): split-batch engine integration and cudagraph
+ support
+
+InplaceSplitRunner + model_runner_v1 execute_model wiring, acl_graph
+offset-key capture with fail-closed eager fallback, acl_graph_split_batch
+dispatch/admission, and attention_v1 FIA seq-lens templating hooks.
+
+Wires the primitive modules of the previous PR into the engine behind
+split_batch_config.enabled (off by default).
+---
+ vllm_ascend/attention/attention_v1.py         |   71 +-
+ vllm_ascend/compilation/acl_graph.py          |  250 +-
+ .../compilation/acl_graph_split_batch.py      |  738 ++++++
+ vllm_ascend/worker/inplace_split_runner.py    | 2117 +++++++++++++++++
+ vllm_ascend/worker/model_runner_v1.py         |  376 ++-
+ 5 files changed, 3404 insertions(+), 148 deletions(-)
+ create mode 100644 vllm_ascend/compilation/acl_graph_split_batch.py
+ create mode 100644 vllm_ascend/worker/inplace_split_runner.py
+
+diff --git a/vllm_ascend/attention/attention_v1.py b/vllm_ascend/attention/attention_v1.py
+index 4c39d89a81..fb2251c13f 100644
+--- a/vllm_ascend/attention/attention_v1.py
++++ b/vllm_ascend/attention/attention_v1.py
+@@ -23,6 +23,7 @@ import torch_npu
+ import vllm.envs as envs_vllm
+ from vllm.config import VllmConfig, get_current_vllm_config
+ from vllm.distributed import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
++from vllm.forward_context import get_forward_context
+ from vllm.utils.math_utils import cdiv
+ from vllm.v1.attention.backend import (  # type: ignore
+     AttentionBackend,
+@@ -61,8 +62,10 @@ from vllm_ascend.compilation.acl_graph import (
+     get_draft_graph_prefill_params,
+     get_graph_params,
+     update_draft_graph_params_workspaces,
++    update_graph_params_parallel_workspaces,
+     update_graph_params_workspaces,
+ )
++from vllm_ascend.compilation.acl_graph_split_batch import ensure_graph_param_key
+ from vllm_ascend.device.device_op import DeviceOperator
+ from vllm_ascend.ops.flashcomm2_oshard_manager import flashcomm2_oshard_manager
+ from vllm_ascend.utils import weak_ref_tensors
+@@ -499,7 +502,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
+                 else:
+                     graph_params = get_draft_graph_params()
+             else:
+-                graph_params = get_graph_params()
++                in_parallel_streams = bool(
++                    getattr(forward_context, "in_parallel_streams", False))
++                graph_params = get_graph_params(in_parallel_streams)
+             with torch.npu.stream(update_stream):
+                 for key, param, handle, event in zip(
+                     forward_context.attn_metadata,
+@@ -558,7 +563,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
+                 ]
+                 attn_keys = [key for _, key in draft_attn_key_steps]
+             else:
+-                graph_params = get_graph_params()
++                in_parallel_streams = bool(
++                    getattr(forward_context, "in_parallel_streams", False))
++                graph_params = get_graph_params(in_parallel_streams)
+                 attn_metadata = forward_context.attn_metadata
+                 attn_keys = list(attn_metadata.keys())
+             # For Qwen3-next, since the kv_cache_config has already categorized
+@@ -663,7 +670,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
+                 ]
+                 attn_keys = [key for _, key in draft_attn_key_steps]
+             else:
+-                graph_params = get_graph_params()
++                in_parallel_streams = bool(
++                    getattr(forward_context, "in_parallel_streams", False))
++                graph_params = get_graph_params(in_parallel_streams)
+                 attn_metadata = forward_context.attn_metadata
+                 attn_keys = list(attn_metadata.keys())
+                 if not use_layer_aware_replay:
+@@ -857,7 +866,13 @@ class AscendAttentionBackendImpl(AttentionImpl):
+             else:
+                 graph_params = get_draft_graph_params()
+         else:
+-            graph_params = get_graph_params()
++            in_parallel_streams = bool(
++                getattr(get_forward_context(), "in_parallel_streams", False))
++            graph_params = get_graph_params(in_parallel_streams)
++        from vllm_ascend.compilation.acl_graph_split_batch import get_graph_param_key
++        forward_context = get_forward_context()
++        param_key = get_graph_param_key(forward_context, num_tokens)
++        ensure_graph_param_key(graph_params, param_key)
+         actual_seq_lengths_q = attn_metadata.actual_seq_lengths_q
+         softmax_lse = torch.empty(1, dtype=query.dtype, device=query.device)
+         input_layout = "TND"
+@@ -888,7 +903,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
+             attn_mask = None
+             sparse_mode = 0
+         use_max_workspace = self._use_max_workspace_for_fia_graph
+-        workspace = graph_params.workspaces.get(num_tokens)
++        workspace = graph_params.workspaces.get(param_key)
+         should_update_workspace_cache = False
+         if use_max_workspace:
+             # Some models mix attention layer shapes under the same graph size.
+@@ -913,7 +928,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
+             )
+             workspace = cache_graph_workspace(
+                 graph_params,
+-                num_tokens,
++                param_key,
+                 candidate_workspace,
+                 use_max_workspace=use_max_workspace,
+             )
+@@ -940,9 +955,12 @@ class AscendAttentionBackendImpl(AttentionImpl):
+             should_update_workspace_cache = True
+         if should_update_workspace_cache:
+             if _EXTRA_CTX.is_draft_model:
+-                update_draft_graph_params_workspaces(num_tokens, workspace)
++                update_draft_graph_params_workspaces(param_key, workspace)
+             else:
+-                update_graph_params_workspaces(num_tokens, workspace)
++                if in_parallel_streams:
++                    update_graph_params_parallel_workspaces(param_key, workspace)
++                else:
++                    update_graph_params_workspaces(param_key, workspace)
+ 
+         # Handle graph capturing mode
+         stream = torch_npu.npu.current_stream()
+@@ -950,7 +968,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
+         event = torch.npu.ExternalEvent()
+         event.wait(stream)
+         event.reset(stream)
+-        graph_params.events[num_tokens].append(event)
++        graph_params.events[param_key].append(event)
+         attn_params = (
+             weak_ref_tensors(query),
+             weak_ref_tensors(key),
+@@ -980,7 +998,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
+             attn_params = attn_params + (None, None, None, None)  # type: ignore
+         layer_name = self._graph_metadata_layer_name(layer) if self._use_layer_aware_fia_graph_replay else None
+         attn_params = attn_params + (layer_name,)  # type: ignore
+-        graph_params.attn_params[num_tokens].append(attn_params)
++        graph_params.attn_params[param_key].append(attn_params)
+ 
+         torch.npu.graph_task_group_begin(stream)
+         torch_npu.npu_fused_infer_attention_score.out(
+@@ -1007,7 +1025,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
+         output = output.view(num_tokens, self.num_heads, self.head_size)
+ 
+         handle = torch.npu.graph_task_group_end(stream)
+-        graph_params.handles[num_tokens].append(handle)
++        graph_params.handles[param_key].append(handle)
+         return output, num_tokens
+ 
+     def full_graph_fia_v2(
+@@ -1024,7 +1042,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
+         if _EXTRA_CTX.is_draft_model:
+             graph_params = get_draft_graph_params()
+         else:
+-            graph_params = get_graph_params()
++            in_parallel_streams = bool(
++                getattr(get_forward_context(), "in_parallel_streams", False))
++            graph_params = get_graph_params(in_parallel_streams)
+ 
+         actual_seq_lengths_q = attn_metadata.actual_seq_lengths_q
+         softmax_lse = torch.empty(1, dtype=query.dtype, device=query.device)
+@@ -1083,7 +1103,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
+             if _EXTRA_CTX.is_draft_model:
+                 update_draft_graph_params_workspaces(num_tokens, workspace)
+             else:
+-                update_graph_params_workspaces(num_tokens, workspace)
++                if in_parallel_streams:
++                    update_graph_params_parallel_workspaces(num_tokens, workspace)
++                else:
++                    update_graph_params_workspaces(num_tokens, workspace)
+ 
+         # Handle graph capturing mode
+         stream = torch_npu.npu.current_stream()
+@@ -1142,7 +1165,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
+         attn_metadata: AscendMetadata,
+         output: torch.Tensor | None = None,
+     ):
+-        graph_params = get_graph_params()
++        in_parallel_streams = bool(
++            getattr(get_forward_context(), "in_parallel_streams", False))
++        graph_params = get_graph_params(in_parallel_streams)
+         num_tokens = query.shape[0]
+         if _EXTRA_CTX.capturing:
+             # Get workspace from cache or calculate it if not present.
+@@ -1159,7 +1184,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
+                     context_lens=attn_metadata.seq_lens,
+                     out=output,
+                 )
+-                update_graph_params_workspaces(num_tokens, workspace)
++                if in_parallel_streams:
++                    update_graph_params_parallel_workspaces(num_tokens, workspace)
++                else:
++                    update_graph_params_workspaces(num_tokens, workspace)
+ 
+             # Handle graph capturing mode
+             stream = torch_npu.npu.current_stream()
+@@ -1257,6 +1285,19 @@ class AscendAttentionBackendImpl(AttentionImpl):
+             )
+             block_table = attn_metadata.block_tables
+             actual_seq_lengths_kv = attn_metadata.seq_lens_list
++        forward_context = get_forward_context()
++        batch_descriptor = forward_context.batch_descriptor
++        _rm = getattr(batch_descriptor, "runtime_metadata", None)
++        if (attn_metadata.attn_state == AscendAttentionState.DecodeOnly
++                and batch_descriptor is not None
++                and _rm is not None
++                and _rm.metadata_mode == "template"
++                and _rm.backend_tag == "fia"):
++            from vllm_ascend.compilation.acl_graph_split_batch import maybe_template_fia_seq_lens, _get_fia_key_t
++            actual_seq_lengths_kv = maybe_template_fia_seq_lens(
++                forward_context, actual_seq_lengths_kv,
++                _get_fia_key_t(key, block_size),
++                source="attention_get_fia_params")
+         return key, value, block_size, block_table, actual_seq_lengths_kv
+ 
+     def forward_fused_infer_attention(
+diff --git a/vllm_ascend/compilation/acl_graph.py b/vllm_ascend/compilation/acl_graph.py
+index dcd7780f54..4572e4d8f8 100644
+--- a/vllm_ascend/compilation/acl_graph.py
++++ b/vllm_ascend/compilation/acl_graph.py
+@@ -1,12 +1,12 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ 
+-import dataclasses
++import os
+ import weakref
+ from collections.abc import Callable
+ from contextlib import ExitStack
+ from dataclasses import dataclass
+-from typing import Any, ClassVar
++from typing import Any, ClassVar, Optional
+ from unittest.mock import patch
+ 
+ import torch
+@@ -14,7 +14,7 @@ import torch_npu
+ import vllm.envs as envs
+ from vllm.compilation.counter import compilation_counter
+ from vllm.compilation.cuda_graph import CUDAGraphOptions
+-from vllm.compilation.monitor import validate_cudagraph_capturing_enabled
++from vllm.compilation import monitor as compilation_monitor
+ from vllm.config import CUDAGraphMode, VllmConfig
+ from vllm.forward_context import BatchDescriptor, get_forward_context
+ from vllm.logger import logger
+@@ -22,7 +22,27 @@ from vllm.platforms import current_platform
+ 
+ from vllm_ascend.ascend_forward_context import _EXTRA_CTX
+ 
++
+ from ..utils import weak_ref_tensors
++from vllm.distributed.device_communicators.pynccl_allocator import \
++    set_graph_pool_id
++
++from vllm_ascend.compilation.acl_graph_diagnostics import (
++    collect_attn_metadata_tensor_infos as _collect_attn_metadata_tensor_infos,
++    collect_tensor_arg_infos as _collect_tensor_arg_infos,
++    resolve_callable_arg_names as _resolve_callable_arg_names,
++    resolve_callable_name as _resolve_callable_name,
++    should_validate_inplace_metadata_ptrs as _should_validate_inplace_metadata_ptrs,
++    validate_input_addresses,
++)
++
++from vllm_ascend.compilation.acl_graph_split_batch import (
++    is_allowed_inplace_lazy_capture,
++)
++_ACLGRAPH_REPLAY_GLOBAL_SYNC = (
++    os.environ.get("VLLM_ASCEND_ACLGRAPH_REPLAY_GLOBAL_SYNC", "0")
++    in ("1", "true", "True")
++)
+ 
+ _acl_graph_wrappers: weakref.WeakSet[Any] = weakref.WeakSet()
+ _STREAM_RESOURCE_ERROR_CODE = "207008"
+@@ -88,15 +108,19 @@ def _raise_stream_resource_capture_error(exc: RuntimeError) -> None:
+     raise RuntimeError(f"{_STREAM_RESOURCE_GUIDANCE}\nOriginal error:\n{exc}") from exc
+ 
+ 
+-@dataclasses.dataclass
++@dataclass
+ class ACLGraphEntry:
+     batch_descriptor: BatchDescriptor
+     aclgraph: torch.npu.NPUGraph | None = None
+     output: Any | None = None
++    capture_count: int = 0
++    replay_count: int = 0
++    fallback_eager_count: int = 0
+ 
+-    # for aclgraph debugging, track the input addresses
+-    # during capture, and check if they are the same during replay
+     input_addresses: list[int] | None = None
++    input_tensor_infos: list[dict[str, Any]] | None = None
++    attn_metadata_addresses: list[int] | None = None
++    attn_metadata_tensor_infos: list[dict[str, Any]] | None = None
+ 
+ 
+ class ACLGraphWrapper:
+@@ -149,18 +173,18 @@ class ACLGraphWrapper:
+         self.first_run_finished = False
+         self.is_debugging_mode = envs.VLLM_LOGGING_LEVEL == "DEBUG"
+         self._runnable_str = str(runnable) if self.is_debugging_mode else None
++        self.runnable_arg_names = _resolve_callable_arg_names(runnable)
++        self.runnable_name = _resolve_callable_name(runnable)
+ 
+-        # assert runtime_mode is not NONE(no aclgraph), otherwise, we don't
+-        # need to initialize a ACLGraphWrapper.
+         assert self.runtime_mode != CUDAGraphMode.NONE
+         self.graph_pool = current_platform.get_global_graph_pool()
++        self.graph_pool_parallel_streams = torch.npu.graph_pool_handle()
+ 
+         if cudagraph_options is None:
+             cudagraph_options = CUDAGraphOptions()
+         self.aclgraph_options = cudagraph_options
+-        # the entries for different batch descriptors that we need to capture
+-        # aclgraphs for.
+         self.concrete_aclgraph_entries: dict[BatchDescriptor, ACLGraphEntry] = {}
++        self.concrete_aclgraph_entries2: dict[BatchDescriptor, ACLGraphEntry] = {}
+         self.enable_enpu = enable_enpu
+         self.use_eagle = use_eagle
+         _acl_graph_wrappers.add(self)
+@@ -168,7 +192,6 @@ class ACLGraphWrapper:
+         ACLGraphWrapper._all_instances.add(self)
+ 
+     def __getattr__(self, key: str):
+-        # allow accessing the attributes of the runnable.
+         if hasattr(self.runnable, key):
+             return getattr(self.runnable, key)
+         if self.is_debugging_mode:
+@@ -178,7 +201,6 @@ class ACLGraphWrapper:
+         raise AttributeError(f"Attribute {key} not found. Set VLLM_LOGGING_LEVEL=DEBUG for more details.")
+ 
+     def unwrap(self) -> Callable:
+-        # in case we need to access the original runnable.
+         return self.runnable
+ 
+     @property
+@@ -188,126 +210,140 @@ class ACLGraphWrapper:
+     def clear_graphs(self) -> None:
+         self.concrete_aclgraph_entries.clear()
+ 
++    def has_graph(
++        self,
++        batch_descriptor: BatchDescriptor,
++        in_parallel_streams: bool = False,
++    ) -> bool:
++        entries = (
++            self.concrete_aclgraph_entries2
++            if in_parallel_streams
++            else self.concrete_aclgraph_entries
++        )
++        entry = entries.get(batch_descriptor)
++        return entry is not None and entry.aclgraph is not None
++
+     def __call__(self, *args, **kwargs):
+         forward_context = get_forward_context()
+         batch_descriptor = forward_context.batch_descriptor
+         aclgraph_runtime_mode = forward_context.cudagraph_runtime_mode
+ 
+         if aclgraph_runtime_mode == CUDAGraphMode.NONE or aclgraph_runtime_mode != self.runtime_mode:
+-            # CUDAGraphMode.NONE could mean the profile run, a warmup run, or
+-            # running without aclgraphs.
+-            # We do not trigger capture/replay if the runtime mode is not
+-            # matches. This enables properly dispatching to the correct
+-            # CUDAGraphWrapper when nesting multiple instances with different
+-            # runtime modes.
+             return self.runnable(*args, **kwargs)
+ 
+-        if batch_descriptor not in self.concrete_aclgraph_entries:
+-            # create a new entry for this batch descriptor
+-            self.concrete_aclgraph_entries[batch_descriptor] = ACLGraphEntry(batch_descriptor=batch_descriptor)
++        in_parallel_streams = bool(
++            getattr(forward_context, "in_parallel_streams", False))
++        entries = (
++            self.concrete_aclgraph_entries2
++            if in_parallel_streams
++            else self.concrete_aclgraph_entries
++        )
++        graph_pool = (
++            self.graph_pool_parallel_streams
++            if in_parallel_streams
++            else self.graph_pool
++        )
++
++        if batch_descriptor not in entries:
++            entries[batch_descriptor] = ACLGraphEntry(batch_descriptor=batch_descriptor)
+ 
+-        entry = self.concrete_aclgraph_entries[batch_descriptor]
++        entry = entries[batch_descriptor]
+ 
+         if entry.aclgraph is None:
+-            if self.aclgraph_options.debug_log_enable:
+-                # Since we capture aclgraph for many different shapes and
+-                # capturing is fast, we don't need to log it for every
+-                # shape. E.g. we only log it for the first subgraph in
+-                # piecewise mode.
+-                logger.debug("Capturing a aclgraph on (%s,%s)", self.runtime_mode.name, entry.batch_descriptor)
+-            # validate that aclgraph capturing is legal at this point.
+-            validate_cudagraph_capturing_enabled()
+-
+-            input_addresses = [x.data_ptr() for x in args if isinstance(x, torch.Tensor)]
++            rm = getattr(batch_descriptor, "runtime_metadata", None)
++            start_num_tokens = int(rm.token_offset) if rm is not None else 0
++            is_inplace_lazy_capture = is_allowed_inplace_lazy_capture(
++                forward_context, batch_descriptor, aclgraph_runtime_mode
++            )
++
++            if start_num_tokens > 0 and not is_inplace_lazy_capture:
++                # Fail closed to eager execution: post-startup admission of
++                # an offset key whose per-forward capture preconditions are
++                # not met must never raise or attempt to capture here.
++                logger.warning_once(
++                    "Offset ACL Graph (start_num_tokens=%d) not found and "
++                    "lazy capture is not allowed; falling back to eager "
++                    "execution. BatchDescriptor: %s",
++                    start_num_tokens,
++                    batch_descriptor,
++                )
++                return self.runnable(*args, **kwargs)
++
++            previous_capture_enabled = compilation_monitor.cudagraph_capturing_enabled
++            if is_inplace_lazy_capture:
++                compilation_monitor.set_cudagraph_capturing_enabled(True)
++            try:
++                compilation_monitor.validate_cudagraph_capturing_enabled()
++            except Exception:
++                if is_inplace_lazy_capture:
++                    compilation_monitor.set_cudagraph_capturing_enabled(previous_capture_enabled)
++                raise
++
++            input_addresses, input_tensor_infos = _collect_tensor_arg_infos(
++                args,
++                self.runnable_arg_names,
++            )
+             entry.input_addresses = input_addresses
++            entry.input_tensor_infos = input_tensor_infos
++
++            if _should_validate_inplace_metadata_ptrs(forward_context):
++                (entry.attn_metadata_addresses,
++                 entry.attn_metadata_tensor_infos) = (
++                     _collect_attn_metadata_tensor_infos(
++                         getattr(forward_context, "attn_metadata", None)))
+             aclgraph = torch.npu.NPUGraph()
+ 
+             with ExitStack() as stack:
+                 if self.aclgraph_options.gc_disable:
+-                    # during every model forward for piecewise aclgraph
+-                    # mode, we will capture many pieces of aclgraphs
+-                    # (roughly one per layer). running gc again and again
+-                    # across layers will make the aclgraph capture very slow.
+-                    # therefore, we only run gc for the first graph,
+-                    # and disable gc for the rest of the graphs.
+                     stack.enter_context(patch("gc.collect", lambda: None))
+                     stack.enter_context(patch("torch.npu.empty_cache", lambda: None))
+ 
+-                # mind-exploding: carefully manage the reference and memory.
+-
+-                # Sync offloader's copy stream before capture.
+-                # Ensure any pre-capture prefetches from offloader are complete.
+                 from vllm.model_executor.offloader.base import get_offloader
+ 
+                 get_offloader().sync_prev_onload()
++                previous_capturing = bool(getattr(forward_context, 'capturing', False))
+                 forward_context.capturing = True
++                set_graph_pool_id(graph_pool)
+                 try:
+-                    with torch.npu.graph(aclgraph, pool=self.graph_pool):
+-                        # `output` is managed by pytorch's aclgraph pool
++                    with torch.npu.graph(aclgraph, pool=graph_pool):
+                         output = self.runnable(*args, **kwargs)
+-                        # Join offloader's copy stream after forward to avoid
+-                        # unjoined stream error. The last layer's start_prefetch
+-                        # forks copy_stream, but wait_prefetch only happens in
+-                        # the next forward pass.
+                         get_offloader().join_after_forward()
+                         if self.aclgraph_options.weak_ref_output:
+-                            # by converting it to weak ref,
+-                            # the original `output` will immediately be released
+-                            # to save memory. It is only safe to do this for
+-                            # the last graph in piecewise aclgraph mode, because
+-                            # the output of the last graph will not be used by
+-                            # any other acl graph.
+                             output = weak_ref_tensors(output)
+                 except RuntimeError as exc:
+                     if _is_stream_resource_capture_error(exc):
+                         _raise_stream_resource_capture_error(exc)
+                     raise
++                finally:
++                    forward_context.capturing = previous_capturing
++                    if is_inplace_lazy_capture:
++                        compilation_monitor.set_cudagraph_capturing_enabled(previous_capture_enabled)
+ 
+-            # here we always use weak ref for the workspaces
+-            # to save memory
+-            global _graph_params
+-            global _draft_graph_params
+-            global _draft_graph_prefill_params
++            global _graph_params, _draft_graph_params, _draft_graph_prefill_params
++            global _graph_params_parallel
+             weak_ref_workspaces(_graph_params)
+             weak_ref_workspaces(_draft_graph_params)
+             weak_ref_workspaces(_draft_graph_prefill_params)
++            weak_ref_workspaces(_graph_params_parallel)
+ 
+-            # here we always use weak ref for the output
+-            # to save memory
+             entry.output = weak_ref_tensors(output)
+             entry.aclgraph = aclgraph
++            entry.capture_count += 1
+ 
+             compilation_counter.num_cudagraph_captured += 1
+ 
+-            # important: we need to return the output, rather than
+-            # the weak ref of the output, so that pytorch can correctly
+-            # manage the memory during acl graph capture
+             return output
+ 
+-        if self.is_debugging_mode:
+-            # check if the input addresses are the same
+-            new_input_addresses = [x.data_ptr() for x in args if isinstance(x, torch.Tensor)]
+-            assert new_input_addresses == entry.input_addresses, (
+-                f"Input addresses for aclgraphs are different "
+-                f"during replay. Expected {entry.input_addresses}, "
+-                f"got {new_input_addresses}"
+-            )
++        if self.is_debugging_mode or _should_validate_inplace_metadata_ptrs(forward_context):
++            validate_input_addresses(
++                entry.input_addresses, args, self.runnable_name)
+ 
+         logger.info_once("Replaying aclgraph")
+-        # In async scheduling or multi-threaded (MT) scenarios, it is possible that
+-        # the CPU's record event (from update_attn_params) for the iteration i completes
+-        # before the grph replay of iteration i-1.
+-        # To ensure proper ordering, we must call synchronize here before replaying,
+-        # so that update_attn_params only executes after the previous graph replay has fully completed.
+-        # If we do not in main model and in full-graph mode when using merge-eagle-graph,
+-        # we do not need to synchronize.
+-        # When enable_enpu is on, model_runner orders update vs replay; skip here.
+-        # When FULL + EAGLE draft (merge path), replay does not need this barrier.
+-        is_draft_eagle = _EXTRA_CTX.is_draft_model and self.use_eagle
+-        need_sync = self.runtime_mode == CUDAGraphMode.FULL and not is_draft_eagle
+-        if not self.enable_enpu and need_sync:
+-            torch.npu.current_stream().synchronize()
++        if _ACLGRAPH_REPLAY_GLOBAL_SYNC and not in_parallel_streams:
++            torch.npu.synchronize()
++        set_graph_pool_id(graph_pool)
+         entry.aclgraph.replay()
++        entry.replay_count += 1
+         return entry.output
+ 
+ 
+@@ -329,6 +365,7 @@ def update_full_graph_params(
+     speculative_config=None,
+     num_dcp_pcp_tokens=None,
+     draft_attn_metadatas=None,
++
+ ):
+     impl_cls = attn_backend.get_impl_cls()
+     impl_cls.update_graph_params(
+@@ -343,8 +380,6 @@ def update_full_graph_params(
+ 
+     from vllm_ascend.ops.gdn import update_conv1d_graph_params
+ 
+-    # For GDN Attention: AscendC operate(conv1d update) update graph params
+-    # No patch can be loaded, update method call is temporarily placed here
+     update_conv1d_graph_params(
+         update_stream,
+         forward_context,
+@@ -361,19 +396,20 @@ class GraphParams:
+     workspaces: dict[int, torch.Tensor]
+     handles: dict[int, list[torch_npu._C._NPUTaskGroupHandle]]
+     attn_params: dict[int, list[tuple]]
+-    conv1d_params: dict[int, list[tuple]]  # for causal conv1d params
+-    conv1d_handles: dict[int, list[torch_npu._C._NPUTaskGroupHandle]]  # for causal conv1d params handles
+-    conv1d_events: dict[int, list[torch.npu.ExternalEvent]]  # for causal conv1d params events
++    conv1d_params: dict[int, list[tuple]]
++    conv1d_handles: dict[int, list[torch_npu._C._NPUTaskGroupHandle]]
++    conv1d_events: dict[int, list[torch.npu.ExternalEvent]]
+ 
+ 
+ _graph_params: GraphParams | None = None
+ 
+ 
+ def reset_graph_params():
+-    global _graph_params, _draft_graph_params, _draft_graph_prefill_params
++    global _graph_params, _draft_graph_params, _draft_graph_prefill_params, _graph_params_parallel
+     _graph_params = None
+     _draft_graph_params = None
+     _draft_graph_prefill_params = None
++    _graph_params_parallel = None
+ 
+ 
+ def set_graph_params(aclgraph_capture_sizes: list[int]):
+@@ -397,7 +433,9 @@ def update_graph_params_workspaces(num_tokens: int, workspace: torch.Tensor):
+         _graph_params.workspaces[num_tokens] = workspace
+ 
+ 
+-def get_graph_params():
++def get_graph_params(in_parallel_streams: bool = False) -> GraphParams | None:
++    if in_parallel_streams and _graph_params_parallel is not None:
++        return _graph_params_parallel
+     return _graph_params
+ 
+ 
+@@ -455,3 +493,31 @@ def update_draft_graph_prefill_params_workspaces(num_tokens: int, workspace: Any
+ 
+ def get_draft_graph_prefill_params():
+     return _draft_graph_prefill_params
++
++
++_graph_params_parallel: GraphParams | None = None
++
++
++def set_graph_params_parallel(aclgraph_capture_sizes: list[int]):
++    global _graph_params_parallel
++    if _graph_params_parallel is not None:
++        raise ValueError("Parallel graph parameters have already been set!")
++    _graph_params_parallel = GraphParams(
++        {size: [] for size in aclgraph_capture_sizes},
++        {size: None for size in aclgraph_capture_sizes},
++        {size: [] for size in aclgraph_capture_sizes},
++        {size: [] for size in aclgraph_capture_sizes},
++        {size: [] for size in aclgraph_capture_sizes},
++        {size: [] for size in aclgraph_capture_sizes},
++        {size: [] for size in aclgraph_capture_sizes},
++    )
++
++
++def update_graph_params_parallel_workspaces(num_tokens: int, workspace: torch.Tensor):
++    global _graph_params_parallel
++    if _graph_params_parallel is not None:
++        _graph_params_parallel.workspaces[num_tokens] = workspace
++
++
++def get_graph_params_parallel():
++    return _graph_params_parallel
+diff --git a/vllm_ascend/compilation/acl_graph_split_batch.py b/vllm_ascend/compilation/acl_graph_split_batch.py
+new file mode 100644
+index 0000000000..e89cc1735b
+--- /dev/null
++++ b/vllm_ascend/compilation/acl_graph_split_batch.py
+@@ -0,0 +1,738 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++import os
++from typing import Any, TYPE_CHECKING
++
++import torch
++import torch_npu
++from vllm.config import CUDAGraphMode
++from vllm.forward_context import BatchDescriptor
++from vllm.logger import logger
++
++from vllm_ascend.attention.utils import using_paged_attention
++from vllm_ascend.compilation.acl_graph_diagnostics import SPLIT_INPLACE_DEBUG
++
++if TYPE_CHECKING:
++    from vllm_ascend.compilation.acl_graph import ACLGraphWrapper, ACLGraphEntry, GraphParams
++
++_ACLGRAPH_REPLAY_GLOBAL_SYNC = (
++    os.environ.get("VLLM_ASCEND_ACLGRAPH_REPLAY_GLOBAL_SYNC", "0")
++    in ("1", "true", "True")
++)
++
++
++def is_allowed_inplace_lazy_capture(
++    forward_context: Any,
++    batch_descriptor: BatchDescriptor,
++    aclgraph_runtime_mode: CUDAGraphMode,
++) -> bool:
++    rm = getattr(batch_descriptor, "runtime_metadata", None)
++    start = int(rm.token_offset) if rm is not None else 0
++    if start <= 0:
++        return False
++    if aclgraph_runtime_mode not in (CUDAGraphMode.FULL, CUDAGraphMode.PIECEWISE):
++        return False
++    if not bool(getattr(forward_context, "allow_inplace_lazy_capture", False)):
++        return False
++    if getattr(forward_context, "split_inplace_mode", None) not in (
++        "inplace_serial",
++        "inplace_parallel",
++    ):
++        return False
++    if rm is None or rm.variant not in ("inplace_serial", "inplace_parallel"):
++        return False
++    if rm.backend_tag not in ("fia", "pa"):
++        return False
++    return True
++
++
++def extract_block_table_from_metadata(metadata: Any):
++    metadata_block_table = None
++    metadata_block_source = None
++    for attr in ("block_table", "block_tables", "block_table_tensor"):
++        candidate = getattr(metadata, attr, None)
++        if isinstance(candidate, torch.Tensor):
++            metadata_block_table = candidate
++            metadata_block_source = attr
++            break
++
++    if metadata_block_table is None:
++        decode_metadata = getattr(metadata, "decode", None)
++        for attr in ("block_table", "block_tables", "block_table_tensor"):
++            candidate = getattr(decode_metadata, attr, None)
++            if isinstance(candidate, torch.Tensor):
++                metadata_block_table = candidate
++                metadata_block_source = f"decode.{attr}"
++                break
++
++    return metadata_block_table, metadata_block_source
++
++
++def refresh_block_table_in_place(
++    dst_block_table: Any,
++    src_block_table: Any,
++) -> bool:
++    if (not isinstance(dst_block_table, torch.Tensor)
++            or not isinstance(src_block_table, torch.Tensor)):
++        return False
++
++    if dst_block_table.data_ptr() == src_block_table.data_ptr():
++        return False
++
++    try:
++        if dst_block_table.ndim == 2 and src_block_table.ndim == 2:
++            rows = min(dst_block_table.shape[0], src_block_table.shape[0])
++            cols = min(dst_block_table.shape[1], src_block_table.shape[1])
++            if rows <= 0 or cols <= 0:
++                return False
++            dst_block_table[:rows, :cols].copy_(
++                src_block_table[:rows, :cols], non_blocking=False)
++            return True
++
++        count = min(dst_block_table.numel(), src_block_table.numel())
++        if count <= 0:
++            return False
++        dst_block_table.view(-1)[:count].copy_(
++            src_block_table.view(-1)[:count], non_blocking=False)
++        return True
++    except Exception:
++        return False
++
++
++def should_template_fia_seq_lens(forward_context: Any) -> bool:
++    batch_descriptor = getattr(forward_context, "batch_descriptor", None)
++    rm = getattr(batch_descriptor, "runtime_metadata", None)
++    if not (rm is not None and rm.metadata_mode == "template"
++            and rm.backend_tag == "fia"):
++        return False
++    # Zero-padding split: the last seq_lens entry belongs to a real request,
++    # not a padding dummy. Templating would pin that request's KV length to
++    # the template value and corrupt its attention output.
++    actual = getattr(forward_context, "split_actual_num_tokens", None)
++    graph = getattr(forward_context, "split_graph_num_tokens", None)
++    if actual is not None and graph is not None and int(actual) >= int(graph):
++        return False
++    return True
++
++
++def _get_fia_key_t(key_tensor: Any, fallback: int) -> int:
++    if isinstance(key_tensor, torch.Tensor):
++        if key_tensor.ndim > 1:
++            return int(key_tensor.shape[1])
++        if key_tensor.ndim > 0 and int(fallback) <= 0:
++            return int(key_tensor.shape[0])
++    return int(fallback)
++
++
++def maybe_template_fia_seq_lens(
++    forward_context: Any,
++    seq_lens: Any,
++    target_t: int,
++    *,
++    source: str = "",
++) -> Any:
++    if not should_template_fia_seq_lens(forward_context):
++        return seq_lens
++    if not isinstance(seq_lens, (list, tuple)):
++        return seq_lens
++    if len(seq_lens) == 0:
++        return seq_lens
++    result = list(seq_lens)
++    result[-1] = target_t
++    return type(seq_lens)(result)
++
++
++def _fia_layer_seq_lens(forward_context: Any, metadata: Any,
++                        key_cache: Any, block_size: int, *,
++                        source: str) -> Any:
++    """Derive the templated FIA ``seq_lens`` for a single layer.
++
++    Keeps the host list type. Never converts to a device tensor (B1' lesson).
++    """
++    return maybe_template_fia_seq_lens(
++        forward_context, metadata.seq_lens_list,
++        _get_fia_key_t(key_cache, block_size),
++        source=source)
++
++
++def _fia_shared_seq_lens_probe(forward_context: Any,
++                               layer_items: list[tuple[Any, Any, Any]],
++                               ) -> tuple[Any, Any, bool]:
++    """C1: derive the FIA ``seq_lens`` / ``actual_seq_lengths_q`` for the first
++    layer and report whether every layer agrees (uniform decode).
++
++    Returns ``(first_seq_lens, first_actual_seq_lengths_q, uniform)``. When
++    ``uniform`` is True the caller may reuse the returned values for every
++    layer; otherwise it must derive per layer (fall back path).
++
++    This is a pure host-side computation (no NPU) so it is unit-testable.
++    """
++    layers = list(layer_items)
++    if not layers:
++        return None, None, False
++    meta0, key_cache0, block_size0 = layers[0]
++    seq0 = _fia_layer_seq_lens(forward_context, meta0, key_cache0, block_size0,
++                               source="acl_graph_shared:first")
++    act0 = getattr(meta0, "actual_seq_lengths_q", None)
++    for meta, key_cache, block_size in layers[1:]:
++        seq = _fia_layer_seq_lens(forward_context, meta, key_cache, block_size,
++                                  source="acl_graph_shared:check")
++        if seq != seq0 or getattr(meta, "actual_seq_lengths_q", None) != act0:
++            return seq0, act0, False
++    return seq0, act0, True
++
++
++def _iter_attn_metadata_objects(attn_metadata: Any):
++    if isinstance(attn_metadata, dict):
++        for value in attn_metadata.values():
++            yield from _iter_attn_metadata_objects(value)
++        return
++    if isinstance(attn_metadata, list):
++        for value in attn_metadata:
++            yield from _iter_attn_metadata_objects(value)
++        return
++    if attn_metadata is not None:
++        yield attn_metadata
++
++
++def template_fia_seq_lens_list(attn_metadata: Any, target_t: int) -> int:
++    updated = 0
++    for metadata_obj in _iter_attn_metadata_objects(attn_metadata):
++        seq_lens_list = getattr(metadata_obj, "seq_lens_list", None)
++        if not isinstance(seq_lens_list, list) or not seq_lens_list:
++            continue
++        templated = list(seq_lens_list)
++        templated[-1] = int(target_t)
++        setattr(metadata_obj, "seq_lens_list", templated)
++        updated += 1
++    return updated
++
++
++GraphParamKey = int | BatchDescriptor
++
++
++def get_graph_param_key(
++    forward_context: Any,
++    runtime_shape: int,
++) -> GraphParamKey:
++    desc = getattr(forward_context, "batch_descriptor", None)
++    if not isinstance(desc, BatchDescriptor):
++        return runtime_shape
++
++    rm = desc.runtime_metadata
++    if rm is not None:
++        return desc
++    return runtime_shape
++
++
++def resolve_graph_param_key(graph_params, forward_context, runtime_shape):
++    param_key = get_graph_param_key(forward_context, runtime_shape)
++    if param_key in graph_params.attn_params:
++        return param_key
++    if isinstance(param_key, BatchDescriptor):
++        int_key = int(param_key.num_tokens)
++        if int_key in graph_params.attn_params:
++            return int_key
++    return param_key
++
++
++def ensure_graph_param_key(graph_params, key):
++    if graph_params is None:
++        return
++    graph_params.events.setdefault(key, [])
++    graph_params.handles.setdefault(key, [])
++    graph_params.attn_params.setdefault(key, [])
++    graph_params.workspaces.setdefault(key, None)
++    if hasattr(graph_params, 'conv1d_params'):
++        graph_params.conv1d_params.setdefault(key, [])
++        graph_params.conv1d_handles.setdefault(key, [])
++        graph_params.conv1d_events.setdefault(key, [])
++
++
++def require_graph_param_key(graph_params, key, *, op):
++    if graph_params is None:
++        raise KeyError(f"Missing GraphParams for {op}: {key!r}")
++    if key not in graph_params.attn_params:
++        raise KeyError(f"Missing GraphParams key for {op}: {key!r}")
++    if key not in graph_params.handles or key not in graph_params.events:
++        raise KeyError(f"Incomplete GraphParams key for {op}: {key!r}")
++
++
++def has_dual_stream_attention_metadata(forward_context) -> bool:
++    dual_metadata = getattr(forward_context,
++                            "dual_stream_attention_metadata", None)
++    return isinstance(dual_metadata, list) and len(dual_metadata) == 2
++
++
++def get_dual_attention_update_metadata(
++    forward_context: Any, dual_metadata: Any, split_idx: int,
++    key: Any) -> Any:
++    runtime_metadata = getattr(
++        forward_context, "macro_graph_dual_attention_update_metadata", None)
++    if runtime_metadata is not None:
++        try:
++            return runtime_metadata[split_idx][key]
++        except (KeyError, IndexError, TypeError) as exc:
++            raise KeyError(
++                "macro_graph_dual_attention_update_metadata is missing "
++                f"split={split_idx}, layer={key!r}") from exc
++    return dual_metadata[split_idx][key]
++
++
++def _update_attn_fia_params(update_stream, forward_context, runtime_shape,
++                            refresh_block_table: bool = False,
++                            in_parallel_streams: bool = False):
++    from vllm_ascend.compilation.acl_graph import get_graph_params
++    graph_params = get_graph_params(in_parallel_streams)
++    if graph_params is None:
++        return
++    param_key = resolve_graph_param_key(graph_params, forward_context, runtime_shape)
++    if param_key not in graph_params.attn_params or not graph_params.attn_params[param_key]:
++        return
++    if param_key not in graph_params.handles or not graph_params.handles[param_key]:
++        return
++    if param_key not in graph_params.events or not graph_params.events[param_key]:
++        return
++
++    # C1: one derivation + shared host list for all layers. When
++    # VLLM_ASCEND_SPLIT_FIA_SHARED_LIST=1, build the templated seq_lens and
++    # actual_seq_lengths_q ONCE (from the first layer) and reuse them for every
++    # layer, guarded by a per-layer uniformity probe that falls back to
++    # per-layer derivation on any disagreement. Keep host lists; never feed
++    # device tensors to the FIA op (B1' lesson).
++    shared_seq_lens = None
++    shared_actual_seq_lengths_q = None
++    stream_items = None
++    if os.environ.get("VLLM_ASCEND_SPLIT_FIA_SHARED_LIST", "0") == "1":
++        stream_items = list(zip(
++            forward_context.attn_metadata,
++            graph_params.attn_params[param_key],
++            graph_params.handles[param_key],
++            graph_params.events[param_key],
++        ))
++        if stream_items:
++            layer_items = []
++            for key, param, _handle, _event in stream_items:
++                (query, key_cache, value, block_tables, attn_mask, block_size,
++                 seq_lens, actual_seq_lengths_q_capture, num_kv_heads,
++                 num_heads, scale, attn_output, softmax_lse, *rest) = param
++                layer_items.append((forward_context.attn_metadata[key],
++                                    key_cache, block_size))
++            seq0, act0, uniform = _fia_shared_seq_lens_probe(
++                forward_context, layer_items)
++            if uniform:
++                shared_seq_lens = seq0
++                shared_actual_seq_lengths_q = act0
++
++    with torch.npu.stream(update_stream):
++        if stream_items is None:
++            stream_items = list(zip(
++                forward_context.attn_metadata,
++                graph_params.attn_params[param_key],
++                graph_params.handles[param_key],
++                graph_params.events[param_key],
++            ))
++        for key, param, handle, event in stream_items:
++            (query, key_cache, value, block_tables, attn_mask, block_size,
++             seq_lens, actual_seq_lengths_q_capture, num_kv_heads, num_heads, scale,
++             attn_output, softmax_lse, *rest) = param
++
++            metadata = forward_context.attn_metadata[key]
++            if shared_seq_lens is None:
++                seq_lens = maybe_template_fia_seq_lens(
++                    forward_context, metadata.seq_lens_list,
++                    _get_fia_key_t(key_cache, block_size),
++                    source=f"acl_graph_update:{key}")
++                actual_seq_lengths_q = metadata.actual_seq_lengths_q
++            else:
++                seq_lens = shared_seq_lens
++                actual_seq_lengths_q = shared_actual_seq_lengths_q
++
++            metadata_block_table, metadata_block_source = extract_block_table_from_metadata(
++                metadata)
++            if refresh_block_table:
++                block_table_refreshed = refresh_block_table_in_place(
++                    block_tables, metadata_block_table)
++                if SPLIT_INPLACE_DEBUG:
++                    from vllm_ascend.inplace_split_debug import log_event, tensor_info
++                    log_event(
++                        "fia_block_table_refresh",
++                        {
++                            "key": key,
++                            "refreshed": block_table_refreshed,
++                            "in_parallel_streams": in_parallel_streams,
++                            "graph_block_table": tensor_info(block_tables),
++                            "meta_block_table": tensor_info(metadata_block_table),
++                            "meta_source": metadata_block_source,
++                        },
++                    )
++
++            if SPLIT_INPLACE_DEBUG:
++                from vllm_ascend.inplace_split_debug import log_event, tensor_info
++                log_event(
++                    "fia_update_before_call",
++                    {
++                        "key": key,
++                        "in_parallel_streams": in_parallel_streams,
++                        "query": tensor_info(query),
++                        "key_cache": tensor_info(key_cache),
++                        "value": tensor_info(value),
++                        "block_tables": tensor_info(block_tables),
++                        "attn_mask": tensor_info(attn_mask),
++                        "attn_output": tensor_info(attn_output),
++                        "softmax_lse": tensor_info(softmax_lse),
++                        "block_size": block_size,
++                        "actual_seq_lengths_q": actual_seq_lengths_q,
++                        "seq_lens": seq_lens,
++                        "seq_lens_list": getattr(metadata, "seq_lens_list", None),
++                        "num_kv_heads": num_kv_heads,
++                        "num_heads": num_heads,
++                        "should_template": should_template_fia_seq_lens(forward_context),
++                    },
++                )
++            torch.npu.graph_task_update_begin(update_stream, handle)
++            torch_npu.npu_fused_infer_attention_score.out(
++                query=query,
++                key=key_cache,
++                value=value,
++                block_table=block_tables,
++                atten_mask=attn_mask,
++                input_layout="TND",
++                block_size=block_size,
++                actual_seq_lengths=actual_seq_lengths_q,
++                actual_seq_lengths_kv=seq_lens,
++                num_key_value_heads=num_kv_heads,
++                num_heads=num_heads,
++                scale=scale,
++                sparse_mode=3,
++                workspace=graph_params.workspaces.get(param_key),
++                out=[attn_output, softmax_lse],
++            )
++            torch.npu.graph_task_update_end(update_stream)
++
++            event.record(update_stream)
++
++
++def _update_attn_pa_params(update_stream, forward_context, runtime_shape,
++                           refresh_block_table: bool = False,
++                           in_parallel_streams: bool = False):
++    from vllm_ascend.compilation.acl_graph import get_graph_params
++    graph_params = get_graph_params(in_parallel_streams)
++    if graph_params is None:
++        return
++    param_key = resolve_graph_param_key(graph_params, forward_context, runtime_shape)
++    if param_key not in graph_params.attn_params or not graph_params.attn_params[param_key]:
++        return
++    if param_key not in graph_params.handles or not graph_params.handles[param_key]:
++        return
++    if param_key not in graph_params.events or not graph_params.events[param_key]:
++        return
++
++    with torch.npu.stream(update_stream):
++        for key, param, handle, event in zip(
++                forward_context.attn_metadata,
++                graph_params.attn_params[param_key],
++                graph_params.handles[param_key],
++                graph_params.events[param_key],
++        ):
++            (
++                query,
++                key_cache,
++                value_cache,
++                num_kv_heads,
++                num_heads,
++                scale,
++                block_table,
++                seq_lens,
++                output,
++            ) = param
++            seq_lens = forward_context.attn_metadata[key].seq_lens
++
++            metadata = forward_context.attn_metadata[key]
++            metadata_block_table, metadata_block_source = extract_block_table_from_metadata(
++                metadata)
++            if refresh_block_table:
++                refresh_block_table_in_place(
++                    block_table, metadata_block_table)
++
++            workspace = torch_npu._npu_paged_attention_get_workspace(
++                query=query,
++                key_cache=key_cache,
++                value_cache=value_cache,
++                num_kv_heads=num_kv_heads,
++                num_heads=num_heads,
++                scale_value=scale,
++                block_table=block_table,
++                context_lens=seq_lens,
++                out=output)
++            torch.npu.graph_task_update_begin(update_stream, handle)
++            torch_npu._npu_paged_attention(query=query,
++                                           key_cache=key_cache,
++                                           value_cache=value_cache,
++                                           num_kv_heads=num_kv_heads,
++                                           num_heads=num_heads,
++                                           scale_value=scale,
++                                           block_table=block_table,
++                                           context_lens=seq_lens,
++                                           out=output,
++                                           workspace=workspace)
++            torch.npu.graph_task_update_end(update_stream)
++
++            event.record(update_stream)
++
++
++def update_attn_params(update_stream, forward_context, runtime_shape,
++                       vllm_config, in_parallel_streams: bool = False):
++    if has_dual_stream_attention_metadata(forward_context):
++        _update_attn_dual_fia_params(update_stream, forward_context,
++                                     runtime_shape,
++                                     in_parallel_streams=in_parallel_streams)
++    elif using_paged_attention(runtime_shape, vllm_config):
++        _update_attn_pa_params(update_stream, forward_context, runtime_shape,
++                               in_parallel_streams=in_parallel_streams)
++    else:
++        _update_attn_fia_params(update_stream, forward_context, runtime_shape,
++                                in_parallel_streams=in_parallel_streams)
++
++
++def update_attn_params_split(update_stream, forward_context,
++                             runtime_shape, vllm_config,
++                             in_parallel_streams: bool = False):
++    if has_dual_stream_attention_metadata(forward_context):
++        _update_attn_dual_fia_params(
++            update_stream,
++            forward_context,
++            runtime_shape,
++            refresh_block_table=True,
++            in_parallel_streams=in_parallel_streams,
++        )
++    elif using_paged_attention(runtime_shape, vllm_config):
++        _update_attn_pa_params(
++            update_stream,
++            forward_context,
++            runtime_shape,
++            refresh_block_table=True,
++            in_parallel_streams=in_parallel_streams,
++        )
++    else:
++        _update_attn_fia_params(
++            update_stream,
++            forward_context,
++            runtime_shape,
++            refresh_block_table=True,
++            in_parallel_streams=in_parallel_streams,
++        )
++
++
++def _update_attn_dual_fia_params(update_stream, forward_context,
++                                 runtime_shape,
++                                 refresh_block_table: bool = True,
++                                 in_parallel_streams: bool = False):
++    from vllm_ascend.compilation.acl_graph import get_graph_params
++    graph_params = get_graph_params(in_parallel_streams)
++    if graph_params is None:
++        return
++    param_key = get_graph_param_key(forward_context, runtime_shape)
++    if param_key not in graph_params.attn_params:
++        return
++    require_graph_param_key(graph_params, param_key,
++                            op="_update_attn_dual_fia_params")
++    dual_metadata = getattr(forward_context,
++                            "dual_stream_attention_metadata", None)
++    if not isinstance(dual_metadata, list) or len(dual_metadata) != 2:
++        return
++
++    with torch.npu.stream(update_stream):
++        attn_items = list(zip(
++                forward_context.attn_metadata,
++                graph_params.attn_params[param_key],
++                graph_params.handles[param_key],
++                graph_params.events[param_key],
++        ))
++        for layer_idx, (key, param, handles, events) in enumerate(attn_items):
++            if not isinstance(param, tuple) or len(param) < 2:
++                continue
++
++            if param[0] == "dual_stream_fia_pta":
++                if len(param) != 5:
++                    continue
++                if not hasattr(torch.npu, "dual_fused_infer_attention_score_update"):
++                    continue
++
++                _, query, attn_output, split_params, split_ranges = param
++                if not isinstance(split_params, list) or len(split_params) != 2:
++                    continue
++                if not isinstance(split_ranges, list) or len(split_ranges) != 2:
++                    continue
++                if isinstance(events, (list, tuple)):
++                    update_events = tuple(events)
++                elif events is None:
++                    update_events = ()
++                else:
++                    update_events = (events,)
++
++                split_update_params = []
++                for split_idx, split_param in enumerate(split_params):
++                    (query_view, key_cache, value, block_tables, attn_mask,
++                     block_size, seq_lens, query_start_loc, num_kv_heads,
++                     num_heads, scale, attn_output_view, softmax_lse,
++                     workspace_key) = split_param
++
++                    metadata = dual_metadata[split_idx][key]
++                    runtime_metadata = get_dual_attention_update_metadata(
++                        forward_context, dual_metadata, split_idx, key)
++                    seq_lens = maybe_template_fia_seq_lens(
++                        forward_context,
++                        getattr(runtime_metadata, "seq_lens_list",
++                                metadata.seq_lens_list),
++                        _get_fia_key_t(key_cache, block_size),
++                        source=f"acl_graph_update_dual:{key}:{split_idx}")
++                    actual_seq_lengths_q = getattr(
++                        runtime_metadata, "actual_seq_lengths_q",
++                        metadata.actual_seq_lengths_q)
++                    metadata_block_table, _ = (
++                        extract_block_table_from_metadata(runtime_metadata))
++                    if refresh_block_table:
++                        refresh_block_table_in_place(
++                            block_tables, metadata_block_table)
++
++                    split_update_params.append({
++                        "key_cache": key_cache,
++                        "value": value,
++                        "block_tables": block_tables,
++                        "attn_mask": attn_mask,
++                        "block_size": block_size,
++                        "seq_lens": seq_lens,
++                        "actual_seq_lengths_q": actual_seq_lengths_q,
++                        "num_kv_heads": num_kv_heads,
++                        "num_heads": num_heads,
++                        "scale": scale,
++                        "softmax_lse": softmax_lse,
++                        "workspace":
++                        graph_params.workspaces.get(workspace_key),
++                    })
++
++                split0, split1 = split_update_params
++                split_start_0, split_graph_tokens_0 = split_ranges[0]
++                split_start_1, split_graph_tokens_1 = split_ranges[1]
++                torch.npu.dual_fused_infer_attention_score_update(
++                    update_stream,
++                    handles,
++                    query,
++                    split0["key_cache"],
++                    split0["value"],
++                    attn_output,
++                    block_table_0=split0["block_tables"],
++                    block_table_1=split1["block_tables"],
++                    actual_seq_lengths_0=split0["actual_seq_lengths_q"],
++                    actual_seq_lengths_1=split1["actual_seq_lengths_q"],
++                    actual_seq_lengths_kv_0=split0["seq_lens"],
++                    actual_seq_lengths_kv_1=split1["seq_lens"],
++                    split_start_0=int(split_start_0),
++                    split_graph_tokens_0=int(split_graph_tokens_0),
++                    split_start_1=int(split_start_1),
++                    split_graph_tokens_1=int(split_graph_tokens_1),
++                    atten_mask=split0["attn_mask"],
++                    workspace_0=split0["workspace"],
++                    workspace_1=split1["workspace"],
++                    softmax_lse_0=split0["softmax_lse"],
++                    softmax_lse_1=split1["softmax_lse"],
++                    num_heads=split0["num_heads"],
++                    scale=split0["scale"],
++                    block_size=split0["block_size"],
++                    num_key_value_heads=split0["num_kv_heads"],
++                    sparse_mode=3,
++                    input_layout="TND",
++                    softmax_lse_flag=False,
++                )
++                for event in update_events:
++                    event.record(update_stream)
++                continue
++
++            if param[0] == "dual_stream_fia":
++                split_params = param[1]
++                if not isinstance(split_params, list) or len(split_params) != 2:
++                    continue
++                if not isinstance(handles, list) or len(handles) != 2:
++                    continue
++                if not isinstance(events, list) or len(events) != 2:
++                    continue
++
++                for split_idx, split_param in enumerate(split_params):
++                    (query, key_cache, value, block_tables, attn_mask, block_size,
++                     seq_lens, query_start_loc, num_kv_heads, num_heads, scale,
++                     attn_output, softmax_lse, workspace_key) = split_param
++
++                    metadata = dual_metadata[split_idx][key]
++                    seq_lens = maybe_template_fia_seq_lens(
++                        forward_context,
++                        metadata.seq_lens_list,
++                        _get_fia_key_t(key_cache, block_size),
++                        source=f"acl_graph_update_dual:{key}:{split_idx}")
++                    actual_seq_lengths_q = metadata.actual_seq_lengths_q
++
++                    metadata_block_table, _ = extract_block_table_from_metadata(metadata)
++                    if refresh_block_table:
++                        refresh_block_table_in_place(
++                            block_tables, metadata_block_table)
++
++                    torch.npu.graph_task_update_begin(update_stream,
++                                                      handles[split_idx])
++                    torch_npu.npu_fused_infer_attention_score.out(
++                        query=query,
++                        key=key_cache,
++                        value=value,
++                        block_table=block_tables,
++                        atten_mask=attn_mask,
++                        input_layout="TND",
++                        block_size=block_size,
++                        actual_seq_lengths=actual_seq_lengths_q,
++                        actual_seq_lengths_kv=seq_lens,
++                        num_key_value_heads=num_kv_heads,
++                        num_heads=num_heads,
++                        scale=scale,
++                        sparse_mode=3,
++                        workspace=graph_params.workspaces.get(workspace_key),
++                        out=[attn_output, softmax_lse],
++                    )
++                    torch.npu.graph_task_update_end(update_stream)
++                    events[split_idx].record(update_stream)
++
++
++def dual_stream_attention_plan_to_slices(
++    plan: Any,
++    query_len: int) -> tuple[list[Any], list[Any]]:
++    from vllm.v1.worker.ubatch_utils import UBatchSlice
++    from vllm_ascend.worker.inplace_split_utils import SplitBatchSlice
++    query_len = int(query_len)
++    if query_len <= 0:
++        raise RuntimeError(
++            "dual_stream_attention_config requires positive query_len")
++    split_batch_slices: list[Any] = []
++    for split_idx in range(2):
++        token_start = int(plan.split_start_tokens[split_idx])
++        actual_tokens = int(plan.split_actual_tokens[split_idx])
++        graph_tokens = int(plan.split_graph_tokens[split_idx])
++        if token_start % query_len != 0:
++            raise RuntimeError(
++                "dual_stream_attention_config split_start_tokens must be "
++                "request-aligned")
++        if actual_tokens % query_len != 0 or graph_tokens % query_len != 0:
++            raise RuntimeError(
++                "dual_stream_attention_config split tokens must be "
++                "request-aligned")
++        request_start = token_start // query_len
++        request_stop = request_start + actual_tokens // query_len
++        split_batch_slices.append(
++            SplitBatchSlice(
++                request_slice=slice(request_start, request_stop),
++                token_slice=slice(token_start, token_start + actual_tokens),
++                padded_num_tokens=graph_tokens,
++                start_num_tokens=token_start,
++            ))
++    ubatch_slices = [
++        UBatchSlice(s.request_slice, s.token_slice)
++        for s in split_batch_slices
++    ]
++    return split_batch_slices, ubatch_slices
+\ No newline at end of file
+diff --git a/vllm_ascend/worker/inplace_split_runner.py b/vllm_ascend/worker/inplace_split_runner.py
+new file mode 100644
+index 0000000000..f665293565
+--- /dev/null
++++ b/vllm_ascend/worker/inplace_split_runner.py
+@@ -0,0 +1,2117 @@
++#
++# Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
++# This file is a part of the vllm-ascend project.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++import os
++import threading
++from contextlib import contextmanager
++from typing import TYPE_CHECKING, Any
++
++import numpy as np
++import torch
++from vllm.config import CUDAGraphMode
++from vllm.forward_context import (
++    BatchDescriptor,
++    CUDAGraphRuntimeMetadata,
++    get_forward_context,
++    override_forward_context,
++)
++from vllm.logger import logger
++from vllm.sequence import IntermediateTensors
++
++from vllm_ascend.attention.attention_v1 import AscendAttentionState
++from vllm_ascend.attention.utils import AscendCommonAttentionMetadata, using_paged_attention
++from vllm_ascend.worker.inplace_split_ops import (
++    AscendUbatchMetadata,
++    clone_split_output,
++    context_ubatch_slices_for_inplace,
++    dual_stream_attention_config,
++    fill_tensor_token_tail,
++    maybe_expand_tensor_for_graph_slice,
++    merge_split_outputs,
++    padding_tail_slice_for_split,
++    slice_split_batch_inputs,
++    stabilize_inplace_common_attn_metadata_list,
++    tokens_slice_for_inplace_execution,
++    trim_split_output,
++)
++from vllm_ascend.worker.inplace_split_worker_pool import SplitReplayWorkerPool
++from vllm_ascend.worker.inplace_split_utils import SplitBatchSlice
++
++if TYPE_CHECKING:
++    from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
++
++
++_INPLACE_PARALLEL_MERGE_SYNC_POLICY = os.environ.get(
++    "VLLM_ASCEND_INPLACE_PARALLEL_MERGE_SYNC_POLICY", "event_wait").strip(
++    ).lower()
++if _INPLACE_PARALLEL_MERGE_SYNC_POLICY not in ("event_wait", "host_sync"):
++    logger.warning(
++        "Unknown VLLM_ASCEND_INPLACE_PARALLEL_MERGE_SYNC_POLICY=%r; "
++        "falling back to event_wait",
++        _INPLACE_PARALLEL_MERGE_SYNC_POLICY,
++    )
++    _INPLACE_PARALLEL_MERGE_SYNC_POLICY = "event_wait"
++
++
++def _parse_inplace_parallel_split_output_mode() -> str:
++    mode = os.environ.get("VLLM_ASCEND_INPLACE_PARALLEL_SPLIT_OUTPUT_MODE")
++    if mode is None:
++        legacy_clone = os.environ.get(
++            "VLLM_ASCEND_INPLACE_PARALLEL_CLONE_SPLIT_OUTPUTS")
++        if legacy_clone is None:
++            return "auto"
++        return ("direct" if legacy_clone in ("0", "false", "False") else
++                "clone")
++    mode = mode.strip().lower()
++    if mode in ("auto", "clone", "direct"):
++        return mode
++    if mode in ("0", "false"):
++        return "direct"
++    if mode in ("1", "true"):
++        return "clone"
++    logger.warning(
++        "Unknown VLLM_ASCEND_INPLACE_PARALLEL_SPLIT_OUTPUT_MODE=%r; "
++        "falling back to auto",
++        mode,
++    )
++    return "auto"
++
++
++_INPLACE_PARALLEL_SPLIT_OUTPUT_MODE = (
++    _parse_inplace_parallel_split_output_mode())
++
++
++def _parse_stream_limit_pair(value: str, env_name: str) -> tuple[int, int] | None:
++    parts = [part.strip() for part in value.split(",")]
++    if len(parts) != 2:
++        logger.warning(
++            "Ignoring %s=%r: expected cube,vector",
++            env_name,
++            value,
++        )
++        return None
++    try:
++        return int(parts[0]), int(parts[1])
++    except ValueError:
++        logger.warning(
++            "Ignoring %s=%r: cube/vector must be integers",
++            env_name,
++            value,
++        )
++        return None
++
++
++def _parse_stream_limit_spec(
++        env_name: str) -> tuple[tuple[int, int], tuple[int, int]] | None:
++    raw = os.environ.get(env_name, "").strip()
++    if not raw:
++        return None
++    parts = [part.strip() for part in raw.split(";")]
++    if len(parts) == 1:
++        limit = _parse_stream_limit_pair(parts[0], env_name)
++        if limit is None:
++            return None
++        return limit, limit
++    if len(parts) == 2:
++        main_limit = _parse_stream_limit_pair(parts[0], env_name)
++        parallel_limit = _parse_stream_limit_pair(parts[1], env_name)
++        if main_limit is None or parallel_limit is None:
++            return None
++        return main_limit, parallel_limit
++    logger.warning(
++        "Ignoring %s=%r: expected cube,vector or "
++        "main_cube,main_vector;parallel_cube,parallel_vector",
++        env_name,
++        raw,
++    )
++    return None
++
++
++_INPLACE_PARALLEL_REPLAY_STREAM_LIMITS = _parse_stream_limit_spec(
++    "VLLM_ASCEND_INPLACE_PARALLEL_REPLAY_STREAM_LIMITS")
++_INPLACE_PARALLEL_UPDATE_STREAM_LIMITS = _parse_stream_limit_spec(
++    "VLLM_ASCEND_INPLACE_PARALLEL_UPDATE_STREAM_LIMITS")
++
++_INPLACE_PARALLEL_REUSE_SPLIT0_COS_SIN = os.environ.get(
++    "VLLM_ASCEND_INPLACE_PARALLEL_REUSE_SPLIT0_COS_SIN", "1") not in (
++        "0", "false", "False")
++
++
++def _inplace_parallel_clone_split_outputs(
++        *,
++        allow_auto_direct_outputs: bool,
++        split_cfg: Any,
++        split_batch_slices: list[Any],
++        aclgraph_runtime_mode: CUDAGraphMode,
++        merge_sync_policy: str) -> bool:
++    if _INPLACE_PARALLEL_SPLIT_OUTPUT_MODE == "clone":
++        return True
++    if _INPLACE_PARALLEL_SPLIT_OUTPUT_MODE == "direct":
++        return False
++    if not allow_auto_direct_outputs:
++        return True
++    if aclgraph_runtime_mode != CUDAGraphMode.FULL:
++        return True
++    if merge_sync_policy != "event_wait":
++        return True
++    if split_cfg is None:
++        return True
++    if getattr(split_cfg, "mode", "") != "inplace_parallel":
++        return True
++    if not bool(getattr(split_cfg, "enable_parallel_streams", False)):
++        return True
++    return len(split_batch_slices) != 2
++
++
++def _record_stream_tree_for_npugraph_ex(value: Any, stream: Any) -> None:
++    if isinstance(value, torch.Tensor):
++        try:
++            if value.device.type == "npu":
++                value.record_stream(stream)
++        except Exception:
++            return
++        return
++    if isinstance(value, IntermediateTensors):
++        for tensor in value.tensors.values():
++            _record_stream_tree_for_npugraph_ex(tensor, stream)
++        return
++    if isinstance(value, dict):
++        for child in value.values():
++            _record_stream_tree_for_npugraph_ex(child, stream)
++        return
++    if isinstance(value, (list, tuple)):
++        for child in value:
++            _record_stream_tree_for_npugraph_ex(child, stream)
++
++
++class InplaceSplitRunner:
++    """Orchestrates inplace split-batch execution.
++
++    Holds a reference to NPUModelRunner via composition rather than inheritance.
++    """
++
++    def __init__(self, runner: "NPUModelRunner"):
++        self._runner = runner
++        self._inplace_parallel_output_release_events: list[
++            torch.npu.Event | None] = []
++        self._replay_worker_pool: SplitReplayWorkerPool | None = None
++
++    def _get_replay_worker_pool(self) -> SplitReplayWorkerPool:
++        """Lazy persistent replay workers (created on the engine device)."""
++        if self._replay_worker_pool is None:
++            self._replay_worker_pool = SplitReplayWorkerPool(num_workers=2)
++        return self._replay_worker_pool
++
++    @property
++    def device(self) -> torch.device:
++        return self._runner.device
++
++    @property
++    def vllm_config(self):
++        return self._runner.vllm_config
++
++    @property
++    def uniform_decode_query_len(self) -> int | None:
++        return self._runner.uniform_decode_query_len
++
++    @property
++    def stream_main(self) -> torch.npu.Stream | None:
++        return self._runner.stream_main
++
++    @property
++    def stream_parallel(self) -> torch.npu.Stream | None:
++        return self._runner.stream_parallel
++
++    @property
++    def ascend_config(self):
++        return self._runner.ascend_config
++
++    @property
++    def model_config(self):
++        return self._runner.model_config
++
++    @property
++    def pcp_size(self):
++        return self._runner.pcp_size
++
++    @property
++    def dcp_size(self):
++        return self._runner.dcp_size
++
++    @property
++    def block_size(self):
++        return self._runner.block_size
++
++    @property
++    def cudagraph_dispatcher(self):
++        return self._runner.cudagraph_dispatcher
++
++    @property
++    def compilation_config(self):
++        return self._runner.compilation_config
++
++    @property
++    def model(self):
++        return self._runner.model
++
++    def _record_replay_stream_event(
++            self, stream: torch.npu.Stream) -> torch.npu.Event:
++        event = torch.npu.Event()
++        event.record(stream)
++        return event
++
++    def _wait_replay_stream_events(
++            self, stream: torch.npu.Stream,
++            events: list[torch.npu.Event | None]) -> None:
++        for event in events:
++            if event is not None:
++                stream.wait_event(event)
++
++    def _wait_inplace_parallel_output_release_events(
++            self, streams: list[torch.npu.Stream]) -> int:
++        events = getattr(self, "_inplace_parallel_output_release_events", [])
++        if not events:
++            return 0
++        self._inplace_parallel_output_release_events = []
++        for stream in streams:
++            self._wait_replay_stream_events(stream, events)
++        return len(events)
++
++    def _record_inplace_parallel_output_release_event(
++            self) -> torch.npu.Event:
++        event = self._record_replay_stream_event(self.stream_main)
++        self._inplace_parallel_output_release_events = [event]
++        return event
++
++    def _set_stream_limit(self, stream: torch.npu.Stream,
++                          limit: tuple[int, int], label: str) -> None:
++        cube_num, vector_num = limit
++        try:
++            torch.npu.set_stream_limit(stream,
++                                       cube_num=cube_num,
++                                       vector_num=vector_num)
++            logger.info_once(
++                "Applied inplace_parallel stream limit for %s: "
++                "cube_num=%s vector_num=%s",
++                label,
++                cube_num,
++                vector_num,
++            )
++        except Exception as exc:
++            logger.warning(
++                "Failed to apply inplace_parallel stream limit for %s: %s",
++                label,
++                exc,
++            )
++
++    def _apply_inplace_parallel_replay_stream_limits(self) -> None:
++        limits = _INPLACE_PARALLEL_REPLAY_STREAM_LIMITS
++        if limits is None:
++            return
++        self._set_stream_limit(self.stream_main, limits[0], "replay_main")
++        self._set_stream_limit(self.stream_parallel, limits[1],
++                               "replay_parallel")
++
++
++    def _stabilize_inplace_common_attn_metadata_list(
++            self,
++            common_attn_metadata_list: list[Any],
++            *,
++            split_mode: str,
++            inplace_split_plan: Any | None,
++    ) -> list[Any]:
++        mrope_positions_gpu = getattr(
++            getattr(self._runner, "mrope_positions", None), "gpu", None)
++        positions_gpu = getattr(
++            getattr(self._runner, "positions", None), "gpu", None)
++        return stabilize_inplace_common_attn_metadata_list(
++            common_attn_metadata_list,
++            split_mode=split_mode,
++            inplace_split_plan=inplace_split_plan,
++            uniform_decode_query_len=self.uniform_decode_query_len,
++            mrope_positions_gpu=mrope_positions_gpu,
++            positions_gpu=positions_gpu)
++
++    def inplace_split_precheck_reason(
++        self,
++        *,
++        split_batch_config: Any,
++        cudagraph_mode: CUDAGraphMode,
++        num_scheduled_tokens_np: np.ndarray,
++        num_reqs: int,
++        has_lora: bool,
++        is_mla: bool,
++        is_mrope: bool,
++        spec_decode_enabled: bool,
++        uniform_decode: bool = True,
++    ) -> str | None:
++        from vllm_ascend.worker.inplace_split_utils import (
++            _INPLACE_SPLIT_MODES,
++            NO_SPLIT_BATCH_TOO_SMALL,
++            NO_SPLIT_CUDAGRAPH_MODE_NOT_FULL,
++            NO_SPLIT_LORA_CONFLICT,
++            NO_SPLIT_MLA_CONFLICT,
++            NO_SPLIT_MODE_NOT_INPLACE,
++            NO_SPLIT_MROPE_CONFLICT,
++            NO_SPLIT_NON_UNIFORM_DECODE,
++            NO_SPLIT_PARALLEL_STREAMS_DISABLED,
++            NO_SPLIT_SPEC_DECODE_CONFLICT,
++        )
++        mode = split_batch_config.mode
++        if mode not in _INPLACE_SPLIT_MODES:
++            return NO_SPLIT_MODE_NOT_INPLACE
++        if not split_batch_config.enabled:
++            return NO_SPLIT_MODE_NOT_INPLACE
++        if mode == "inplace_parallel" and not split_batch_config.enable_parallel_streams:
++            return NO_SPLIT_PARALLEL_STREAMS_DISABLED
++        if not uniform_decode and not getattr(split_batch_config, "enable_mixed_request_split", False) and not getattr(split_batch_config, "enable_inplace_spec_decode", False):
++            return NO_SPLIT_NON_UNIFORM_DECODE
++        if uniform_decode and cudagraph_mode not in (CUDAGraphMode.FULL, CUDAGraphMode.PIECEWISE):
++            return NO_SPLIT_CUDAGRAPH_MODE_NOT_FULL
++        if not uniform_decode and cudagraph_mode != CUDAGraphMode.PIECEWISE:
++            return NO_SPLIT_CUDAGRAPH_MODE_NOT_FULL
++        if spec_decode_enabled and not split_batch_config.enable_inplace_spec_decode:
++            return NO_SPLIT_SPEC_DECODE_CONFLICT
++        if has_lora:
++            return NO_SPLIT_LORA_CONFLICT
++        if is_mla:
++            return NO_SPLIT_MLA_CONFLICT
++        if is_mrope and not split_batch_config.enable_inplace_mrope:
++            return NO_SPLIT_MROPE_CONFLICT
++        if num_reqs < split_batch_config.min_batch_size_for_split:
++            return NO_SPLIT_BATCH_TOO_SMALL
++        return None
++
++    def should_split(
++        self,
++        split_batch_config: Any,
++        cudagraph_mode: CUDAGraphMode,
++        num_scheduled_tokens_np: np.ndarray,
++        num_reqs: int,
++        total_num_tokens: int,
++        has_lora: bool,
++        is_mla: bool,
++        is_mrope: bool,
++        spec_decode_enabled: bool,
++        cudagraph_capture_sizes: list[int],
++    ) -> tuple[Any, str]:
++        if split_batch_config.mode == "dual_pad":
++            plan, reason = self._should_split_dual_pad(
++                split_batch_config=split_batch_config,
++                cudagraph_mode=cudagraph_mode,
++                num_scheduled_tokens_np=num_scheduled_tokens_np,
++                num_reqs=num_reqs,
++                total_num_tokens=total_num_tokens,
++                has_lora=has_lora,
++                is_mla=is_mla,
++                is_mrope=is_mrope,
++                spec_decode_enabled=spec_decode_enabled,
++                cudagraph_capture_sizes=cudagraph_capture_sizes,
++            )
++            plan = self._maybe_convert_dual_pad_to_unified(
++                split_batch_config, plan)
++            return plan, (plan.reason if plan is not None else reason)
++        from vllm_ascend.inplace_split_debug import (
++            is_enabled as _debug_enabled,
++        )
++        from vllm_ascend.inplace_split_debug import (
++            log_event,
++            next_step_id,
++            set_current_step_id,
++        )
++        from vllm_ascend.worker.inplace_split_utils import (
++            INPLACE_SPLIT_DRY_RUN,
++            NO_SPLIT_ATTENTION_BACKEND_MISMATCH,
++            create_inplace_split_batch_slices,
++            inplace_split_first_graph_matches_attention_backend,
++            select_inplace_attention_backend,
++        )
++        precheck_reason = self.inplace_split_precheck_reason(
++            split_batch_config=split_batch_config,
++            cudagraph_mode=cudagraph_mode,
++            num_scheduled_tokens_np=num_scheduled_tokens_np,
++            num_reqs=num_reqs,
++            has_lora=has_lora,
++            is_mla=is_mla,
++            is_mrope=is_mrope,
++            spec_decode_enabled=spec_decode_enabled,
++        )
++        if precheck_reason is not None:
++            if _debug_enabled():
++                log_event("inplace_split_precheck_failed", {"reason": precheck_reason})
++            return None, precheck_reason
++
++        uniform_decode_query_len = self.uniform_decode_query_len
++        if uniform_decode_query_len < 1:
++            return None, "no_split_non_uniform_decode"
++
++        offset_capture_sizes = split_batch_config.inplace_offset_capture_sizes
++        if offset_capture_sizes is None:
++            offset_capture_sizes = cudagraph_capture_sizes
++
++        if _debug_enabled():
++            step_id = next_step_id()
++            set_current_step_id(step_id)
++            log_event("inplace_split_planning_start", {
++                "total_num_tokens": total_num_tokens,
++                "num_reqs": num_reqs,
++                "uniform_decode_query_len": uniform_decode_query_len,
++            })
++
++        split_plan, reason = create_inplace_split_batch_slices(
++            num_scheduled_tokens_per_request=num_scheduled_tokens_np,
++            total_num_tokens=total_num_tokens,
++            uniform_decode_query_len=uniform_decode_query_len,
++            cudagraph_capture_sizes=cudagraph_capture_sizes,
++            inplace_max_remainder_tokens=split_batch_config.inplace_max_remainder_tokens,
++            force_split=split_batch_config.force_split,
++            offset_match_policy=split_batch_config.inplace_offset_match_policy,
++            offset_capture_sizes=offset_capture_sizes,
++            offset_min_graph_tokens=split_batch_config.inplace_offset_min_graph_tokens,
++            offset_max_padding_tokens=split_batch_config.inplace_offset_max_padding_tokens,
++            offset_max_padding_ratio=split_batch_config.inplace_offset_max_padding_ratio,
++            offset_max_graph_tokens_by_start=split_batch_config.inplace_offset_max_graph_tokens_by_start,
++            offset_allowed_graph_tokens_by_start=split_batch_config.inplace_offset_allowed_graph_tokens_by_start,
++            first_tokens_policy=split_batch_config.inplace_split_planner_policy,
++        )
++
++        if (split_plan is not None
++                and not inplace_split_first_graph_matches_attention_backend(
++                    split_plan,
++                    lambda shape: using_paged_attention(shape, self.vllm_config),
++                )):
++            reason = NO_SPLIT_ATTENTION_BACKEND_MISMATCH
++            split_plan = None
++
++        if _debug_enabled():
++            log_event("inplace_split_planning_result", {
++                "reason": reason,
++                "has_plan": split_plan is not None,
++            })
++
++        logger.info(
++            "DUAL_INPLACE split decision: has_plan=%s, reason=%s, total_tokens=%d",
++            split_plan is not None, reason,
++            split_plan.total_num_tokens if split_plan else 0,
++        )
++
++        return split_plan, reason
++
++    def _should_split_dual_pad(
++        self,
++        *,
++        split_batch_config: Any,
++        cudagraph_mode: CUDAGraphMode,
++        num_scheduled_tokens_np: np.ndarray,
++        num_reqs: int,
++        total_num_tokens: int,
++        has_lora: bool,
++        is_mla: bool,
++        is_mrope: bool,
++        spec_decode_enabled: bool,
++        cudagraph_capture_sizes: list[int],
++    ) -> tuple[Any, str]:
++        """DUAL_PAD split decision: largest main graph hit + padded remainder.
++
++        Uses the reference implementation's decision logic (no offset graphs,
++        no lazy capture): split only when the padding saved exceeds
++        ``cudagraph_split_pad_threshold`` (unless ``force_split``).
++        """
++        from vllm_ascend.inplace_split_debug import (
++            is_enabled as _debug_enabled,
++            log_event,
++        )
++        from vllm_ascend.worker.dual_pad_utils import (
++            create_dual_pad_split_batch_slices,
++            dual_pad_precheck_reason,
++        )
++
++        precheck_reason = dual_pad_precheck_reason(
++            split_batch_config=split_batch_config,
++            cudagraph_mode=cudagraph_mode,
++            num_reqs=num_reqs,
++            has_lora=has_lora,
++            is_mla=is_mla,
++            is_mrope=is_mrope,
++            spec_decode_enabled=spec_decode_enabled,
++        )
++        if precheck_reason is not None:
++            if _debug_enabled():
++                log_event("inplace_split_precheck_failed",
++                          {"reason": precheck_reason})
++            return None, precheck_reason
++
++        split_plan, reason = create_dual_pad_split_batch_slices(
++            num_scheduled_tokens_per_request=num_scheduled_tokens_np,
++            total_num_tokens=total_num_tokens,
++            cudagraph_capture_sizes=cudagraph_capture_sizes,
++            parallel_capture_sizes=getattr(
++                split_batch_config, "parallel_capture_sizes", None),
++            cudagraph_split_pad_threshold=getattr(
++                split_batch_config, "cudagraph_split_pad_threshold", 0),
++            force_split=bool(getattr(split_batch_config, "force_split", False)),
++        )
++
++        if _debug_enabled():
++            log_event("inplace_split_planning_result", {
++                "reason": reason,
++                "has_plan": split_plan is not None,
++            })
++
++        logger.info(
++            "DUAL_PAD split decision: has_plan=%s, reason=%s, total_tokens=%d",
++            split_plan is not None, reason,
++            split_plan.total_num_tokens if split_plan else 0,
++        )
++
++        return split_plan, reason
++
++    def _maybe_convert_dual_pad_to_unified(
++        self,
++        split_batch_config: Any,
++        split_plan: Any | None,
++    ) -> Any | None:
++        """P11 unified-row-graph gate: swap a committed dual_pad plan for a
++        single whole-batch plan executed as ONE main-pool graph.
++
++        Requires ``VLLM_ASCEND_DUAL_UNIFIED_GEMM=1`` AND a non-empty declared
++        ``unified_capture_sizes`` AND the batch token total to be one of the
++        declared sizes. Everything is default-OFF; the OFF path returns the
++        dual_pad plan untouched (bit-exact behavior).
++        """
++        if split_plan is None:
++            return None
++        if not getattr(split_batch_config, "enable_unified_gemm", False):
++            return split_plan
++        declared = getattr(split_batch_config, "unified_capture_sizes", None)
++        if not declared:
++            return split_plan
++        total = int(split_plan.total_num_tokens)
++        if total not in declared:
++            return split_plan
++        from vllm_ascend.worker.dual_pad_utils import make_unified_whole_batch_plan
++        converted = make_unified_whole_batch_plan(split_plan)
++        logger.info(
++            "DUAL_PAD decision converted to UNIFIED single graph: "
++            "total=%d, declared=%s",
++            total, declared,
++        )
++        return converted
++
++    def _has_aclgraph_for_context(self, forward_context: Any) -> bool:
++        from vllm_ascend.compilation.acl_graph import ACLGraphWrapper
++        batch_descriptor = getattr(forward_context, "batch_descriptor", None)
++        if batch_descriptor is None:
++            return False
++        in_parallel_streams = forward_context.in_parallel_streams
++        if isinstance(self.model, ACLGraphWrapper):
++            return self.model.has_graph(batch_descriptor, in_parallel_streams)
++        return False
++
++    def _expand_inplace_inputs_for_graph_slice(
++        self,
++        graph_stop: int,
++        input_ids: torch.Tensor | None,
++        positions: torch.Tensor | None,
++        inputs_embeds: torch.Tensor | None,
++    ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
++        input_ids_backing = getattr(getattr(self._runner, "input_ids", None), "gpu", None)
++        positions_backing = getattr(getattr(self._runner, "positions", None), "gpu", None)
++        inputs_embeds_backing = getattr(getattr(self._runner, "inputs_embeds", None), "gpu", None)
++
++        input_ids = maybe_expand_tensor_for_graph_slice(
++            input_ids, input_ids_backing, graph_stop, name="input_ids")
++
++        if positions is not None:
++            positions_token_dim = 1 if positions.ndim == 2 else 0
++            if positions_token_dim == 1:
++                mrope_backing = getattr(getattr(self._runner, "mrope_positions", None), "gpu", None)
++                if mrope_backing is not None:
++                    positions_backing = mrope_backing
++            positions = maybe_expand_tensor_for_graph_slice(
++                positions, positions_backing, graph_stop,
++                name="positions", token_dim=positions_token_dim)
++
++        inputs_embeds = maybe_expand_tensor_for_graph_slice(
++            inputs_embeds, inputs_embeds_backing, graph_stop, name="inputs_embeds")
++        return input_ids, positions, inputs_embeds
++
++    def _fill_inplace_padding_tail(
++        self,
++        split_slice: Any,
++        input_ids: torch.Tensor | None,
++        positions: torch.Tensor | None,
++        inputs_embeds: torch.Tensor | None,
++        intermediate_tensors: Any | None,
++        *,
++        stream: Any | None = None,
++    ) -> dict[str, Any]:
++        tail_slice = padding_tail_slice_for_split(split_slice)
++        if tail_slice is None:
++            return {"tail_filled": False}
++
++        def _fill() -> dict[str, Any]:
++            fill_tensor_token_tail(input_ids, tail_slice, name="input_ids")
++            if positions is not None:
++                positions_token_dim = 1 if positions.ndim == 2 else 0
++                fill_tensor_token_tail(
++                    positions, tail_slice, name="positions", token_dim=positions_token_dim)
++            fill_tensor_token_tail(inputs_embeds, tail_slice, name="inputs_embeds")
++            if intermediate_tensors is not None:
++                for name, tensor in intermediate_tensors.tensors.items():
++                    fill_tensor_token_tail(tensor, tail_slice, name=name)
++            return {"tail_filled": True}
++
++        if stream is not None:
++            with torch.npu.stream(stream):
++                return _fill()
++        return _fill()
++
++    def _context_ubatch_slices_for_inplace(self, split_batch_slices) -> list:
++        return context_ubatch_slices_for_inplace(split_batch_slices)
++
++
++    def _prepare_inplace_split_inputs_for_execution(
++        self,
++        split_batch_slices: Any,
++        input_ids: torch.Tensor | None,
++        positions: torch.Tensor,
++        inputs_embeds: torch.Tensor | None,
++        intermediate_tensors: Any,
++
++        stream_for_split: Any | None = None,
++    ) -> list[dict]:
++        prepared = []
++        for idx, split_slice in enumerate(split_batch_slices):
++            ts = tokens_slice_for_inplace_execution(split_slice)
++            graph_stop = int(ts.stop)
++            split_input_ids, split_positions, split_inputs_embeds = (
++                self._expand_inplace_inputs_for_graph_slice(
++                    graph_stop, input_ids, positions, inputs_embeds))
++            stream = stream_for_split(idx) if stream_for_split else None
++            padding_tail_payload = self._fill_inplace_padding_tail(
++                split_slice, split_input_ids, split_positions,
++                split_inputs_embeds, intermediate_tensors,
++                stream=stream)
++            prepared.append({
++                "tokens_slice": ts,
++                "input_ids": split_input_ids,
++                "positions": split_positions,
++                "inputs_embeds": split_inputs_embeds,
++                "padding_tail_payload": padding_tail_payload,
++            })
++        return prepared
++
++    def needs_inplace_serial_offset_capture(
++        self, metadata: AscendUbatchMetadata
++    ) -> bool:
++        context = metadata.context
++        batch_descriptor = getattr(context, "batch_descriptor", None)
++        if batch_descriptor is None:
++            return False
++        cg_mode = getattr(context, "cudagraph_runtime_mode", CUDAGraphMode.NONE)
++        _rm = getattr(batch_descriptor, "runtime_metadata", None)
++        start_nt = int(_rm.token_offset) if _rm is not None else 0
++        allow_lazy = bool(getattr(context, "allow_inplace_lazy_capture", False))
++        has_graph = self._has_aclgraph_for_context(context)
++        result = (cg_mode in (CUDAGraphMode.FULL, CUDAGraphMode.PIECEWISE)
++                  and start_nt > 0 and allow_lazy and not has_graph)
++
++        from vllm_ascend.inplace_split_debug import is_enabled as _is_enabled
++        from vllm_ascend.inplace_split_debug import log_event as _log_event
++        if _is_enabled():
++            in_parallel_streams = bool(getattr(context, "in_parallel_streams", False))
++            _log_event(
++                "needs_offset_capture_check",
++                {
++                    "result": result,
++                    "cg_mode": cg_mode.name if isinstance(cg_mode, CUDAGraphMode) else str(cg_mode),
++                    "start_nt": start_nt,
++                    "allow_lazy": allow_lazy,
++                    "has_graph": has_graph,
++                    "in_parallel_streams": in_parallel_streams,
++                },
++            )
++
++        return result
++
++    @contextmanager
++    def _bind_inplace_parallel_rope_capture_slot(
++        self, context: Any, *, parallel_streams: bool
++    ):
++        if (not parallel_streams
++                or getattr(context, "split_inplace_mode", "")
++                != "inplace_parallel"):
++            yield
++            return
++
++        slot_id = int(getattr(context, "cos_sin_slot_id", 0) or 0)
++        if slot_id <= 0:
++            yield
++            return
++
++        import vllm_ascend.ops.rotary_embedding as rotary_embedding
++
++        cos, sin = rotary_embedding.get_cos_and_sin_slice(slot_id=slot_id)
++        if cos is None or sin is None:
++            raise RuntimeError(
++                "Missing rotary cos/sin buffers for inplace parallel "
++                f"capture slot {slot_id}")
++
++        previous_cos = rotary_embedding._cos_slice_slots[0]
++        previous_sin = rotary_embedding._sin_slice_slots[0]
++        rotary_embedding._cos_slice_slots[0] = cos
++        rotary_embedding._sin_slice_slots[0] = sin
++        from vllm_ascend.inplace_split_debug import is_enabled as _is_enabled
++        from vllm_ascend.inplace_split_debug import log_event as _log_event
++        from vllm_ascend.inplace_split_debug import tensor_info as _tensor_info
++        if _is_enabled():
++            _log_event(
++                "inplace_parallel_rope_slot_binding",
++                {
++                    "phase": "bind",
++                    "compiled_slot_id": 0,
++                    "capture_slot_id": slot_id,
++                    "cos": _tensor_info(cos),
++                    "sin": _tensor_info(sin),
++                },
++            )
++        try:
++            yield
++        finally:
++            rotary_embedding._cos_slice_slots[0] = previous_cos
++            rotary_embedding._sin_slice_slots[0] = previous_sin
++            if _is_enabled():
++                _log_event(
++                    "inplace_parallel_rope_slot_binding",
++                    {
++                        "phase": "restore",
++                        "compiled_slot_id": 0,
++                        "capture_slot_id": slot_id,
++                    },
++                )
++
++    def _run_inplace_serial_offset_capture(
++        self,
++        metadata: AscendUbatchMetadata,
++        split_slice: Any,
++        model_kwargs: dict[str, Any],
++        *,
++        parallel_streams: bool = False,
++    ) -> Any:
++        from vllm.compilation.monitor import set_cudagraph_capturing_enabled
++
++        from vllm_ascend.inplace_split_debug import (
++            is_enabled as _is_enabled,
++            log_event as _log_event,
++            batch_descriptor_info as _bd_info,
++            tensor_info as _tensor_info,
++            metadata_tensor_info as _mti,
++        )
++
++        split_cfg = self.ascend_config.split_batch_config
++        context = metadata.context
++        sliced_input_ids = metadata.input_ids
++        sliced_positions = metadata.positions
++        sliced_intermediate_tensors = metadata.intermediate_tensors
++        sliced_inputs_embeds = metadata.inputs_embeds
++
++        batch_descriptor = getattr(context, "batch_descriptor", None)
++
++        warmups = int(getattr(self.compilation_config, 'cudagraph_num_of_warmups', 0) or 0)
++
++        previous_mode = getattr(context, 'cudagraph_runtime_mode', CUDAGraphMode.NONE)
++        previous_capturing = bool(getattr(context, 'capturing', False))
++        capture_stream = (self.stream_parallel if parallel_streams
++                          else self.stream_main)
++        is_offset = split_slice.start_num_tokens > 0
++        if is_offset:
++            forced_backend = getattr(context, 'forced_attention_backend', '')
++            if split_cfg.inplace_force_pa_for_offset:
++                forced_backend = "pa"
++            context.forced_attention_backend = forced_backend
++            logger.debug("[inplace_serial] lazy capture: forced_attention_backend=%s, "
++                         "inplace_force_pa_for_offset=%s, start_num_tokens=%d",
++                          forced_backend, split_cfg.inplace_force_pa_for_offset,
++                          split_slice.start_num_tokens)
++
++        if _is_enabled():
++            _log_event(
++                "inplace_capture_entry",
++                {
++                    "parallel_streams": parallel_streams,
++                    "input_ids": _tensor_info(sliced_input_ids),
++                    "positions": _tensor_info(sliced_positions),
++                    "num_tokens": int(split_slice.num_tokens),
++                    "graph_num_tokens": int(split_slice.graph_num_tokens),
++                    "start_num_tokens": int(split_slice.start_num_tokens),
++                },
++            )
++            _log_event(
++                "inplace_capture_attn_diag",
++                {
++                    "parallel_streams": parallel_streams,
++                    "metadata": _mti(context.attn_metadata),
++                },
++            )
++
++        previous_capturing_enabled = True
++        set_cudagraph_capturing_enabled(True)
++
++        try:
++            with (
++                self._bind_inplace_parallel_rope_capture_slot(
++                    context, parallel_streams=parallel_streams),
++                torch.npu.stream(capture_stream),
++            ):
++
++                if _is_enabled():
++                    _log_event(
++                        "inplace_capture_before_warmup",
++                        {
++                            "parallel_streams": parallel_streams,
++                            "warmups": warmups,
++                        },
++                    )
++
++                for warmup_idx in range(warmups):
++                    context.cudagraph_runtime_mode = CUDAGraphMode.NONE
++                    context.capturing = False
++                    with override_forward_context(context):
++                        _ = self.model(
++                            input_ids=sliced_input_ids,
++                            positions=sliced_positions,
++                            intermediate_tensors=sliced_intermediate_tensors,
++                            inputs_embeds=sliced_inputs_embeds,
++                            **model_kwargs,
++                        )
++                    capture_stream.synchronize()
++                    if _is_enabled():
++                        _log_event(
++                            "inplace_capture_warmup_done",
++                            {
++                                "warmup_idx": warmup_idx,
++                                "parallel_streams": parallel_streams,
++                            },
++                        )
++
++                if _is_enabled():
++                    _log_event(
++                        "inplace_capture_before_capture",
++                        {
++                            "parallel_streams": parallel_streams,
++                        },
++                    )
++                context.cudagraph_runtime_mode = CUDAGraphMode.FULL
++                context.capturing = False
++                with override_forward_context(context):
++                    _ = self.model(
++                        input_ids=sliced_input_ids,
++                        positions=sliced_positions,
++                        intermediate_tensors=sliced_intermediate_tensors,
++                        inputs_embeds=sliced_inputs_embeds,
++                        **model_kwargs,
++                    )
++                capture_stream.synchronize()
++                if _is_enabled():
++                    _log_event(
++                        "inplace_capture_after_capture",
++                        {
++                            "parallel_streams": parallel_streams,
++                        },
++                    )
++
++        finally:
++            context.cudagraph_runtime_mode = previous_mode
++            context.capturing = previous_capturing
++            set_cudagraph_capturing_enabled(previous_capturing_enabled)
++
++        _has_graph = self._has_aclgraph_for_context(context)
++
++        if not _has_graph:
++            raise RuntimeError(
++                f"Inplace offset graph capture did not create an ACL "
++                f"graph entry for {getattr(context, 'batch_descriptor', None)!r}"
++            )
++
++        if _is_enabled():
++            _log_event(
++                "inplace_capture_has_graph_check",
++                {
++                    "parallel_streams": parallel_streams,
++                    "has_graph": True,
++                    "in_parallel_streams": parallel_streams,
++                    "batch_descriptor": _bd_info(batch_descriptor),
++                },
++            )
++
++        with torch.npu.stream(capture_stream):
++            context.cudagraph_runtime_mode = previous_mode
++            context.capturing = False
++            with override_forward_context(context):
++                replay_result = self.model(
++                    input_ids=sliced_input_ids,
++                    positions=sliced_positions,
++                    intermediate_tensors=sliced_intermediate_tensors,
++                    inputs_embeds=sliced_inputs_embeds,
++                    **model_kwargs,
++                )
++                if context.cudagraph_runtime_mode == CUDAGraphMode.FULL:
++                    if split_slice.start_num_tokens > 0:
++                        self._update_attn_params_for_split_ubatch(
++                            context,
++                            split_slice.graph_num_tokens,
++                            parallel_streams=parallel_streams)
++                    else:
++                        self._update_attn_params_for_wrapper(
++                            context,
++                            split_slice.graph_num_tokens)
++            capture_stream.synchronize()
++
++        if _is_enabled():
++            _log_event(
++                "inplace_lazy_capture_complete",
++                {
++                    "batch_descriptor": _bd_info(batch_descriptor),
++                    "num_tokens": int(split_slice.num_tokens),
++                    "graph_num_tokens": int(split_slice.graph_num_tokens),
++                    "returned": "replay_after_capture",
++                    "in_parallel_streams": parallel_streams,
++                    "stream": "parallel" if parallel_streams else "main",
++                },
++            )
++
++        return replay_result
++
++    def _update_attn_params_for_wrapper(
++        self,
++        forward_context,
++        num_tokens,
++    ):
++        from vllm.forward_context import get_forward_context
++
++        from vllm_ascend.compilation.acl_graph_split_batch import update_attn_params
++
++        forward_context = get_forward_context()
++        if forward_context.cudagraph_runtime_mode != CUDAGraphMode.FULL:
++            return
++        if getattr(forward_context, 'capturing', False):
++            return
++
++        use_mla = getattr(self.vllm_config.model_config, 'use_mla', False)
++        if use_mla:
++            logger.warning_once(
++                "[inplace_split] MLA attention backend is not yet supported "
++                "for inplace split attn param update; skipping.")
++            return
++
++        update_stream = getattr(self._runner, 'update_stream_main', None) or getattr(self._runner, 'update_stream', None)
++        if update_stream is None:
++            update_stream = torch.npu.current_stream()
++        update_attn_params(
++            update_stream,
++            forward_context,
++            num_tokens,
++            self.vllm_config,
++        )
++
++    def _update_attn_params_for_split_ubatch(
++        self,
++        forward_context,
++        num_tokens,
++        parallel_streams: bool = False,
++    ):
++        from vllm_ascend.compilation.acl_graph_split_batch import update_attn_params_split
++
++        if forward_context.cudagraph_runtime_mode != CUDAGraphMode.FULL:
++            return
++        if getattr(forward_context, 'capturing', False):
++            return
++
++        use_mla = getattr(self.vllm_config.model_config, 'use_mla', False)
++        if use_mla:
++            logger.warning_once(
++                "[inplace_split] MLA attention backend is not yet supported "
++                "for inplace split attn param update; skipping.")
++            return
++
++        if parallel_streams:
++            update_stream = getattr(self._runner, 'update_stream_parallel', None)
++            if update_stream is None:
++                update_stream = getattr(self._runner, 'stream_parallel', None)
++            if update_stream is None:
++                update_stream = torch.npu.current_stream()
++        else:
++            update_stream = getattr(self._runner, 'update_stream_main', None) or getattr(self._runner, 'update_stream', None)
++            if update_stream is None:
++                update_stream = torch.npu.current_stream()
++        update_attn_params_split(
++            update_stream,
++            forward_context,
++            num_tokens,
++            self.vllm_config,
++            in_parallel_streams=parallel_streams,
++        )
++
++    def _make_split_batch_metadata_inplace_parallel(
++        self,
++        split_ubatch_slices,
++        split_batch_slices,
++        attn_metadata,
++        input_ids,
++        positions,
++        inputs_embeds,
++        intermediate_tensors,
++        batch_descriptor,
++        aclgraph_runtime_mode,
++        inplace_attention_backend,
++    ):
++        from vllm.forward_context import get_forward_context
++
++        from vllm_ascend.ascend_forward_context import create_ascend_forward_context
++
++        cur_forward_context = get_forward_context()
++        dp_metadata = getattr(cur_forward_context, 'dp_metadata', None)
++        context_ubatch_slices = self._context_ubatch_slices_for_inplace(split_batch_slices)
++        split_cfg = getattr(self.ascend_config, "split_batch_config", None)
++        allow_lazy = bool(split_cfg is not None and getattr(split_cfg, "enable_inplace_lazy_capture", True))
++        force_pa_for_offset = bool(split_cfg is not None and getattr(split_cfg, "inplace_force_pa_for_offset", False))
++
++        from vllm_ascend.inplace_split_debug import (
++            is_enabled as _split_debug_enabled,
++            log_event as _log_event,
++            batch_descriptor_info as _bd_info,
++            tensor_view_info as _tvi,
++            metadata_tensor_info as _mti,
++        )
++
++        def _stream_for_split(split_idx: int):
++            return self.stream_parallel if split_idx > 0 else self.stream_main
++
++        prepared_split_inputs = self._prepare_inplace_split_inputs_for_execution(
++            split_batch_slices,
++            input_ids,
++            positions,
++            inputs_embeds,
++            intermediate_tensors,
++            stream_for_split=_stream_for_split,
++        )
++
++        _cached_dual_stream_metadata = getattr(
++            self._runner, "_dual_stream_attention_metadata", None)
++        _cached_dual_stream_slices = getattr(
++            self._runner, "_dual_stream_attention_slices", None)
++        _cached_dual_stream_plan = getattr(
++            self._runner, "_dual_stream_attention_plan", None)
++        _cached_dual_stream_secondary_mode = None
++        if _cached_dual_stream_metadata is not None:
++            _dsa_cfg = dual_stream_attention_config(
++                getattr(self.ascend_config, "split_batch_config", None))
++            _cached_dual_stream_secondary_mode = getattr(
++                _dsa_cfg, "secondary_stream_mode", "dedicated_pair")
++
++        ubatch_metadata = []
++        for i, split_slice in enumerate(split_batch_slices):
++            in_parallel_streams = i > 0
++            split_attention_backend = inplace_attention_backend
++            if force_pa_for_offset and split_slice.start_num_tokens > 0:
++                split_attention_backend = "pa"
++            capture_metadata_mode = (
++                "template"
++                if split_slice.start_num_tokens > 0
++                and split_attention_backend == "fia" else ""
++            )
++            ubatch_attn_metadata = None
++            if attn_metadata is not None:
++                if isinstance(attn_metadata, list) and i < len(attn_metadata):
++                    ubatch_attn_metadata = attn_metadata[i]
++                else:
++                    ubatch_attn_metadata = attn_metadata
++
++            ubatch_runtime_metadata = None
++            if split_slice.start_num_tokens > 0:
++                ubatch_runtime_metadata = CUDAGraphRuntimeMetadata(
++                    token_offset=split_slice.start_num_tokens,
++                    variant="inplace_parallel",
++                    backend_tag=split_attention_backend,
++                    metadata_mode=capture_metadata_mode,
++                )
++            ubatch_cudagraph_mode, ubatch_batch_descriptor = (
++                self.cudagraph_dispatcher.dispatch(
++                    num_tokens=split_slice.graph_num_tokens,
++                    uniform_decode=True,
++                    has_lora=batch_descriptor.has_lora,
++                    runtime_metadata=ubatch_runtime_metadata,
++                    allow_runtime_key_registration=(
++                        allow_lazy and split_slice.start_num_tokens > 0),
++                ))
++
++            ubatch_rm = getattr(ubatch_batch_descriptor, "runtime_metadata", None)
++            allow_inplace_lazy_capture = bool(
++                allow_lazy and split_slice.start_num_tokens > 0
++                and ubatch_cudagraph_mode in (CUDAGraphMode.FULL, CUDAGraphMode.PIECEWISE)
++                and ubatch_rm is not None
++                and ubatch_rm.variant == "inplace_parallel"
++                and ubatch_rm.backend_tag in ("fia", "pa"))
++
++            validate_inplace_ptrs = bool(
++                split_cfg is not None
++                and getattr(split_cfg, "inplace_validate_metadata_ptrs", False)
++                and split_slice.start_num_tokens > 0)
++
++            if _split_debug_enabled():
++                _log_event(
++                    "split_descriptor",
++                    {
++                        "idx": i,
++                        "execution": "inplace_parallel",
++                        "stream": ("parallel" if in_parallel_streams
++                                   else "main"),
++                        "dispatch_num_tokens":
++                        int(split_slice.graph_num_tokens),
++                        "actual_num_tokens": int(split_slice.num_tokens),
++                        "runtime_mode": (
++                            ubatch_cudagraph_mode.name
++                            if isinstance(ubatch_cudagraph_mode,
++                                          CUDAGraphMode) else
++                            str(ubatch_cudagraph_mode)),
++                        "batch_descriptor": _bd_info(ubatch_batch_descriptor),
++                        "in_parallel_streams": in_parallel_streams,
++                        "graph_params_pool": ("parallel"
++                                              if in_parallel_streams
++                                              else "main"),
++                        "graph_entry_pool": ("parallel"
++                                             if in_parallel_streams
++                                             else "main"),
++                        "allow_inplace_lazy_capture":
++                        allow_inplace_lazy_capture,
++                        "validate_inplace_ptrs": validate_inplace_ptrs,
++                        "forced_attention_backend":
++                        split_attention_backend,
++                        "force_pa_for_offset":
++                        force_pa_for_offset,
++                    },
++                )
++
++            if (split_slice.start_num_tokens > 0
++                    and split_attention_backend == "fia"
++                    and ubatch_attn_metadata is not None
++                    and getattr(ubatch_batch_descriptor, "runtime_metadata", None) is not None
++                    and getattr(ubatch_batch_descriptor, "runtime_metadata", None).metadata_mode == "template"
++                    and split_slice.graph_num_tokens > split_slice.num_tokens):
++                # Template the dummy padding request's KV length only. For a
++                # zero-padding split (graph_num_tokens == num_tokens) the last
++                # seq_lens entry belongs to a real request; templating it
++                # would pin that request's KV length to the block-size
++                # template value and corrupt its attention output.
++                from vllm_ascend.compilation.acl_graph_split_batch import template_fia_seq_lens_list
++                template_fia_seq_lens_list(ubatch_attn_metadata, self.block_size)
++
++            ctx_stream = self.stream_parallel if in_parallel_streams else self.stream_main
++            clone_cos_sin = not (
++                _INPLACE_PARALLEL_REUSE_SPLIT0_COS_SIN
++                and aclgraph_runtime_mode == CUDAGraphMode.FULL
++                and split_cfg is not None
++                and getattr(split_cfg, "mode", "") == "inplace_parallel"
++                and bool(getattr(split_cfg, "enable_parallel_streams", False))
++                and len(split_batch_slices) == 2
++            )
++            reuse_cos_sin = (
++                _INPLACE_PARALLEL_REUSE_SPLIT0_COS_SIN
++                and i == 0
++                and aclgraph_runtime_mode == CUDAGraphMode.FULL
++                and split_cfg is not None
++                and getattr(split_cfg, "mode", "") == "inplace_parallel"
++                and bool(getattr(split_cfg, "enable_parallel_streams", False))
++                and len(split_batch_slices) == 2
++            )
++            with torch.npu.stream(ctx_stream):
++                split_forward_context = create_ascend_forward_context(
++                    cur_forward_context,
++                    attn_metadata=ubatch_attn_metadata,
++                    vllm_config=self.vllm_config,
++                    dp_metadata=dp_metadata,
++                    ubatch_slices=context_ubatch_slices,
++                    batch_descriptor=ubatch_batch_descriptor,
++                    cudagraph_runtime_mode=ubatch_cudagraph_mode,
++                    ubatch_num=i,
++                    positions=prepared_split_inputs[i]["positions"],
++                    in_parallel_streams=in_parallel_streams,
++                    cos_sin_slot_id=i,
++                    reuse_existing_cos_sin=reuse_cos_sin,
++                    clone_cos_sin=clone_cos_sin,
++                )
++            setattr(split_forward_context, "split_inplace_mode",
++                    "inplace_parallel")
++            setattr(split_forward_context, "forced_attention_backend",
++                    split_attention_backend)
++            setattr(split_forward_context, "allow_inplace_lazy_capture",
++                    allow_inplace_lazy_capture)
++            setattr(split_forward_context, "split_actual_num_tokens",
++                    int(split_slice.num_tokens))
++            setattr(split_forward_context, "split_graph_num_tokens",
++                    int(split_slice.graph_num_tokens))
++            setattr(split_forward_context, "validate_inplace_metadata_ptrs",
++                    validate_inplace_ptrs)
++            setattr(split_forward_context, "validate_inplace_input_ptrs",
++                    validate_inplace_ptrs)
++
++            if _cached_dual_stream_metadata is not None:
++                split_forward_context.dual_stream_attention_metadata = (
++                    _cached_dual_stream_metadata)
++                split_forward_context.dual_stream_attention_slices = (
++                    _cached_dual_stream_slices)
++                split_forward_context.dual_stream_attention_plan = (
++                    _cached_dual_stream_plan)
++                split_forward_context.dual_stream_attention_secondary_stream_mode = (
++                    _cached_dual_stream_secondary_mode)
++
++            prepared_inputs = prepared_split_inputs[i]
++            tokens_slice = prepared_inputs["tokens_slice"]
++            sliced_input_ids, sliced_positions, sliced_inputs_embeds, sliced_intermediate_tensors = (
++                slice_split_batch_inputs(
++                    tokens_slice, prepared_inputs["input_ids"],
++                    prepared_inputs["positions"],
++                    prepared_inputs["inputs_embeds"],
++                    intermediate_tensors,
++                    vllm_config=self.vllm_config,
++                )
++            )
++
++            if _split_debug_enabled():
++                _log_event(
++                    "inplace_parallel_execution",
++                    {
++                        "idx": i,
++                        "stream": ("parallel" if in_parallel_streams
++                                   else "main"),
++                        "buffer_source": "original_offset_view",
++                        "graph_params_pool": ("parallel"
++                                              if in_parallel_streams
++                                              else "main"),
++                        "graph_entry_pool": ("parallel"
++                                             if in_parallel_streams
++                                             else "main"),
++                        "token_start": int(split_slice.token_slice.start),
++                        "token_stop": int(split_slice.token_slice.stop),
++                        "graph_token_stop": int(tokens_slice.stop),
++                        "start_num_tokens":
++                        int(split_slice.start_num_tokens),
++                        "num_tokens": int(split_slice.num_tokens),
++                        "graph_num_tokens": int(split_slice.graph_num_tokens),
++                        "input_ids": _tvi(sliced_input_ids),
++                        "positions": _tvi(sliced_positions),
++                        "inputs_embeds": _tvi(sliced_inputs_embeds),
++                        "metadata": _mti(
++                            split_forward_context.attn_metadata),
++                        "batch_descriptor": _bd_info(
++                            split_forward_context.batch_descriptor),
++                    },
++                )
++
++            ubatch_metadata.append(
++                AscendUbatchMetadata(
++                    context=split_forward_context,
++                    input_ids=sliced_input_ids,
++                    positions=sliced_positions,
++                    inputs_embeds=sliced_inputs_embeds,
++                    intermediate_tensors=sliced_intermediate_tensors,
++                    num_tokens=split_slice.graph_num_tokens,
++                )
++            )
++        return ubatch_metadata
++
++    def run_inplace_parallel(
++        self,
++        split_plan: Any,
++        input_ids: torch.Tensor,
++        positions: torch.Tensor,
++        intermediate_tensors: Any,
++        inputs_embeds: torch.Tensor | None,
++        attn_metadata: Any,
++        cudagraph_mode: CUDAGraphMode,
++        batch_descriptor: BatchDescriptor,
++        inplace_attention_backend: str | None = None,
++        **model_kwargs,
++    ) -> torch.Tensor:
++
++        from vllm_ascend.inplace_split_debug import is_enabled as _split_debug_enabled
++        from vllm_ascend.inplace_split_debug import log_event as _split_debug_log_event
++
++        split_cfg = getattr(self.ascend_config, "split_batch_config", None)
++
++        split_slices = split_plan.split_slices
++        original_forward_context = get_forward_context()
++        num_splits = len(split_slices)
++
++        if inplace_attention_backend is None:
++            from vllm_ascend.worker.inplace_split_utils import (
++                inplace_split_preserves_attention_backend,
++                select_inplace_attention_backend,
++            )
++            inplace_attention_backend = select_inplace_attention_backend(
++                split_plan, lambda shape: using_paged_attention(shape, self.vllm_config))
++            if not inplace_split_preserves_attention_backend(
++                split_plan, lambda shape: using_paged_attention(shape, self.vllm_config)):
++                logger.debug(
++                    "Inplace parallel split changes attention backend; using %s for both splits.",
++                    inplace_attention_backend)
++
++        if self.stream_main is None:
++            self._runner.stream_main = torch.npu.current_stream()
++        if self.stream_parallel is None:
++            self._runner.stream_parallel = torch.npu.Stream(device=self.device)
++
++        self._apply_inplace_parallel_replay_stream_limits()
++
++        from vllm.v1.worker.ubatch_utils import UBatchSlice
++        split_ubatch_slices = [
++            UBatchSlice(s.request_slice, s.token_slice)
++            for s in split_slices
++        ]
++
++        ubatch_metadata = self._make_split_batch_metadata_inplace_parallel(
++            split_ubatch_slices=split_ubatch_slices,
++            split_batch_slices=split_slices,
++            attn_metadata=attn_metadata,
++            input_ids=input_ids,
++            positions=positions,
++            inputs_embeds=inputs_embeds,
++            intermediate_tensors=intermediate_tensors,
++            batch_descriptor=batch_descriptor,
++            aclgraph_runtime_mode=cudagraph_mode,
++            inplace_attention_backend=inplace_attention_backend,
++        )
++
++        clone_split_outputs = _inplace_parallel_clone_split_outputs(
++            allow_auto_direct_outputs=True,
++            split_cfg=split_cfg,
++            split_batch_slices=split_slices,
++            aclgraph_runtime_mode=cudagraph_mode,
++            merge_sync_policy=_INPLACE_PARALLEL_MERGE_SYNC_POLICY,
++        )
++
++        results: list[Any | None] = [None] * num_splits
++        split_done_events: list[torch.npu.Event | None] = [None] * num_splits
++        split_errors: list[tuple[int, Exception]] = []
++        split_error_lock = threading.Lock()
++
++        split_debug_active = _split_debug_enabled()
++
++        self._wait_inplace_parallel_output_release_events(
++            (self.stream_main, self.stream_parallel))
++
++        def _finish_inplace_parallel_split_result(
++                slice_idx: int,
++                split_result: Any,
++                *,
++                parallel_streams: bool,
++                target_stream: torch.npu.Stream) -> None:
++            split_slice = split_slices[slice_idx]
++            with torch.npu.stream(target_stream):
++                trimmed_result = trim_split_output(
++                    split_result, split_slice.num_tokens)
++                if clone_split_outputs:
++                    trimmed_result = clone_split_output(trimmed_result)
++                results[slice_idx] = trimmed_result
++                if parallel_streams:
++                    split_done_events[slice_idx] = (
++                        self._record_replay_stream_event(target_stream))
++
++        def _run_inplace_parallel_worker(slice_idx: int) -> None:
++            try:
++                split_slice = split_slices[slice_idx]
++                metadata = ubatch_metadata[slice_idx]
++                parallel_streams = slice_idx > 0
++                target_stream = self.stream_parallel if parallel_streams else self.stream_main
++
++                needs_offset = self.needs_inplace_serial_offset_capture(metadata)
++                if split_debug_active:
++                    _split_debug_log_event(
++                        "parallel_worker_start",
++                        {
++                            "slice_idx": slice_idx,
++                            "path": "offset_capture" if needs_offset
++                            else "normal_replay",
++                            "start_num_tokens":
++                            int(split_slice.start_num_tokens),
++                            "graph_num_tokens":
++                            int(split_slice.graph_num_tokens),
++                            "parallel_streams": parallel_streams,
++                            **({"has_aclgraph": True} if not needs_offset
++                               else {}),
++                        },
++                    )
++
++                with torch.inference_mode():
++                    if needs_offset:
++                        split_result = self._run_inplace_serial_offset_capture(
++                            metadata,
++                            split_slice,
++                            model_kwargs,
++                            parallel_streams=parallel_streams,
++                        )
++                    else:
++
++                        _rm = getattr(
++                            metadata.context.batch_descriptor,
++                            "runtime_metadata", None)
++                        # The main split slice has no runtime_metadata; only
++                        # offset descriptors (token_offset > 0) carry the
++                        # pre-captured-graph invariant checked below.
++                        if (_rm is not None
++                                and int(_rm.token_offset) > 0
++                                and metadata.context.cudagraph_runtime_mode
++                                == CUDAGraphMode.FULL
++                                and not self._has_aclgraph_for_context(
++                                    metadata.context)):
++                            raise RuntimeError(
++                                "Missing inplace parallel offset ACL graph "
++                                "before normal replay path: "
++                                f"{metadata.context.batch_descriptor!r}")
++                        with torch.npu.stream(target_stream):
++                            with override_forward_context(metadata.context):
++                                split_result = self.model(
++                                    input_ids=metadata.input_ids,
++                                    positions=metadata.positions,
++                                    inputs_embeds=metadata.inputs_embeds,
++                                    intermediate_tensors=metadata.intermediate_tensors,
++                                    **model_kwargs,
++                                )
++                                if (metadata.context.cudagraph_runtime_mode
++                                        == CUDAGraphMode.FULL):
++                                    if split_slice.start_num_tokens > 0:
++                                        self._update_attn_params_for_split_ubatch(
++                                            metadata.context,
++                                            split_slice.graph_num_tokens,
++                                            parallel_streams=parallel_streams)
++                                    else:
++                                        self._update_attn_params_for_wrapper(
++                                            metadata.context,
++                                            split_slice.graph_num_tokens)
++
++                    _finish_inplace_parallel_split_result(
++                        slice_idx,
++                        split_result,
++                        parallel_streams=parallel_streams,
++                        target_stream=target_stream)
++            except Exception as e:
++                with split_error_lock:
++                    split_errors.append((slice_idx, e))
++
++        self._get_replay_worker_pool().dispatch([
++            (lambda i=slice_idx: _run_inplace_parallel_worker(i))
++            for slice_idx in range(num_splits)
++        ])
++
++        if split_errors:
++            split_errors.sort(key=lambda item: item[0])
++            failed_slice_idx, first_error = split_errors[0]
++            raise RuntimeError(
++                "inplace parallel replay worker failed at "
++                f"slice_idx={failed_slice_idx}: {first_error}") from first_error
++
++        merged_results: list[Any] = [
++            result for result in results if result is not None
++        ]
++        if len(merged_results) != num_splits:
++            raise RuntimeError(
++                "Missing inplace parallel split result: "
++                f"expected={num_splits}, got={len(merged_results)}")
++
++        if _INPLACE_PARALLEL_MERGE_SYNC_POLICY == "host_sync":
++            self.stream_main.synchronize()
++            if num_splits > 1:
++                self.stream_parallel.synchronize()
++            with override_forward_context(original_forward_context):
++                result = merge_split_outputs(merged_results)
++                if not clone_split_outputs:
++                    self._record_inplace_parallel_output_release_event()
++            return result
++
++        with torch.npu.stream(self.stream_main):
++            self._wait_replay_stream_events(self.stream_main,
++                                            split_done_events)
++            for merged_result in merged_results:
++                _record_stream_tree_for_npugraph_ex(merged_result,
++                                                    self.stream_main)
++            with override_forward_context(original_forward_context):
++                result = merge_split_outputs(merged_results)
++                if not clone_split_outputs:
++                    self._record_inplace_parallel_output_release_event()
++        return result
++
++    def _extract_second_split_slot_mapping(
++        self,
++        split_batch_slices: Any,
++        attn_metadata: Any,
++    ) -> torch.Tensor | None:
++        """Return split-1's slot_mapping tensor from its attention metadata.
++
++        All layers share the common-metadata slot_mapping view, so any layer
++        object provides it.  Returns None when unavailable (the caller then
++        skips the parallel slot_mapping copy).
++        """
++        if len(split_batch_slices) < 2 or attn_metadata is None:
++            return None
++        if not (isinstance(attn_metadata, list) and len(attn_metadata) > 1):
++            return None
++        second_meta = attn_metadata[1]
++        if isinstance(second_meta, dict):
++            second_meta = next(iter(second_meta.values()), None)
++        for candidate in (second_meta,
++                          getattr(second_meta, "decode", None),
++                          getattr(second_meta, "decode_meta", None)):
++            slot_mapping = getattr(candidate, "slot_mapping", None)
++            if isinstance(slot_mapping, torch.Tensor):
++                return slot_mapping
++        return None
++
++    def _prepare_dual_pad_split_inputs(
++        self,
++        split_batch_slices: Any,
++        input_ids: torch.Tensor | None,
++        positions: torch.Tensor | None,
++        inputs_embeds: torch.Tensor | None,
++        second_slot_mapping: torch.Tensor | None = None,
++    ) -> None:
++        """Dual-pad input pre-write.
++
++        Copies the second split's input_ids / positions / inputs_embeds into
++        the dedicated parallel-stream buffers and zero-pads each split tail to
++        its own padded graph size (mirrors the reference implementation's
++        pre-write in model_runner_v3.py L1174-1220).
++
++        Also copies the second split's slot_mapping into the dedicated
++        parallel slot_mapping buffer that the parallel-pool graphs' KV-write
++        op (npu_scatter_pa_kv_cache) was captured against.  Without this copy
++        split-1 would scatter its K/V into split-0's cache slots, corrupting
++        split-0's KV cache.
++        """
++        if len(split_batch_slices) < 2:
++            return
++        runner = self._runner
++        second = split_batch_slices[1]
++        second_start = int(second.token_slice.start)
++        second_stop = int(second.token_slice.stop)
++        second_num_tokens = second_stop - second_start
++        second_padded = int(second.graph_num_tokens)
++
++        # The source buffers (input_ids / positions / slot_mapping) were
++        # produced on stream_main.  Order the parallel-stream copies after
++        # them so split-1 never reads a stale value (the reference pre-write
++        # runs on the default stream and so avoids this hazard entirely).
++        self.stream_parallel.wait_stream(self.stream_main)
++
++        with torch.npu.stream(self.stream_parallel):
++            parallel_slot_mapping = getattr(
++                runner, "slot_mapping_parallel_streams", None)
++            if (parallel_slot_mapping is not None
++                    and second_slot_mapping is not None):
++                parallel_slot_mapping[:second_num_tokens].copy_(
++                    second_slot_mapping[:second_num_tokens])
++                if second_padded > second_num_tokens:
++                    # PADDING_SLOT_ID (-1): the graph's KV-write op processes
++                    # the full padded size; padded lanes must not write KV.
++                    parallel_slot_mapping[
++                        second_num_tokens:second_padded].fill_(-1)
++
++            parallel_positions = getattr(
++                runner, "positions_parallel_streams", None)
++            if parallel_positions is not None and positions is not None:
++                if positions.ndim == 2:
++                    parallel_positions[:, :second_num_tokens].copy_(
++                        positions[:, second_start:second_stop])
++                    if second_padded > second_num_tokens:
++                        parallel_positions[:, second_num_tokens:second_padded].fill_(0)
++                else:
++                    parallel_positions[:second_num_tokens].copy_(
++                        positions[second_start:second_stop])
++                    if second_padded > second_num_tokens:
++                        parallel_positions[second_num_tokens:second_padded].fill_(0)
++
++            parallel_input_ids = getattr(
++                runner, "input_ids_parallel_streams", None)
++            if parallel_input_ids is not None and input_ids is not None:
++                parallel_input_ids[:second_num_tokens].copy_(
++                    input_ids[second_start:second_stop])
++                if second_padded > second_num_tokens:
++                    parallel_input_ids[second_num_tokens:second_padded].fill_(0)
++
++            parallel_inputs_embeds = getattr(
++                runner, "inputs_embeds_parallel_streams", None)
++            if (parallel_inputs_embeds is not None
++                    and inputs_embeds is not None):
++                parallel_inputs_embeds[:second_num_tokens].copy_(
++                    inputs_embeds[second_start:second_stop], non_blocking=True)
++                if second_padded > second_num_tokens:
++                    parallel_inputs_embeds[
++                        second_num_tokens:second_padded].fill_(0)
++
++        # Zero-pad the main-stream (split 0) tail in the original buffers.
++        first = split_batch_slices[0]
++        first_num_tokens = int(first.num_tokens)
++        first_padded = int(first.graph_num_tokens)
++        if first_padded > first_num_tokens and input_ids is not None:
++            input_ids[first_num_tokens:first_padded].fill_(0)
++            if positions is not None:
++                if positions.ndim == 2:
++                    positions[:, first_num_tokens:first_padded].fill_(0)
++                else:
++                    positions[first_num_tokens:first_padded].fill_(0)
++
++    def _make_split_batch_metadata_dual_pad(
++        self,
++        split_ubatch_slices: Any,
++        split_batch_slices: Any,
++        attn_metadata: Any,
++        input_ids: torch.Tensor | None,
++        positions: torch.Tensor | None,
++        inputs_embeds: torch.Tensor | None,
++        intermediate_tensors: Any,
++        batch_descriptor: BatchDescriptor,
++        aclgraph_runtime_mode: CUDAGraphMode,
++        inplace_attention_backend: str | None = None,
++    ):
++        """Build per-split forward contexts + sliced inputs for dual-pad.
++
++        Both splits dispatch through the standard (``start_num_tokens=0``)
++        dispatcher path so they reuse the graphs captured at startup (main
++        pool for split 0, parallel pool for split 1 via
++        ``in_parallel_streams``).  Split 1's execution inputs are rebound to
++        the dedicated parallel-stream buffers (values pre-copied by
++        ``_prepare_dual_pad_split_inputs``).
++        """
++        from vllm.forward_context import get_forward_context
++
++        from vllm_ascend.ascend_forward_context import create_ascend_forward_context
++
++        cur_forward_context = get_forward_context()
++        dp_metadata = getattr(cur_forward_context, 'dp_metadata', None)
++        runner = self._runner
++
++        # Contexts use local (per-buffer) token coordinates so cos/sin covers
++        # the full graph size, matching what graph capture bound.  The
++        # attention metadata, by contrast, was already split with the original
++        # (main-buffer) token coordinates by split_attn_metadata + stabilize.
++        from vllm.v1.worker.ubatch_utils import UBatchSlice
++        context_ubatch_slices = [
++            UBatchSlice(s.request_slice, slice(0, int(s.graph_num_tokens)))
++            for s in split_batch_slices
++        ]
++
++        ubatch_metadata = []
++        for i, split_slice in enumerate(split_batch_slices):
++            in_parallel_streams = i > 0
++            ubatch_attn_metadata = None
++            if attn_metadata is not None:
++                if isinstance(attn_metadata, list) and i < len(attn_metadata):
++                    ubatch_attn_metadata = attn_metadata[i]
++                else:
++                    ubatch_attn_metadata = attn_metadata
++
++            if in_parallel_streams:
++                # Parallel-pool graphs are keyed by the exact padded parallel
++                # size; the main dispatcher would re-pad the size to the
++                # nearest main capture size and miss the captured graph.
++                from vllm_ascend.worker.dual_pad_utils import (
++                    make_dual_pad_parallel_batch_descriptor)
++                ubatch_cudagraph_mode = CUDAGraphMode.FULL
++                ubatch_batch_descriptor = (
++                    make_dual_pad_parallel_batch_descriptor(
++                        split_slice.graph_num_tokens,
++                        has_lora=batch_descriptor.has_lora,
++                        num_active_loras=getattr(
++                            batch_descriptor, "num_active_loras", 0),
++                        uniform_decode_query_len=(
++                            self.cudagraph_dispatcher
++                            .uniform_decode_query_len),
++                        max_num_seqs=(
++                            self.vllm_config.scheduler_config.max_num_seqs),
++                    ))
++            else:
++                ubatch_cudagraph_mode, ubatch_batch_descriptor = (
++                    self.cudagraph_dispatcher.dispatch(
++                        num_tokens=split_slice.graph_num_tokens,
++                        uniform_decode=True,
++                        has_lora=batch_descriptor.has_lora,
++                    ))
++
++            ctx_stream = (self.stream_parallel if in_parallel_streams
++                          else self.stream_main)
++
++            if in_parallel_streams:
++                ctx_positions = getattr(
++                    runner, "positions_parallel_streams", None)
++            else:
++                ctx_positions = positions
++            if ctx_positions is None:
++                ctx_positions = positions
++            if ctx_positions is not None:
++                ctx_positions = ctx_positions[:split_slice.graph_num_tokens]
++
++            with torch.npu.stream(ctx_stream):
++                split_forward_context = create_ascend_forward_context(
++                    cur_forward_context,
++                    attn_metadata=ubatch_attn_metadata,
++                    vllm_config=self.vllm_config,
++                    dp_metadata=dp_metadata,
++                    ubatch_slices=context_ubatch_slices,
++                    batch_descriptor=ubatch_batch_descriptor,
++                    cudagraph_runtime_mode=ubatch_cudagraph_mode,
++                    ubatch_num=i,
++                    positions=ctx_positions,
++                    in_parallel_streams=in_parallel_streams,
++                    cos_sin_slot_id=i,
++                )
++            setattr(split_forward_context, "split_inplace_mode", "dual_pad")
++            setattr(split_forward_context, "forced_attention_backend",
++                    inplace_attention_backend)
++            setattr(split_forward_context, "allow_inplace_lazy_capture",
++                    False)
++            setattr(split_forward_context, "split_actual_num_tokens",
++                    int(split_slice.num_tokens))
++            setattr(split_forward_context, "split_graph_num_tokens",
++                    int(split_slice.graph_num_tokens))
++
++            sliced_input_ids, sliced_positions, sliced_inputs_embeds, \
++                sliced_intermediate_tensors = slice_split_batch_inputs(
++                    split_slice.token_slice, input_ids, positions,
++                    inputs_embeds, intermediate_tensors,
++                    vllm_config=self.vllm_config,
++                )
++
++            if in_parallel_streams:
++                num_tokens = int(split_slice.num_tokens)
++                padded_tokens = int(split_slice.graph_num_tokens)
++                if (sliced_input_ids is not None
++                        and getattr(runner, "input_ids_parallel_streams", None) is not None):
++                    sliced_input_ids = (
++                        runner.input_ids_parallel_streams[:padded_tokens])
++                if (sliced_positions is not None
++                        and getattr(runner, "positions_parallel_streams", None) is not None):
++                    sliced_positions = (
++                        runner.positions_parallel_streams[:padded_tokens])
++                if (sliced_inputs_embeds is not None
++                        and getattr(runner, "inputs_embeds_parallel_streams", None) is not None):
++                    sliced_inputs_embeds = (
++                        runner.inputs_embeds_parallel_streams[:padded_tokens])
++
++            ubatch_metadata.append(
++                AscendUbatchMetadata(
++                    context=split_forward_context,
++                    input_ids=sliced_input_ids,
++                    positions=sliced_positions,
++                    inputs_embeds=sliced_inputs_embeds,
++                    intermediate_tensors=sliced_intermediate_tensors,
++                    num_tokens=split_slice.graph_num_tokens,
++                )
++            )
++        return ubatch_metadata
++
++    def run_dual_pad(
++        self,
++        split_plan: Any,
++        input_ids: torch.Tensor,
++        positions: torch.Tensor,
++        intermediate_tensors: Any,
++        inputs_embeds: torch.Tensor | None,
++        attn_metadata: Any,
++        cudagraph_mode: CUDAGraphMode,
++        batch_descriptor: BatchDescriptor,
++        **model_kwargs,
++    ) -> torch.Tensor:
++        """Execute a dual-pad split (two independent padded buffers).
++
++        Reuses the dual-inplace parallel skeleton (two worker threads on
++        stream_main / stream_parallel, per-split attn param updates, event
++        based merge) but with dual-pad input semantics: split 1 reads from the
++        dedicated parallel-stream buffers and both splits dispatch through the
++        standard (non-offset) graph path.
++        """
++        split_cfg = getattr(self.ascend_config, "split_batch_config", None)
++        split_slices = split_plan.split_slices
++        original_forward_context = get_forward_context()
++        num_splits = len(split_slices)
++
++        from vllm_ascend.worker.inplace_split_utils import (
++            select_inplace_attention_backend,
++        )
++        inplace_attention_backend = select_inplace_attention_backend(
++            split_plan,
++            lambda shape: using_paged_attention(shape, self.vllm_config))
++
++        if self.stream_main is None:
++            self._runner.stream_main = torch.npu.current_stream()
++        if self.stream_parallel is None:
++            self._runner.stream_parallel = torch.npu.Stream(device=self.device)
++
++        self._apply_inplace_parallel_replay_stream_limits()
++
++        second_slot_mapping = self._extract_second_split_slot_mapping(
++            split_slices, attn_metadata)
++        self._prepare_dual_pad_split_inputs(
++            split_slices, input_ids, positions, inputs_embeds,
++            second_slot_mapping=second_slot_mapping)
++
++        from vllm.v1.worker.ubatch_utils import UBatchSlice
++        split_ubatch_slices = [
++            UBatchSlice(s.request_slice, s.token_slice)
++            for s in split_slices
++        ]
++
++        ubatch_metadata = self._make_split_batch_metadata_dual_pad(
++            split_ubatch_slices=split_ubatch_slices,
++            split_batch_slices=split_slices,
++            attn_metadata=attn_metadata,
++            input_ids=input_ids,
++            positions=positions,
++            inputs_embeds=inputs_embeds,
++            intermediate_tensors=intermediate_tensors,
++            batch_descriptor=batch_descriptor,
++            aclgraph_runtime_mode=cudagraph_mode,
++            inplace_attention_backend=inplace_attention_backend,
++        )
++
++        clone_split_outputs = _inplace_parallel_clone_split_outputs(
++            allow_auto_direct_outputs=True,
++            split_cfg=split_cfg,
++            split_batch_slices=split_slices,
++            aclgraph_runtime_mode=cudagraph_mode,
++            merge_sync_policy=_INPLACE_PARALLEL_MERGE_SYNC_POLICY,
++        )
++
++        results: list[Any | None] = [None] * num_splits
++        split_done_events: list[torch.npu.Event | None] = [None] * num_splits
++        split_errors: list[tuple[int, Exception]] = []
++        split_error_lock = threading.Lock()
++
++        self._wait_inplace_parallel_output_release_events(
++            (self.stream_main, self.stream_parallel))
++
++        def _finish_dual_pad_split_result(
++                slice_idx: int,
++                split_result: Any,
++                *,
++                parallel_streams: bool,
++                target_stream: torch.npu.Stream) -> None:
++            split_slice = split_slices[slice_idx]
++            with torch.npu.stream(target_stream):
++                trimmed_result = trim_split_output(
++                    split_result, split_slice.num_tokens)
++                if clone_split_outputs:
++                    trimmed_result = clone_split_output(trimmed_result)
++                results[slice_idx] = trimmed_result
++                if parallel_streams:
++                    split_done_events[slice_idx] = (
++                        self._record_replay_stream_event(target_stream))
++
++        def _run_dual_pad_worker(slice_idx: int) -> None:
++            try:
++                split_slice = split_slices[slice_idx]
++                metadata = ubatch_metadata[slice_idx]
++                parallel_streams = slice_idx > 0
++                target_stream = (self.stream_parallel if parallel_streams
++                                 else self.stream_main)
++
++                with torch.inference_mode():
++                    with torch.npu.stream(target_stream):
++                        with override_forward_context(metadata.context):
++                            split_result = self.model(
++                                input_ids=metadata.input_ids,
++                                positions=metadata.positions,
++                                inputs_embeds=metadata.inputs_embeds,
++                                intermediate_tensors=metadata.intermediate_tensors,
++                                **model_kwargs,
++                            )
++                            if (metadata.context.cudagraph_runtime_mode
++                                    == CUDAGraphMode.FULL):
++                                if parallel_streams:
++                                    self._update_attn_params_for_split_ubatch(
++                                        metadata.context,
++                                        split_slice.graph_num_tokens,
++                                        parallel_streams=True)
++                                else:
++                                    self._update_attn_params_for_wrapper(
++                                        metadata.context,
++                                        split_slice.graph_num_tokens)
++
++                _finish_dual_pad_split_result(
++                    slice_idx,
++                    split_result,
++                    parallel_streams=parallel_streams,
++                    target_stream=target_stream)
++            except Exception as e:
++                with split_error_lock:
++                    split_errors.append((slice_idx, e))
++
++        self._get_replay_worker_pool().dispatch([
++            (lambda i=slice_idx: _run_dual_pad_worker(i))
++            for slice_idx in range(num_splits)
++        ])
++
++        if split_errors:
++            split_errors.sort(key=lambda item: item[0])
++            failed_slice_idx, first_error = split_errors[0]
++            raise RuntimeError(
++                "dual pad replay worker failed at "
++                f"slice_idx={failed_slice_idx}: {first_error}") from first_error
++
++        merged_results: list[Any] = [
++            result for result in results if result is not None
++        ]
++        if len(merged_results) != num_splits:
++            raise RuntimeError(
++                "Missing dual pad split result: "
++                f"expected={num_splits}, got={len(merged_results)}")
++
++        if _INPLACE_PARALLEL_MERGE_SYNC_POLICY == "host_sync":
++            self.stream_main.synchronize()
++            if num_splits > 1:
++                self.stream_parallel.synchronize()
++            with override_forward_context(original_forward_context):
++                result = merge_split_outputs(merged_results)
++                if not clone_split_outputs:
++                    self._record_inplace_parallel_output_release_event()
++            return result
++
++        with torch.npu.stream(self.stream_main):
++            self._wait_replay_stream_events(self.stream_main,
++                                            split_done_events)
++            for merged_result in merged_results:
++                _record_stream_tree_for_npugraph_ex(merged_result,
++                                                    self.stream_main)
++            with override_forward_context(original_forward_context):
++                result = merge_split_outputs(merged_results)
++                if not clone_split_outputs:
++                    self._record_inplace_parallel_output_release_event()
++        return result
++
++    def run_unified(
++        self,
++        split_plan: Any,
++        input_ids: torch.Tensor,
++        positions: torch.Tensor,
++        intermediate_tensors: Any,
++        inputs_embeds: torch.Tensor | None,
++        attn_metadata: Any,
++        cudagraph_mode: CUDAGraphMode,
++        batch_descriptor: BatchDescriptor,
++        **model_kwargs,
++    ) -> torch.Tensor:
++        """P11 unified-row-graph execution (env-gated, default OFF).
++
++        ONE main-pool graph replaying at the exact batch token count over a
++        single whole-batch slice (the joint continuous row buffer):
++
++        - no worker threads / parallel streams / output merging;
++        - merged varlen FIA attention: one per-layer attention call serves
++          the whole batch (single TND GEMM-like dispatch alongside the
++          unified linears that motivated this path);
++        - graph task-param update BEFORE replay via the normal-path channel
++          (``_update_full_graph_params_if_needed`` → backend
++          ``update_graph_params``, ExternalEvent-order on the update stream).
++        """
++        from vllm.v1.worker.ubatch_utils import UBatchSlice
++
++        from vllm_ascend.ascend_forward_context import create_ascend_forward_context
++
++        runner = self._runner
++        original_forward_context = get_forward_context()
++        split_slice = split_plan.split_slices[0]
++        graph_num_tokens = int(split_slice.graph_num_tokens)
++        actual_num_tokens = int(split_slice.num_tokens)
++
++        unified_mode, unified_desc = self.cudagraph_dispatcher.dispatch(
++            num_tokens=graph_num_tokens,
++            uniform_decode=True,
++            has_lora=bool(getattr(batch_descriptor, "has_lora", False)),
++        )
++        if unified_mode != CUDAGraphMode.FULL:
++            raise RuntimeError(
++                "DUAL_UNIFIED_GEMM requires an exact-size FULL graph for "
++                f"{graph_num_tokens} tokens; got mode={unified_mode}, "
++                f"descriptor={unified_desc!r}. Verify that "
++                "split_batch_config.unified_capture_sizes was declared and "
++                "active during startup capture."
++            )
++
++        unified_attn_metadata = attn_metadata
++        if isinstance(attn_metadata, list):
++            if len(attn_metadata) != 1:
++                raise RuntimeError(
++                    "DUAL_UNIFIED_GEMM expects single whole-batch attention "
++                    f"metadata, got {len(attn_metadata)} entries")
++            unified_attn_metadata = attn_metadata[0]
++
++        context_ubatch_slices = [
++            UBatchSlice(split_slice.request_slice,
++                        slice(0, graph_num_tokens))
++        ]
++        unified_forward_context = create_ascend_forward_context(
++            original_forward_context,
++            attn_metadata=unified_attn_metadata,
++            vllm_config=self.vllm_config,
++            dp_metadata=getattr(original_forward_context, "dp_metadata", None),
++            ubatch_slices=context_ubatch_slices,
++            batch_descriptor=unified_desc,
++            cudagraph_runtime_mode=unified_mode,
++            ubatch_num=0,
++            positions=positions[:graph_num_tokens],
++        )
++        setattr(unified_forward_context, "split_inplace_mode", "dual_pad")
++        setattr(unified_forward_context, "allow_inplace_lazy_capture", False)
++        setattr(unified_forward_context, "split_actual_num_tokens",
++                actual_num_tokens)
++        setattr(unified_forward_context, "split_graph_num_tokens",
++                graph_num_tokens)
++
++        with override_forward_context(unified_forward_context):
++            # Normal-path ordering: refresh the graph-bound attention task
++            # parameters BEFORE enqueueing the replay so the event recorded
++            # on the update stream orders it against the captured wait.
++            self._runner._update_full_graph_params_if_needed(
++                unified_forward_context,
++                graph_num_tokens,
++                positions[:graph_num_tokens],
++            )
++            split_result = self.model(
++                input_ids=input_ids[:graph_num_tokens],
++                positions=positions[:graph_num_tokens],
++                inputs_embeds=(
++                    inputs_embeds[:graph_num_tokens]
++                    if inputs_embeds is not None else None),
++                intermediate_tensors=intermediate_tensors,
++                **model_kwargs,
++            )
++        return trim_split_output(split_result, actual_num_tokens)
++
++    def capture_parallel_stream_graphs(self) -> None:
++        from vllm_ascend.compilation.acl_graph import ACLGraphWrapper
++
++        runner = self._runner
++        if not isinstance(runner.model, ACLGraphWrapper):
++            return
++        if not hasattr(runner, 'cudagraph_batch_sizes_parallel') or runner.cudagraph_batch_sizes_parallel is None:
++            return
++        for batch_size in runner.cudagraph_batch_sizes_parallel:
++            # Capture uniform-decode graphs so the BatchDescriptor (uniform
++            # flag included) matches the runtime dispatch used by dual-pad.
++            runner._dummy_run(
++                batch_size,
++                in_parallel_streams=True,
++                uniform_decode=True,
++            )
+\ No newline at end of file
+diff --git a/vllm_ascend/worker/model_runner_v1.py b/vllm_ascend/worker/model_runner_v1.py
+index 0043627e28..fa081b7fe6 100644
+--- a/vllm_ascend/worker/model_runner_v1.py
++++ b/vllm_ascend/worker/model_runner_v1.py
+@@ -109,7 +109,19 @@ from vllm_ascend.attention.attention_v1 import AscendAttentionBackend, AscendAtt
+ from vllm_ascend.attention.context_parallel.dsa_cp import AscendDSACPMetadataBuilder
+ from vllm_ascend.attention.dsa_v1 import AscendDSAMetadataBuilder
+ from vllm_ascend.attention.mla_v1 import AscendMLABackend
+-from vllm_ascend.attention.utils import AscendCommonAttentionMetadata, using_paged_attention
++from vllm_ascend.attention.utils import AscendCommonAttentionMetadata, split_attn_metadata, using_paged_attention
++from vllm_ascend.worker.inplace_split_ops import (
++    AscendUbatchMetadata,
++    clone_attn_metadata_block_tables,
++    context_ubatch_slices_for_inplace,
++    dual_stream_attention_config,
++    merge_split_outputs,
++    rebind_attn_metadata_slot_mapping,
++    stabilize_inplace_common_attn_metadata_list,
++    trim_split_output,
++)
++from vllm_ascend.worker.inplace_split_runner import InplaceSplitRunner
++from vllm_ascend.worker.inplace_split_utils import SplitBatchSlice
+ 
+ # yapf conflicts with isort for this block
+ # yapf: disable
+@@ -118,6 +130,7 @@ from vllm_ascend.compilation.acl_graph import (
+     reset_graph_params,
+     set_draft_graph_params,
+     set_graph_params,
++    set_graph_params_parallel,
+     update_full_graph_params,
+ )
+ from vllm_ascend.eplb.adaptor.vllm_adaptor import VllmEplbAdaptor
+@@ -243,6 +256,9 @@ def get_tp_context(drafter):
+     return getattr(drafter, "tp_group_context", nullcontext())
+ 
+ 
++
++
++
+ class ExecuteModelState(NamedTuple):
+     """Ephemeral cached state transferred between execute_model() and
+     sample_tokens(), after execute_model() returns None."""
+@@ -501,8 +517,18 @@ class NPUModelRunner(GPUModelRunner):
+         set_potential_max_tokens(vllm_config)
+         self.decode_threshold = 1 + (self.speculative_config.num_speculative_tokens if self.speculative_config else 0)
+ 
++        self.stream_main: torch.npu.Stream | None = None
++        self.stream_parallel: torch.npu.Stream | None = None
++        self.update_stream_main: torch.npu.Stream | None = None
++        self.update_stream_parallel: torch.npu.Stream | None = None
++        self.input_ids_parallel_streams: torch.Tensor | None = None
++        self.inputs_embeds_parallel_streams: torch.Tensor | None = None
++        self.positions_parallel_streams: torch.Tensor | None = None
++        self._inplace_split_runner: InplaceSplitRunner | None = None
++
+         self.use_aclgraph = self._use_aclgraph()
+ 
++
+         eplb_config = self.ascend_config.eplb_config
+         self.dynamic_eplb = eplb_config.dynamic_eplb
+         self.eplb_enable = self.dynamic_eplb or (eplb_config.expert_map_path is not None)
+@@ -611,7 +637,6 @@ class NPUModelRunner(GPUModelRunner):
+     def _sync_device(self) -> None:
+         torch.npu.synchronize()
+ 
+-
+     def _init_dp_metadata_buffers(self) -> None:
+         if self.dp_size <= 1:
+             self._dp_metadata_tensor = None
+@@ -2192,6 +2217,35 @@ class NPUModelRunner(GPUModelRunner):
+ 
+                 num_tokens_padded = batch_desc.num_tokens
+                 num_reqs_padded = batch_desc.num_reqs if batch_desc.num_reqs is not None else num_reqs
++
++                from vllm_ascend.worker.inplace_split_utils import INPLACE_SPLIT_DRY_RUN
++                split_batch_config = self.ascend_config.split_batch_config
++                inplace_split_plan = None
++                inplace_split_reason = ""
++                logger.info_once(
++                    "DUAL_INPLACE check: enabled=%s, mode=%s, cudagraph_mode=%s",
++                    split_batch_config.enabled, split_batch_config.mode, cudagraph_mode,
++                )
++                if split_batch_config.enabled and cudagraph_mode in (CUDAGraphMode.FULL, CUDAGraphMode.PIECEWISE):
++                    is_mla = self.model_config.use_mla
++                    is_mrope = getattr(self.model_config.hf_text_config, "rope_scaling", None) is not None and getattr(
++                        self.model_config.hf_text_config, "rope_type", ""
++                    ) == "mrope"
++                    has_lora = len(self.input_batch.lora_id_to_lora_request) > 0
++                    use_spec_decode = len(scheduler_output.scheduled_spec_decode_tokens) > 0
++                    capture_sizes = list(self.compilation_config.cudagraph_capture_sizes) if self.compilation_config.cudagraph_capture_sizes else []
++                    inplace_split_plan, inplace_split_reason = self._inplace_split_runner.should_split(
++                        split_batch_config=split_batch_config,
++                        cudagraph_mode=cudagraph_mode,
++                        num_scheduled_tokens_np=num_scheduled_tokens_np,
++                        num_reqs=num_reqs,
++                        total_num_tokens=num_tokens_unpadded,
++                        has_lora=has_lora,
++                        is_mla=is_mla,
++                        is_mrope=is_mrope,
++                        spec_decode_enabled=use_spec_decode,
++                        cudagraph_capture_sizes=capture_sizes,
++                    )
+                 ubatch_slices, ubatch_slices_padded = maybe_create_ubatch_slices(
+                     should_ubatch,
+                     num_scheduled_tokens_np,
+@@ -2280,6 +2334,7 @@ class NPUModelRunner(GPUModelRunner):
+                         batch_desc.num_reqs,
+                     )
+ 
++
+                 (attn_metadata, spec_decode_common_attn_metadata) = self._build_attention_metadata(
+                     num_tokens=num_tokens_unpadded
+                     if not (self.use_cp and self.pcp_manager.pcp_use_hybrid_attn)
+@@ -2294,6 +2349,9 @@ class NPUModelRunner(GPUModelRunner):
+                     num_scheduled_tokens=scheduler_output.num_scheduled_tokens,
+                     num_scheduled_tokens_np=num_scheduled_tokens_np,
+                     cascade_attn_prefix_lens=cascade_attn_prefix_lens,
++                    split_mode=split_batch_config.mode if inplace_split_plan is not None else None,
++                    inplace_split_plan=inplace_split_plan,
++
+                 )
+ 
+                 self._sanitize_placeholder_input_ids_for_forward(
+@@ -2375,9 +2433,44 @@ class NPUModelRunner(GPUModelRunner):
+             observe_first_compute_if_supported(self, scheduler_output)
+             if self.cache_config.mamba_cache_mode == "align":
+                 mamba_utils.do_mamba_copy_block(preprocess_bufs)
+-            hidden_states = self._model_forward(
+-                num_tokens_padded, input_ids, positions, intermediate_tensors, inputs_embeds, **model_kwargs
+-            )
++            if inplace_split_plan is not None:
++                split_mode = split_batch_config.mode
++                if getattr(inplace_split_plan, "use_unified", False):
++                    hidden_states = self._inplace_split_runner.run_unified(
++                        inplace_split_plan, input_ids, positions,
++                        intermediate_tensors, inputs_embeds, attn_metadata,
++                        cudagraph_mode, batch_desc,
++                        **model_kwargs,
++                    )
++                elif split_mode == "inplace_parallel":
++                    from vllm_ascend.worker.inplace_split_utils import (
++                        select_inplace_attention_backend,
++                    )
++                    attn_backend = select_inplace_attention_backend(
++                        inplace_split_plan,
++                        lambda shape: using_paged_attention(shape, self.vllm_config))
++                    hidden_states = self._inplace_split_runner.run_inplace_parallel(
++                        inplace_split_plan, input_ids, positions,
++                        intermediate_tensors, inputs_embeds, attn_metadata,
++                        cudagraph_mode, batch_desc,
++                        inplace_attention_backend=attn_backend,
++                        **model_kwargs,
++                    )
++                elif split_mode == "dual_pad":
++                    hidden_states = self._inplace_split_runner.run_dual_pad(
++                        inplace_split_plan, input_ids, positions,
++                        intermediate_tensors, inputs_embeds, attn_metadata,
++                        cudagraph_mode, batch_desc,
++                        **model_kwargs,
++                    )
++                else:
++                    hidden_states = self._model_forward(
++                        num_tokens_padded, input_ids, positions, intermediate_tensors, inputs_embeds, **model_kwargs
++                    )
++            else:
++                hidden_states = self._model_forward(
++                    num_tokens_padded, input_ids, positions, intermediate_tensors, inputs_embeds, **model_kwargs
++                )
+         with record_function_or_nullcontext("post process"):
+             aux_hidden_states = None
+             if self.use_aux_hidden_state_outputs:
+@@ -2911,17 +3004,10 @@ class NPUModelRunner(GPUModelRunner):
+         }
+         run_model = partial(self.model, **model_inputs)
+ 
+-        if self.enable_enpu:
+-            # The soft segmentation scenario requires event.record first, then event.wait
+-            self._update_full_graph_params_if_needed(
+-                forward_context, num_tokens_padded, positions
+-            )
+-            hidden_states = run_model()
+-        else:
+-            hidden_states = run_model()
+-            self._update_full_graph_params_if_needed(
+-                forward_context, num_tokens_padded, positions
+-            )
++        self._update_full_graph_params_if_needed(
++            forward_context, num_tokens_padded, positions
++        )
++        hidden_states = run_model()
+ 
+         if forward_context.flash_comm_v1_enabled and not isinstance(hidden_states, IntermediateTensors):
+             hidden_states = self._all_gather_hidden_states_and_aux(hidden_states)
+@@ -3097,6 +3183,9 @@ class NPUModelRunner(GPUModelRunner):
+         num_scheduled_tokens: dict[str, int] | None = None,
+         num_scheduled_tokens_np: np.ndarray | None = None,
+         cascade_attn_prefix_lens: list[list[int]] | None = None,
++        split_mode: str | None = None,
++        inplace_split_plan: Any | None = None,
++
+     ) -> tuple[PerLayerAttnMetadata, CommonAttentionMetadata | None]:
+         """
+         :return: tuple[attn_metadata, spec_decode_common_attn_metadata]
+@@ -3109,6 +3198,8 @@ class NPUModelRunner(GPUModelRunner):
+         attn_metadata: PerLayerAttnMetadata = {}
+         if ubatch_slices is not None:
+             attn_metadata = [dict() for _ in range(len(ubatch_slices))]
++        elif inplace_split_plan is not None:
++            attn_metadata = [dict() for _ in range(len(inplace_split_plan.split_slices))]
+ 
+         if for_cudagraph_capture:
+             # For some attention backends (e.g. FA) with sliding window models we need
+@@ -3315,12 +3406,24 @@ class NPUModelRunner(GPUModelRunner):
+             for layer_name in attn_group.layer_names:
+                 attn_metadata_dict[layer_name] = attn_metadata_i
+ 
++
+         # Prepare the attention metadata for each KV cache group and make layers
+         # in the same group share the same metadata.
+         prefill_ratio_to_sas_metadata: dict[Any, Any] = {}
+         decode_ratio_to_sas_metadata: dict[Any, Any] = {}
+         common_ratio_to_sas_metadata: dict[Any, Any] = {}
+         spec_decode_common_attn_metadata = None
++
++        split_ubatch_slices_for_metadata = None
++        if ubatch_slices is not None:
++            split_ubatch_slices_for_metadata = ubatch_slices
++        elif inplace_split_plan is not None:
++            from vllm.v1.worker.ubatch_utils import UBatchSlice
++            split_ubatch_slices_for_metadata = [
++                UBatchSlice(s.request_slice, s.token_slice)
++                for s in inplace_split_plan.split_slices
++            ]
++
+         for kv_cache_gid, kv_cache_group in enumerate(self.kv_cache_config.kv_cache_groups):
+             cm = copy(cm_base)  # shallow copy
+             # Basically only the encoder seq_lens, block_table and slot_mapping change
+@@ -3352,24 +3455,52 @@ class NPUModelRunner(GPUModelRunner):
+                 # build per-step attention metadata for the active MTP layer.
+                 self.drafter.set_per_group_attn_metadata(
+                     kv_cache_gid, cm.block_table_tensor, cm.slot_mapping)
+-            if self.speculative_config and spec_decode_common_attn_metadata is None:
+-                if isinstance(self.drafter, AscendEagleProposer | AscendDraftModelProposer | AscendDflashProposer):
+-                    if self.drafter.attn_layer_names[0] in kv_cache_group.layer_names:
++
++            if split_ubatch_slices_for_metadata is not None:
++
++                common_attn_metadata_list = split_attn_metadata(
++                    split_ubatch_slices_for_metadata, cm, self.max_num_tokens)
++                common_attn_metadata_list = self._inplace_split_runner._stabilize_inplace_common_attn_metadata_list(
++                    common_attn_metadata_list,
++                    split_mode=split_mode or "",
++                    inplace_split_plan=inplace_split_plan)
++                for ubid, cm_i in enumerate(common_attn_metadata_list):
++
++                    if self._has_gdn:
++                        attn_group = self.attn_groups[kv_cache_gid][0]
++                        builder = attn_group.get_metadata_builder(0)
++                        if isinstance(builder, GDNAttentionMetadataBuilder):
++                            cm_i.query_start_loc_cpu = self.gdn_query_start_loc.cpu[: num_reqs_padded + 1]
++                            cm_i.query_start_loc = self.gdn_query_start_loc.gpu[: num_reqs_padded + 1]
++                    if self.enable_hamming_sparse is True:
++                        from vllm_ascend.attention.kvcomp_attn.attention_utils import build_kvcomp_metadata
++                        build_kvcomp_metadata(self.kvcomp_meta_data, cm_i)
++                    for attn_gid in range(len(self.attn_groups[kv_cache_gid])):
++                        _build_attn_group_metadata(
++                            kv_cache_gid, attn_gid, cm_i,
++                            prefill_ratio_to_sas_metadata,
++                            decode_ratio_to_sas_metadata,
++                            common_ratio_to_sas_metadata,
++                            ubid=ubid)
++            else:
++                if self.speculative_config and spec_decode_common_attn_metadata is None:
++                    if isinstance(self.drafter, AscendEagleProposer | AscendDraftModelProposer | AscendDflashProposer):
++                        if self.drafter.attn_layer_names[0] in kv_cache_group.layer_names:
++                            spec_decode_common_attn_metadata = cm
++                    else:
+                         spec_decode_common_attn_metadata = cm
+-                else:
+-                    spec_decode_common_attn_metadata = cm
+-            if self.enable_hamming_sparse is True:
+-                from vllm_ascend.attention.kvcomp_attn.attention_utils import build_kvcomp_metadata
+-                build_kvcomp_metadata(self.kvcomp_meta_data, cm)
+-            for attn_gid in range(len(self.attn_groups[kv_cache_gid])):
+-                _build_attn_group_metadata(
+-                    kv_cache_gid,
+-                    attn_gid,
+-                    cm,
+-                    prefill_ratio_to_sas_metadata,
+-                    decode_ratio_to_sas_metadata,
+-                    common_ratio_to_sas_metadata,
+-                )
++                if self.enable_hamming_sparse is True:
++                    from vllm_ascend.attention.kvcomp_attn.attention_utils import build_kvcomp_metadata
++                    build_kvcomp_metadata(self.kvcomp_meta_data, cm)
++                for attn_gid in range(len(self.attn_groups[kv_cache_gid])):
++                    _build_attn_group_metadata(
++                        kv_cache_gid,
++                        attn_gid,
++                        cm,
++                        prefill_ratio_to_sas_metadata,
++                        decode_ratio_to_sas_metadata,
++                        common_ratio_to_sas_metadata,
++                    )
+         if self.is_mm_prefix_lm:
+             req_doc_ranges = {}
+             for req_id in self.input_batch.req_ids:
+@@ -3397,6 +3528,7 @@ class NPUModelRunner(GPUModelRunner):
+             # the attention metadata in directly), and therefore does not want to use
+             # padded attention metadata.
+             spec_decode_common_attn_metadata = spec_decode_common_attn_metadata.unpadded(num_tokens, num_reqs)
++
+         return attn_metadata, spec_decode_common_attn_metadata
+ 
+     def _should_build_dummy_attn_metadata(
+@@ -3430,6 +3562,7 @@ class NPUModelRunner(GPUModelRunner):
+         num_active_loras: int = 0,
+         profile_seq_lens: int | None = None,
+         profile_cpp: bool = False,
++        in_parallel_streams: bool = False,
+     ) -> tuple[torch.Tensor, torch.Tensor]:
+         # only support eager mode and piecewise graph now
+         assert cudagraph_runtime_mode is None or cudagraph_runtime_mode.valid_runtime_modes()
+@@ -3496,6 +3629,23 @@ class NPUModelRunner(GPUModelRunner):
+             force_has_lora=num_active_loras > 0,
+             force_num_active_loras=num_active_loras,
+         )
++        if in_parallel_streams:
++            # DUAL_PAD parallel-pool capture: graphs must be keyed by the
++            # exact parallel size.  The main-pool dispatcher above would pad
++            # the size to the nearest main capture size, which mis-keys the
++            # graph (runtime lookup misses) and breaks dummy metadata
++            # construction (num_reqs vs num_reqs_padded mismatch).
++            assert uniform_decode, (
++                "parallel stream graph capture requires uniform decode")
++            from vllm_ascend.worker.dual_pad_utils import (
++                make_dual_pad_parallel_batch_descriptor)
++            batch_desc = make_dual_pad_parallel_batch_descriptor(
++                num_tokens_unpadded,
++                has_lora=num_active_loras > 0,
++                num_active_loras=num_active_loras,
++                uniform_decode_query_len=self.uniform_decode_query_len,
++                max_num_seqs=max_num_reqs,
++            )
+         if self.use_cp:
+             self.pcp_manager.init_batch_info(
+                 num_scheduled_tokens,
+@@ -3508,6 +3658,12 @@ class NPUModelRunner(GPUModelRunner):
+                 self.pcp_manager.query_lens_pcp_full.copy_to_gpu()
+         if cudagraph_runtime_mode is None:
+             cudagraph_runtime_mode = _cudagraph_mode
++        elif (in_parallel_streams
++              and cudagraph_runtime_mode == CUDAGraphMode.FULL
++              and _cudagraph_mode != CUDAGraphMode.FULL):
++            logger.debug(
++                "[dummy_run] Overriding runtime mode %s -> FULL for parallel stream capture",
++                _cudagraph_mode.name)
+         else:
+             assert cudagraph_runtime_mode == _cudagraph_mode, (
+                 f"Cudagraph runtime mode mismatch in dummy_run. "
+@@ -3610,20 +3766,33 @@ class NPUModelRunner(GPUModelRunner):
+             assert num_tokens_padded <= self.max_num_tokens
+             if self.supports_mm_inputs and not self.model_config.is_encoder_decoder or self.enable_prompt_embeds:
+                 input_ids = None
+-                inputs_embeds = self.inputs_embeds.gpu[:num_tokens_padded]
++                if in_parallel_streams and hasattr(self, 'inputs_embeds_parallel_streams'):
++                    inputs_embeds = self.inputs_embeds_parallel_streams.gpu[:num_tokens_padded]
++                else:
++                    inputs_embeds = self.inputs_embeds.gpu[:num_tokens_padded]
+             else:
+-                input_ids = self.input_ids.gpu[:num_tokens_padded]
++                if in_parallel_streams and hasattr(self, 'input_ids_parallel_streams'):
++                    input_ids = self.input_ids_parallel_streams.gpu[:num_tokens_padded]
++                else:
++                    input_ids = self.input_ids.gpu[:num_tokens_padded]
+                 inputs_embeds = None
+ 
+             if self.uses_mrope:
+                 positions = self.mrope_positions.gpu[:, :num_tokens_padded]
+             elif self.uses_xdrope_dim > 0:
+                 positions = self.xdrope_positions.gpu[:, :num_tokens_padded]
++            elif in_parallel_streams and hasattr(self, 'positions_parallel_streams'):
++                positions = self.positions_parallel_streams.gpu[:num_tokens_padded]
+             else:
+                 positions = self.positions[:num_tokens_padded]
+ 
+             # update global cos, sin
+-            update_cos_sin(positions)
++            # Parallel-stream graphs bind the slot-1 cos/sin buffers (the
++            # runtime dual-pad split-1 forward context uses cos_sin_slot_id=1),
++            # so the capture-time update must target slot 1 as well.
++            update_cos_sin(
++                positions,
++                slot_id=(1 if in_parallel_streams else 0))
+ 
+             if get_pp_group().is_first_rank:
+                 intermediate_tensors = None
+@@ -3661,8 +3830,24 @@ class NPUModelRunner(GPUModelRunner):
+                 if hasattr(self.drafter, "model") and hasattr(self.drafter.model, "compute_logits"):
+                     return self.drafter.model.compute_logits(hidden_states[dummy_indices])
+ 
++            capture_attn_metadata = attn_metadata
++            if in_parallel_streams:
++                capture_attn_metadata = clone_attn_metadata_block_tables(
++                    capture_attn_metadata)
++                # Bind the parallel-pool graphs to the dedicated slot_mapping
++                # buffer: at runtime _prepare_dual_pad_split_inputs copies
++                # split-1's slots into it, so the captured KV-write op
++                # scatters split-1 K/V into split-1's own cache slots
++                # instead of split-0's.
++                parallel_slot_mapping = getattr(
++                    self, "slot_mapping_parallel_streams", None)
++                if parallel_slot_mapping is not None:
++                    capture_attn_metadata = (
++                        rebind_attn_metadata_slot_mapping(
++                            capture_attn_metadata,
++                            parallel_slot_mapping.gpu[:num_tokens_padded]))
+             with set_ascend_forward_context(
+-                attn_metadata,
++                capture_attn_metadata,
+                 self.vllm_config,
+                 num_tokens=num_tokens_padded,
+                 num_tokens_across_dp=num_tokens_across_dp,
+@@ -3674,6 +3859,8 @@ class NPUModelRunner(GPUModelRunner):
+                 has_sinks = self._has_sinks,
+                 input_ids=input_ids,
+                 eplb_heat_collection_status=self.eplb_heat_collection_status if self.dynamic_eplb else False,
++                in_parallel_streams=in_parallel_streams,
++                cos_sin_slot_id=(1 if in_parallel_streams else 0),
+             ):
+                 outputs = self._model_forward(
+                     num_tokens_padded, input_ids, positions, intermediate_tensors, inputs_embeds
+@@ -3859,6 +4046,33 @@ class NPUModelRunner(GPUModelRunner):
+                 use_eagle=self.use_eagle,
+                 enable_enpu=self.enable_enpu,
+             )
++            if self.ascend_config.split_batch_config.enabled:
++                self.stream_main = torch.npu.current_stream()
++                self.stream_parallel = torch.npu.Stream(device=self.device)
++                self.update_stream_main = torch.npu.Stream()
++                self.update_stream_parallel = torch.npu.Stream()
++                self.input_ids_parallel_streams = self._make_buffer(
++                    self.max_num_tokens, dtype=torch.int32)
++                self.inputs_embeds_parallel_streams = self._make_buffer(
++                    self.max_num_tokens, self.inputs_embeds_size,
++                    dtype=self.dtype, numpy=False)
++                self.positions_parallel_streams = self._make_buffer(
++                    self.max_num_tokens, dtype=torch.int64)
++                # Dedicated slot_mapping for the parallel-stream graph pool.
++                # The captured KV-write op (npu_scatter_pa_kv_cache) binds the
++                # slot_mapping address seen at capture time; without this
++                # buffer the parallel graphs would bind the head of the
++                # persistent slot_mapping buffer, which at runtime holds
++                # split-0's slots, so split-1 would overwrite split-0's KV.
++                self.slot_mapping_parallel_streams = self._make_buffer(
++                    self.max_num_tokens, dtype=torch.int32)
++                self.slot_mapping_parallel_streams.gpu.fill_(-1)
++                self._inplace_split_runner = InplaceSplitRunner(self)
++                logger.info(
++                    "DUAL_INPLACE mode enabled: mode=%s, parallel_streams=%s",
++                    self.ascend_config.split_batch_config.mode,
++                    self.ascend_config.split_batch_config.enable_parallel_streams,
++                )
+ 
+         if self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
+             self._start_dump_data()
+@@ -4823,20 +5037,30 @@ class NPUModelRunner(GPUModelRunner):
+                 set(group_key.attn_backend for group_key in attn_backends.values()),
+             )
+ 
++        def _get_num_attn_metadata_builders() -> int:
++            if self.parallel_config.use_ubatching:
++                return self.parallel_config.num_ubatches
++            split_cfg = getattr(self.ascend_config, "split_batch_config", None)
++            split_enabled = bool(split_cfg is not None
++                                 and getattr(split_cfg, "enabled", False))
++            if split_enabled:
++                n = int(getattr(split_cfg, "num_splits", 1))
++                return max(1, n)
++            return 1
++
+         def create_attn_groups(
+             attn_backends_map: dict[AttentionBackend, list[str]], kv_cache_group_id: int
+         ) -> list[AttentionGroup]:
+             attn_groups: list[AttentionGroup] = []
+             for (attn_backend, kv_cache_spec), layer_names in attn_backends_map.items():
+-                attn_metadata_builders = []
+-                attn_metadata_builders.append(
++                attn_metadata_builders = [
+                     attn_backend.get_builder_cls()(
+                         kv_cache_spec,
+                         layer_names,
+                         self.vllm_config,
+                         self.device,
+-                    )
+-                )
++                    ) for _ in range(_get_num_attn_metadata_builders())
++                ]
+                 attn_group = AttentionGroup(
+                     attn_backend, layer_names, kv_cache_spec, kv_cache_group_id, attn_metadata_builders
+                 )
+@@ -5037,6 +5261,52 @@ class NPUModelRunner(GPUModelRunner):
+             )
+             self.drafter.initialize_cudagraph_keys(cudagraph_mode)
+ 
++        # P11 unified-row-graph (env-gated, default OFF): register exact-size
++        # FULL keys for the declared unified sizes so that
++        #   - ``get_capture_descs`` exposes them → core capture_model captures
++        #     each one through the standard startup dummy-run flow,
++        #   - ``set_graph_params`` below allocates the matching attn-param
++        #     buckets keyed by the exact token count,
++        #   - runtime dispatch hits them exactly (no padding to next size).
++        # Descriptor construction MUST reuse _create_padded_batch_descriptor
++        # AFTER patching the bs->padded table, so the registered key matches
++        # the runtime dispatch formula bit-for-bit.
++        unified_cfg = getattr(self.ascend_config, "split_batch_config", None)
++        if (
++            unified_cfg is not None
++            and getattr(unified_cfg, "enable_unified_gemm", False)
++            and getattr(unified_cfg, "unified_capture_sizes", None)
++        ):
++            dispatcher = self.cudagraph_dispatcher
++            bs_to_padded = getattr(dispatcher, "_bs_to_padded_graph_size", None)
++            if bs_to_padded is None:
++                # Eager run (cudagraph keys never initialized): exact-size
++                # FULL graphs do not exist here, so skip registration; the
++                # standard dispatch path stays NONE end to end.
++                logger.info_once(
++                    "DUAL_UNIFIED_GEMM skipped key registration: cudagraph "
++                    "keys are not initialized (eager run).")
++                unified_cfg = None
++            else:
++                max_size = dispatcher.compilation_config.max_cudagraph_capture_size
++                for size in unified_cfg.unified_capture_sizes:
++                    if size <= 0 or size > max_size:
++                        raise ValueError(
++                            "DUAL_UNIFIED_GEMM unified_capture_sizes entry "
++                            f"{size} must be within [1, {max_size}]")
++                    if size >= len(bs_to_padded):
++                        raise ValueError(
++                            "DUAL_UNIFIED_GEMM unified_capture_sizes entry "
++                            f"{size} exceeds the dispatcher table range")
++                    bs_to_padded[size] = size
++                    unified_desc = dispatcher._create_padded_batch_descriptor(
++                        size, True, False, 0)
++                    dispatcher.add_cudagraph_key(CUDAGraphMode.FULL, unified_desc)
++                logger.info(
++                    "DUAL_UNIFIED_GEMM registered exact-size FULL keys: %s",
++                    sorted(unified_cfg.unified_capture_sizes),
++                )
++
+         capture_descs = self.cudagraph_dispatcher.get_capture_descs()
+         capture_sizes = sorted({
+             desc.num_tokens
+@@ -5052,6 +5322,15 @@ class NPUModelRunner(GPUModelRunner):
+             set_graph_params(capture_sizes)
+             if self.speculative_config:
+                 set_draft_graph_params(capture_sizes)
++            split_cfg = getattr(self.ascend_config, "split_batch_config", None)
++            if split_cfg is not None and split_cfg.enabled:
++                parallel_sizes = (
++                    split_cfg.parallel_capture_sizes
++                    if split_cfg.parallel_capture_sizes is not None
++                    else capture_sizes
++                )
++                self.cudagraph_batch_sizes_parallel = sorted(parallel_sizes)
++                set_graph_params_parallel(self.cudagraph_batch_sizes_parallel)
+ 
+     def profile_cudagraph_memory(self) -> int:
+         parent_module_name = _get_gpu_model_runner_module_name(self)
+@@ -5085,6 +5364,21 @@ class NPUModelRunner(GPUModelRunner):
+         if mgr is not None and hasattr(self, "update_stream"):
+             mgr.update_stream = self.update_stream
+ 
++        split_cfg = getattr(self.ascend_config, "split_batch_config", None)
++        if (split_cfg is not None
++                and split_cfg.enabled
++                and split_cfg.enable_parallel_streams
++                and self.use_aclgraph):
++            from vllm_ascend.compilation.acl_graph import ACLGraphWrapper
++            if isinstance(self.model, ACLGraphWrapper):
++                from vllm.compilation.monitor import set_cudagraph_capturing_enabled
++                set_cudagraph_capturing_enabled(True)
++                try:
++                    with graph_capture(device=self.device):
++                        self._inplace_split_runner.capture_parallel_stream_graphs()
++                finally:
++                    set_cudagraph_capturing_enabled(False)
++
+         return cuda_graph_size
+ 
+     def _prepare_multimodal_fields(self):
+-- 
+2.53.0.windows.3
+

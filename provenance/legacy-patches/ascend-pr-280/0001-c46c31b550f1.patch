@@ -1,0 +1,1336 @@
+From c46c31b550f1d3cd7f4694d1405054e6d4726a11 Mon Sep 17 00:00:00 2001
+From: Raing5Days <M202574102@hust.edu.cn>
+Date: Sun, 30 Aug 2026 15:49:49 +0000
+Subject: [PATCH] feat(ascend): split-batch scaffolding - config, envs,
+ platform key strategy, plumbing
+
+Adds the default-off SplitBatchConfig (additional_config.split_batch_config),
+inplace-parallel env knobs, the fail-closed cudagraph runtime-key admission
+strategy (get_cudagraph_key_strategy), forward-context metadata plumbing,
+dual-slot rotary cos/sin buffers, split-batch debug/diagnostics modules, and
+the split-batch feature guide.
+
+No behavior change unless split_batch_config.enabled is set.
+
+Requires vllm-hust >= 13f11da444 (#273: BatchDescriptor.runtime_metadata +
+Platform.get_cudagraph_key_strategy contract).
+---
+ docs/source/user_guide/feature_guide/index.md |   1 +
+ .../user_guide/feature_guide/split_batch.md   | 122 ++++++++++++
+ vllm_ascend/ascend_config.py                  | 168 +++++++++++++++++
+ vllm_ascend/ascend_forward_context.py         | 173 +++++++++++++++++
+ vllm_ascend/attention/utils.py                | 171 +++++++++++++++++
+ .../compilation/acl_graph_diagnostics.py      | 174 ++++++++++++++++++
+ vllm_ascend/envs.py                           |  34 ++++
+ vllm_ascend/inplace_split_debug.py            | 123 +++++++++++++
+ vllm_ascend/ops/fused_moe/moe_runtime_args.py |   5 +-
+ vllm_ascend/ops/rotary_embedding.py           |  69 ++++---
+ vllm_ascend/platform.py                       |  48 +++++
+ 11 files changed, 1059 insertions(+), 29 deletions(-)
+ create mode 100644 docs/source/user_guide/feature_guide/split_batch.md
+ create mode 100644 vllm_ascend/compilation/acl_graph_diagnostics.py
+ create mode 100644 vllm_ascend/inplace_split_debug.py
+
+diff --git a/docs/source/user_guide/feature_guide/index.md b/docs/source/user_guide/feature_guide/index.md
+index 5ac97b5591..68bd368424 100644
+--- a/docs/source/user_guide/feature_guide/index.md
++++ b/docs/source/user_guide/feature_guide/index.md
+@@ -33,4 +33,5 @@ lmcache_ascend_deployment
+ dynamic_chunk_pipeline_parallel
+ flash_attention
+ layered_prefill
++split_batch
+ :::
+diff --git a/docs/source/user_guide/feature_guide/split_batch.md b/docs/source/user_guide/feature_guide/split_batch.md
+new file mode 100644
+index 0000000000..eae6c5f1b6
+--- /dev/null
++++ b/docs/source/user_guide/feature_guide/split_batch.md
+@@ -0,0 +1,122 @@
++# Split-Batch (Dual-Stream) Execution
++
++## Overview
++
++Split-batch (internally: `DUAL_INPLACE`) is an **experimental, opt-in** decode
++optimization for Ascend NPU. When a decode batch meets the admission conditions,
++the engine splits it into two halves and executes them back-to-back instead of
++running the padded batch as one unit:
++
++- `inplace_serial` — replays two exact-size graphs sequentially, avoiding the
++  padding overhead of one large graph.
++- `inplace_parallel` — additionally runs the two halves on two NPU streams
++  (a main stream and a parallel stream) so their compute overlaps.
++- `dual_pad` — pads both halves to capture sizes and dispatches dual-padded
++  graphs, trading some padding for graph reuse.
++
++The feature is fully gated: without `additional_config["split_batch_config"]`
++nothing changes relative to the default single-stream path.
++
++## Getting Started
++
++Enable it through `additional_config`:
++
++```python
++from vllm import LLM
++
++llm = LLM(
++    model="Qwen/Qwen3-0.6B",
++    additional_config={
++        "split_batch_config": {
++            "enabled": True,
++            "mode": "inplace_parallel",
++            "num_splits": 2,
++            "enable_parallel_streams": True,
++        },
++    },
++    compilation_config={
++        "cudagraph_mode": "FULL",
++        "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32, 64],
++    },
++)
++```
++
++A runnable example with graph capture sizes is available at
++`examples/dual_inplace_parallel.py`.
++
++## Admission Conditions
++
++A batch is only split when **all** of the following hold (otherwise the engine
++silently falls back to the normal path):
++
++- `enabled` is `True` and `mode` is one of the split modes.
++- The batch is a uniform decode batch (`inplace_parallel`/`inplace_serial`);
++  non-uniform or speculative-decoding batches additionally require
++  `enable_inplace_spec_decode`.
++- `cudagraph_mode` is `FULL` or `PIECEWISE`.
++- No LoRA adapters and no MLA models are active.
++- MRoPE models require `enable_inplace_mrope`.
++- The number of scheduled requests is at least `min_batch_size_for_split`.
++- `inplace_parallel` additionally requires `enable_parallel_streams`.
++
++## Configuration Reference
++
++`additional_config["split_batch_config"]` accepts the following keys:
++
++| Key | Type / Default | Description |
++| --- | --- | --- |
++| `enabled` | `bool`, `False` | Master switch. |
++| `mode` | `str`, `"parallel_buffer"` | `parallel_buffer` (inert default, never splits), `inplace_serial`, `inplace_parallel`, `dual_pad`. |
++| `num_splits` | `int`, `2` | Number of sub-batches; must be `2` for the inplace/dual-pad modes. |
++| `enable_parallel_streams` | `bool`, `False` | Run the two halves on two NPU streams (required by `inplace_parallel`). |
++| `min_batch_size_for_split` | `int`, `4` | Smallest batch size eligible for splitting. |
++| `force_split` | `bool`, `False` | Bypass some planner heuristics for testing. |
++| `cudagraph_split_pad_threshold` | `int`, `0` | Minimum saved padding required before `dual_pad` actually splits. |
++| `enable_inplace_lazy_capture` | `bool`, `True` | Allow offset graphs to be captured lazily at first replay. |
++| `inplace_parallel_replay_policy` | `str`, `"full_graph_parallel"` | `full_graph_parallel` or `piecewise_attention_parallel` (requires `PIECEWISE` cudagraph mode). |
++| `inplace_split_planner_policy` | `str`, `"largest_lower"` | How the planner assigns requests to halves: `largest_lower` or `balanced`. |
++| `inplace_offset_match_policy` | `str`, `"exact"` | Offset-graph key matching: `exact` or `bucket`. |
++| `inplace_offset_capture_sizes` | `list[int]`, `None` | Explicit size list for offset graphs (auto-derived when unset). |
++| `parallel_capture_sizes` | `list[int]`, `None` | Explicit size list for parallel-pool graphs (auto-derived when unset). |
++| `inplace_offset_min_graph_tokens` | `int`, `1` | Lower bound for offset graph sizes. |
++| `inplace_offset_max_padding_tokens` | `int`, `None` | Cap on padding tokens accepted for an offset graph. |
++| `inplace_offset_max_padding_ratio` | `float`, `None` | Cap on padding ratio accepted for an offset graph. |
++| `inplace_offset_max_graph_tokens_by_start` | `dict[int, int]`, `None` | Per-start-position graph size caps. |
++| `inplace_offset_allowed_graph_tokens_by_start` | `dict[int, list[int]]`, `None` | Per-start-position allowed size lists. |
++| `inplace_max_remainder_tokens` | `int`, `None` | Cap on remainder tokens after splitting. |
++| `enable_inplace_spec_decode` | `bool`, `False` | Opt-in for speculative-decoding / mixed batches. |
++| `enable_inplace_mrope` | `bool`, `False` | Opt-in for MRoPE models. |
++| `inplace_validate_metadata_ptrs` | `bool`, `False` | Debug validation of metadata pointers per step. |
++| `unified_capture_sizes` | `list[int]`, `[]` | Size list for the unified exact-size row graph (P11); also requires `VLLM_ASCEND_DUAL_UNIFIED_GEMM=1`. |
++
++## Environment Variables
++
++| Variable | Default | Description |
++| --- | --- | --- |
++| `VLLM_ASCEND_INPLACE_PARALLEL_MERGE_SYNC_POLICY` | `event_wait` | How split outputs are merged: `event_wait` (lightweight NPU events) or `host_sync` (full device sync). |
++| `VLLM_ASCEND_INPLACE_PARALLEL_SPLIT_OUTPUT_MODE` | `auto` | Whether split outputs are cloned before merging: `auto`, `clone`, or `direct`. |
++| `VLLM_ASCEND_INPLACE_PARALLEL_REUSE_SPLIT0_COS_SIN` | `1` | Reuse split-0 cos/sin buffers in split-1 for rotary embedding. |
++| `VLLM_ASCEND_INPLACE_PARALLEL_REPLAY_STREAM_LIMITS` | `None` | Replay stream cube/vector limits, format `"main_cube,main_vector:parallel_cube,parallel_vector"`. |
++| `VLLM_ASCEND_INPLACE_PARALLEL_UPDATE_STREAM_LIMITS` | `None` | Same format, for the update stream. |
++| `VLLM_ASCEND_DUAL_UNIFIED_GEMM` | `0` | Set to `1` to enable the unified exact-size row graph (together with `unified_capture_sizes`). |
++| `VLLM_ASCEND_SPLIT_INPLACE_DEBUG` | `0` | Set to `1` to emit the JSONL split-batch event log (see Debugging). |
++| `VLLM_ASCEND_SPLIT_INPLACE_DEBUG_FILE` | None | Output path for the JSONL event log. |
++
++## Debugging
++
++Set `VLLM_ASCEND_SPLIT_INPLACE_DEBUG=1` (and optionally
++`VLLM_ASCEND_SPLIT_INPLACE_DEBUG_FILE=<path>`) to record a per-step JSONL
++event log with split decisions, planner plans, and replay outcomes. The
++engine also logs one startup line
++(`DUAL_INPLACE check: enabled=..., mode=..., cudagraph_mode=...`) confirming
++whether the feature is active.
++
++## Limitations
++
++- Experimental: the default path is unchanged, but enabling the feature changes
++  scheduling and graph-capture behavior; validate outputs and performance for
++  your model and workload before production use.
++- Rotary-embedding cos/sin buffers are double-allocated at startup to support
++  two streams (one extra `max_num_batched_tokens x rope_dim` buffer pair).
++- LoRA and MLA are not supported; MRoPE and speculative decoding require their
++  explicit opt-in keys.
+diff --git a/vllm_ascend/ascend_config.py b/vllm_ascend/ascend_config.py
+index ecbe7d9b3a..95b4b9921f 100644
+--- a/vllm_ascend/ascend_config.py
++++ b/vllm_ascend/ascend_config.py
+@@ -403,6 +403,9 @@ class AscendConfig:
+         rejection_sampler_config = additional_config.get("rejection_sampler_config", {})
+         self.rejection_sampler_config = RejectionSamplerConfig(rejection_sampler_config)
+ 
++        split_batch_config = additional_config.get("split_batch_config", {})
++        self.split_batch_config = SplitBatchConfig(split_batch_config)
++
+     def get_utility_selector_config_dict(self) -> dict[str, Any]:
+         return {
+             "enable_utility_victim_selection": self.enable_utility_victim_selection,
+@@ -999,3 +1002,168 @@ def get_ascend_config():
+     if _ASCEND_CONFIG is None or not _is_ascend_config_initialized(_ASCEND_CONFIG):
+         raise RuntimeError("Ascend config is not initialized. Please call init_ascend_config first.")
+     return _ASCEND_CONFIG
++
++
++class SplitBatchConfig:
++    """Configuration for DUAL_INPLACE split-batch mode.
++
++    Parsed from ``additional_config.split_batch_config``.
++    """
++
++    def __init__(self, split_batch_config: dict | None = None):
++        if split_batch_config is None:
++            split_batch_config = {}
++        self.enabled: bool = bool(split_batch_config.get("enabled", False))
++        self.enable_parallel_streams: bool = bool(
++            split_batch_config.get("enable_parallel_streams", False)
++        )
++        self.mode: str = str(split_batch_config.get("mode", "parallel_buffer"))
++        self.num_splits: int = int(split_batch_config.get("num_splits", 2))
++        self.min_batch_size_for_split: int = int(
++            split_batch_config.get("min_batch_size_for_split", 4)
++        )
++
++        raw_parallel_sizes = split_batch_config.get("parallel_capture_sizes", None)
++        if raw_parallel_sizes is not None:
++            self.parallel_capture_sizes: list[int] = sorted(int(s) for s in raw_parallel_sizes)
++        else:
++            self.parallel_capture_sizes = None
++
++        self.enable_inplace_lazy_capture: bool = bool(
++            split_batch_config.get("enable_inplace_lazy_capture", True)
++        )
++
++        self.inplace_parallel_replay_policy: str = str(
++            split_batch_config.get("inplace_parallel_replay_policy", "full_graph_parallel")
++        )
++
++        self.inplace_validate_metadata_ptrs: bool = bool(
++            split_batch_config.get("inplace_validate_metadata_ptrs", False)
++        )
++        self.force_split: bool = bool(
++            split_batch_config.get("force_split", False)
++        )
++
++        # DUAL_PAD (dual-pad) mode: minimum padding saved (without split vs
++        # with split) required to actually split the batch. Mirrors the
++        # reference implementation's `cudagraph_split_pad_threshold` (which is
++        # not present in vllm-hust's CompilationConfig), so it lives here.
++        self.cudagraph_split_pad_threshold: int = int(
++            split_batch_config.get("cudagraph_split_pad_threshold", 0)
++        )
++        self.inplace_force_pa_for_offset: bool = bool(
++            split_batch_config.get("inplace_force_pa_for_offset", False)
++        )
++        self.enable_inplace_spec_decode: bool = bool(
++            split_batch_config.get("enable_inplace_spec_decode", False)
++        )
++        self.enable_inplace_mrope: bool = bool(
++            split_batch_config.get("enable_inplace_mrope", False)
++        )
++        self.inplace_split_planner_policy: str = str(
++            split_batch_config.get("inplace_split_planner_policy",
++                                   split_batch_config.get("inplace_split_first_tokens_policy", "largest_lower"))
++        )
++        self.inplace_offset_match_policy: str = str(
++            split_batch_config.get("inplace_offset_match_policy", "exact")
++        )
++
++        raw_offset_capture_sizes = split_batch_config.get("inplace_offset_capture_sizes", None)
++        if raw_offset_capture_sizes is not None:
++            self.inplace_offset_capture_sizes: list[int] | None = sorted(
++                int(s) for s in raw_offset_capture_sizes
++            )
++        else:
++            self.inplace_offset_capture_sizes = None
++
++        self.inplace_offset_min_graph_tokens: int = int(
++            split_batch_config.get("inplace_offset_min_graph_tokens", 1)
++        )
++
++        raw_max_pad_tokens = split_batch_config.get("inplace_offset_max_padding_tokens", None)
++        self.inplace_offset_max_padding_tokens: int | None = (
++            int(raw_max_pad_tokens) if raw_max_pad_tokens is not None else None
++        )
++
++        raw_max_pad_ratio = split_batch_config.get("inplace_offset_max_padding_ratio", None)
++        self.inplace_offset_max_padding_ratio: float | None = (
++            float(raw_max_pad_ratio) if raw_max_pad_ratio is not None else None
++        )
++
++        raw_max_graph_by_start = split_batch_config.get(
++            "inplace_offset_max_graph_tokens_by_start", None
++        )
++        if raw_max_graph_by_start is not None:
++            self.inplace_offset_max_graph_tokens_by_start: dict[int, int] | None = {
++                int(k): int(v) for k, v in raw_max_graph_by_start.items()
++            }
++        else:
++            self.inplace_offset_max_graph_tokens_by_start = None
++
++        raw_allowed_by_start = split_batch_config.get(
++            "inplace_offset_allowed_graph_tokens_by_start", None
++        )
++        if raw_allowed_by_start is not None:
++            self.inplace_offset_allowed_graph_tokens_by_start: dict[int, list[int]] | None = {
++                int(k): [int(v) for v in vs] for k, vs in raw_allowed_by_start.items()
++            }
++        else:
++            self.inplace_offset_allowed_graph_tokens_by_start = None
++
++        raw_max_remainder = split_batch_config.get("inplace_max_remainder_tokens", None)
++        self.inplace_max_remainder_tokens: int | None = (
++            int(raw_max_remainder) if raw_max_remainder is not None else None
++        )
++
++        # P11 unified-row-graph gate (default OFF). Requires BOTH the env
++        # switch and a non-empty declared size list; converts a would-be
++        # dual_pad decision into one main-pool graph captured at the exact
++        # batch token count (see plan-0826g M2).
++        self.enable_unified_gemm: bool = os.environ.get(
++            "VLLM_ASCEND_DUAL_UNIFIED_GEMM", "0"
++        ) in ("1", "true", "True")
++        raw_unified_sizes = split_batch_config.get("unified_capture_sizes", None)
++        if raw_unified_sizes is not None:
++            self.unified_capture_sizes: list[int] = sorted(
++                int(s) for s in raw_unified_sizes
++            )
++        else:
++            self.unified_capture_sizes = []
++
++        self._validate()
++
++    def _validate(self):
++        valid_modes = ("parallel_buffer", "inplace_serial", "inplace_parallel", "dual_pad")
++        if self.mode not in valid_modes:
++            raise ValueError(
++                f"split_batch_config.mode must be one of {valid_modes}, got '{self.mode}'"
++            )
++        if self.mode in ("inplace_serial", "inplace_parallel", "dual_pad") and self.num_splits != 2:
++            raise ValueError(
++                f"split_batch_config.num_splits must be 2 for inplace/dual_pad modes, got {self.num_splits}"
++            )
++        valid_offset_policies = ("exact", "bucket")
++        if self.inplace_offset_match_policy not in valid_offset_policies:
++            raise ValueError(
++                f"split_batch_config.inplace_offset_match_policy must be one of "
++                f"{valid_offset_policies}, got '{self.inplace_offset_match_policy}'"
++            )
++        valid_replay_policies = ("full_graph_parallel", "piecewise_attention_parallel")
++        if self.inplace_parallel_replay_policy not in valid_replay_policies:
++            raise ValueError(
++                f"split_batch_config.inplace_parallel_replay_policy must be one of "
++                f"{valid_replay_policies}, got '{self.inplace_parallel_replay_policy}'"
++            )
++
++        if (self.inplace_parallel_replay_policy == "piecewise_attention_parallel"
++                and self.mode == "inplace_parallel"):
++            logger.info(
++                "piecewise_attention_parallel enabled; ensure cudagraph_mode "
++                "is set to PIECEWISE at runtime")
++        valid_planner_policies = ("largest_lower", "balanced")
++        if self.inplace_split_planner_policy not in valid_planner_policies:
++            raise ValueError(
++                f"split_batch_config.inplace_split_planner_policy must be one of "
++                f"{valid_planner_policies}, got '{self.inplace_split_planner_policy}'"
++            )
++
+diff --git a/vllm_ascend/ascend_forward_context.py b/vllm_ascend/ascend_forward_context.py
+index bb577b5315..be80a35f45 100644
+--- a/vllm_ascend/ascend_forward_context.py
++++ b/vllm_ascend/ascend_forward_context.py
+@@ -74,6 +74,15 @@ def set_ascend_forward_context(
+     has_sinks=False,
+     input_ids=None,
+     eplb_heat_collection_status: bool = False,
++    split_inplace_mode: str | None = None,
++    in_parallel_streams: bool = False,
++    allow_inplace_lazy_capture: bool = False,
++    validate_inplace_metadata_ptrs: bool = False,
++    cos_sin_slot_id: int = 0,
++    ubatch_num: int = 0,
++    forced_attention_backend: str = "",
++    split_actual_num_tokens: int | None = None,
++    split_graph_num_tokens: int | None = None,
+ ):
+     """A context manager that stores the current forward context,
+     can be attention metadata, etc.
+@@ -87,6 +96,9 @@ def set_ascend_forward_context(
+         "cudagraph_runtime_mode": aclgraph_runtime_mode,
+         "batch_descriptor": batch_descriptor,
+         "skip_compiled": skip_compiled,
++        "split_inplace_mode": split_inplace_mode,
++        "in_parallel_streams": in_parallel_streams,
++        "allow_inplace_lazy_capture": allow_inplace_lazy_capture,
+     }
+     with set_forward_context(**forward_context_kwargs):
+         forward_context = get_forward_context()
+@@ -160,6 +172,13 @@ def set_ascend_forward_context(
+         forward_context.is_draft_model = is_draft_model
+         forward_context.is_draft_model_prefill = False
+ 
++        forward_context.validate_inplace_metadata_ptrs = validate_inplace_metadata_ptrs
++        forward_context.cos_sin_slot_id = cos_sin_slot_id
++        forward_context.ubatch_num = ubatch_num
++        forward_context.forced_attention_backend = forced_attention_backend
++        forward_context.split_actual_num_tokens = split_actual_num_tokens
++        forward_context.split_graph_num_tokens = split_graph_num_tokens
++
+         if num_tokens is None and attn_metadata is not None:
+             num_tokens = attn_metadata.num_actual_tokens
+ 
+@@ -197,6 +216,153 @@ def set_ascend_forward_context(
+             pass
+ 
+ 
++
++def create_ascend_forward_context(
++    cur_forward_context: Any,
++    attn_metadata: Any,
++    vllm_config: VllmConfig,
++    virtual_engine: int = 0,
++    dp_metadata: Any = None,
++    cudagraph_runtime_mode: CUDAGraphMode = CUDAGraphMode.NONE,
++    batch_descriptor: BatchDescriptor | None = None,
++    ubatch_slices: Any = None,
++    ubatch_num: int = 0,
++    positions: Any = None,
++    in_parallel_streams: bool = False,
++    cos_sin_slot_id: int = 0,
++    reuse_existing_cos_sin: bool = False,
++    clone_cos_sin: bool = True,
++) -> Any:
++    from vllm.forward_context import ForwardContext
++
++    new_forward_context = ForwardContext(
++        no_compile_layers=vllm_config.compilation_config.static_forward_context,
++        attn_metadata=attn_metadata,
++        slot_mapping={},
++        dp_metadata=dp_metadata,
++        cudagraph_runtime_mode=cudagraph_runtime_mode,
++        batch_descriptor=batch_descriptor,
++        ubatch_slices=ubatch_slices,
++        in_parallel_streams=in_parallel_streams,
++    )
++
++    if attn_metadata is not None:
++        if isinstance(attn_metadata, dict):
++            attn_meta_i = next(iter(attn_metadata.values()))
++        else:
++            attn_meta_i = attn_metadata
++        new_forward_context.num_tokens = getattr(attn_meta_i, "num_actual_tokens", 0)
++
++    tp_world_size = get_tensor_model_parallel_world_size()
++    dp_world_size = get_dp_group().world_size
++
++    new_forward_context.moe_comm_type = getattr(cur_forward_context, "moe_comm_type", None)
++    from vllm_ascend.ops.fused_moe.moe_comm_method import get_moe_comm_method
++    try:
++        new_forward_context.moe_comm_method = get_moe_comm_method(
++            new_forward_context.moe_comm_type, ubatch_num)
++    except TypeError:
++        new_forward_context.moe_comm_method = get_moe_comm_method(
++            new_forward_context.moe_comm_type)
++    new_forward_context.sp_enabled = getattr(cur_forward_context, "sp_enabled", False)
++    new_forward_context.with_prefill = getattr(cur_forward_context, "with_prefill", True)
++    new_forward_context.in_profile_run = getattr(cur_forward_context, "in_profile_run", False)
++    new_forward_context.capturing = False
++    new_forward_context.mmrs_fusion = getattr(cur_forward_context, "mmrs_fusion", False)
++    new_forward_context.flash_comm_v1_enabled = getattr(cur_forward_context, "flash_comm_v1_enabled", False)
++    new_forward_context.flashcomm_v2_enabled = getattr(cur_forward_context, "flashcomm_v2_enabled", False)
++    new_forward_context.pad_size = 0
++    new_forward_context.is_first_layer = True
++    new_forward_context.layer_idx = getattr(cur_forward_context, "layer_idx", None)
++    new_forward_context.model_instance = getattr(cur_forward_context, "model_instance", None)
++    new_forward_context.is_draft_model = getattr(cur_forward_context, "is_draft_model", False)
++    new_forward_context.is_draft_model_prefill = False
++    new_forward_context.prefetch_mlp_enabled = getattr(cur_forward_context, "prefetch_mlp_enabled", False)
++    new_forward_context.weight_prefetch_method = getattr(cur_forward_context, "weight_prefetch_method", None)
++    new_forward_context.is_mtp_model = getattr(cur_forward_context, "is_mtp_model", False)
++    new_forward_context.dbo_enabled = True
++    new_forward_context.dbo_first_layer_sync = True
++    new_forward_context.prefetch_mlp_gate_up_proj = False
++    new_forward_context.prefetch_mlp_down_proj = False
++
++    new_forward_context.cos_sin_slot_id = cos_sin_slot_id
++    new_forward_context.ubatch_num = ubatch_num
++
++    num_tokens = new_forward_context.num_tokens or 0
++    if num_tokens:
++        new_forward_context.padded_num_tokens = math.ceil(
++            (getattr(cur_forward_context, "max_tokens_across_dp", num_tokens) or num_tokens) / tp_world_size
++        ) * tp_world_size
++
++    if dp_world_size > 1 and dp_metadata is not None:
++        max_tokens_across_dp = dp_metadata.max_tokens_across_dp_cpu.item()
++        new_forward_context.max_tokens_across_dp = max_tokens_across_dp
++    else:
++        new_forward_context.max_tokens_across_dp = num_tokens
++
++    from vllm_ascend.ops.rotary_embedding import update_cos_sin, get_cos_and_sin_slice, get_cos_and_sin_mla
++    if ubatch_slices and ubatch_slices[ubatch_num]:
++        from vllm_ascend.attention.utils import slice_positions_by_token
++        token_slice = ubatch_slices[ubatch_num].token_slice
++        if positions is not None:
++            positions = slice_positions_by_token(positions, token_slice)
++        num_speculative_tokens = (
++            vllm_config.speculative_config.num_speculative_tokens
++            if vllm_config.speculative_config else 0)
++        decode_token_per_req = 1 + num_speculative_tokens
++        mla_slice = slice(
++            ubatch_slices[ubatch_num].request_slice.start *
++            decode_token_per_req,
++            ubatch_slices[ubatch_num].request_slice.stop *
++            decode_token_per_req)
++        cos_slice = None
++        sin_slice = None
++        if (reuse_existing_cos_sin and cos_sin_slot_id == 0
++                and token_slice.start == 0
++                and isinstance(positions, torch.Tensor)
++                and positions.ndim == 1):
++            cos_slice, sin_slice = get_cos_and_sin_slice(
++                slot_id=cos_sin_slot_id)
++            num_tokens = int(positions.size(0))
++            if (cos_slice is not None and sin_slice is not None
++                    and int(cos_slice.shape[1]) >= num_tokens
++                    and int(sin_slice.shape[1]) >= num_tokens):
++                cos_slice = cos_slice[:, :num_tokens]
++                sin_slice = sin_slice[:, :num_tokens]
++            else:
++                cos_slice = None
++                sin_slice = None
++        if cos_slice is None or sin_slice is None:
++            if positions is not None:
++                update_cos_sin(positions, slot_id=cos_sin_slot_id)
++            cos_slice, sin_slice = get_cos_and_sin_slice(slot_id=cos_sin_slot_id)
++        if clone_cos_sin:
++            new_forward_context.cos = cos_slice.clone()
++            new_forward_context.sin = sin_slice.clone()
++        else:
++            new_forward_context.cos = cos_slice
++            new_forward_context.sin = sin_slice
++
++        cos_mla, sin_mla = get_cos_and_sin_mla()
++
++        new_forward_context.cos_mla = cos_mla[
++            mla_slice] if cos_mla is not None else None
++
++        new_forward_context.sin_mla = sin_mla[
++            mla_slice] if sin_mla is not None else None
++    elif positions is not None:
++        update_cos_sin(positions, slot_id=cos_sin_slot_id)
++        cos_slice, sin_slice = get_cos_and_sin_slice(slot_id=cos_sin_slot_id)
++        if clone_cos_sin:
++            new_forward_context.cos = cos_slice.clone()
++            new_forward_context.sin = sin_slice.clone()
++        else:
++            new_forward_context.cos = cos_slice
++            new_forward_context.sin = sin_slice
++
++    return new_forward_context
++
++
+ _mc2_tokens_capacity: int | None = None
+ _reserved_mc2_mask: torch.Tensor | None = None
+ 
+@@ -365,8 +531,15 @@ class _ExtraForwardContextProxy:
+         "num_accept_tokens",
+         "in_profile_run",
+         "padded_num_tokens",
++
+         "sinks",
+         "eplb_heat_collection_status",
++        "validate_inplace_metadata_ptrs",
++        "cos_sin_slot_id",
++        "ubatch_num",
++        "forced_attention_backend",
++        "split_actual_num_tokens",
++        "split_graph_num_tokens",
+     )
+ 
+     def check_extra_attr(self, name: str):
+diff --git a/vllm_ascend/attention/utils.py b/vllm_ascend/attention/utils.py
+index e798e19424..3e7e7503eb 100644
+--- a/vllm_ascend/attention/utils.py
++++ b/vllm_ascend/attention/utils.py
+@@ -222,6 +222,10 @@ class AscendCommonAttentionMetadata(CommonAttentionMetadata):
+     # Current attention state (e.g., ChunkedPrefill, DecodeOnly).
+     attn_state: Any = None
+ 
++    attn_mask: torch.Tensor = None
++
++    spec_attn_mask: torch.Tensor = None
++
+     # Padding size for graph capture, -1 means not in graph mode.
+     graph_pad_size: int = -1
+ 
+@@ -260,6 +264,8 @@ class AscendCommonAttentionMetadata(CommonAttentionMetadata):
+             positions=self.positions,
+             positions_cpu=self.positions_cpu,
+             attn_state=self.attn_state,
++            attn_mask=self.attn_mask,
++            spec_attn_mask=self.spec_attn_mask,
+             graph_pad_size=-1,  # It should be -1 when not run in fullgraph mode.
+             num_input_tokens=self.num_input_tokens,
+             prefill_context_parallel_metadata=self.prefill_context_parallel_metadata,
+@@ -477,3 +483,168 @@ def enabling_mlapo(vllm_config: VllmConfig) -> bool:
+         and not vllm_config.kv_transfer_config.is_kv_producer
+     )
+     return bool(config_val and is_decode_instance)
++
++
++def slice_positions_by_token(positions: torch.Tensor,
++                             token_slice: slice) -> torch.Tensor:
++    if positions.ndim == 2:
++        return positions[:, token_slice]
++    return positions[token_slice]
++
++
++def slice_query_start_locs(
++    query_start_loc: torch.Tensor,
++    request_slice: slice,
++) -> torch.Tensor:
++    return query_start_loc[request_slice.start: request_slice.stop + 1] -\
++        query_start_loc[request_slice.start]
++
++
++def _make_metadata_with_slice(
++        ubatch_slice,
++        attn_metadata: AscendCommonAttentionMetadata,
++        max_num_tokens: int = 0) -> AscendCommonAttentionMetadata:
++    from vllm.v1.worker.ubatch_utils import UBatchSlice
++    from vllm_ascend.inplace_split_debug import is_enabled as split_debug_enabled
++    from vllm_ascend.inplace_split_debug import log_event as split_debug_log_event
++
++    assert not ubatch_slice.is_empty(), (
++        f"Ubatch slice {ubatch_slice} is empty")
++
++    request_slice = ubatch_slice.request_slice
++    token_slice = ubatch_slice.token_slice
++
++    start_locs = attn_metadata.query_start_loc_cpu
++    first_req = request_slice.start
++    first_tok = token_slice.start
++    last_req = request_slice.stop - 1
++    last_tok = token_slice.stop - 1
++
++    assert start_locs[first_req] <= first_tok < start_locs[first_req + 1], \
++        "Token slice start outside of first request"
++    assert start_locs[last_req] <= last_tok < start_locs[last_req+1], \
++        "Token slice end outside of last request"
++
++    splits_first_request = first_tok > start_locs[first_req]
++    splits_last_request = last_tok < start_locs[last_req + 1] - 1
++
++    query_start_loc_cpu = slice_query_start_locs(start_locs, request_slice)
++    query_start_loc = slice_query_start_locs(attn_metadata.query_start_loc,
++                                             request_slice)
++
++    assert len(query_start_loc) >= 2, (
++        f"query_start_loc must have at least 2 elements, "
++        f"got {len(query_start_loc)}")
++
++    if splits_first_request:
++        tokens_skipped = first_tok - start_locs[first_req]
++        query_start_loc[1:] -= tokens_skipped
++        query_start_loc_cpu[1:] -= tokens_skipped
++
++    seq_lens = attn_metadata.seq_lens[request_slice]
++    seq_lens_cpu = attn_metadata.seq_lens_cpu[request_slice]
++
++    if splits_last_request:
++        tokens_skipped = query_start_loc_cpu[-1] - token_slice.stop
++        query_start_loc[-1] -= tokens_skipped
++        query_start_loc_cpu[-1] -= tokens_skipped
++
++        seq_lens = seq_lens.clone()
++        seq_lens_cpu = seq_lens_cpu.clone()
++        seq_lens[-1] -= tokens_skipped
++        seq_lens_cpu[-1] -= tokens_skipped
++
++    num_computed_tokens_cpu = attn_metadata.num_computed_tokens_cpu[
++        request_slice]
++
++    num_requests = request_slice.stop - request_slice.start
++    num_actual_tokens = token_slice.stop - token_slice.start
++    max_query_len = int(
++        torch.max(torch.abs(query_start_loc_cpu[1:] -
++                            query_start_loc_cpu[:-1])).item())
++
++    if max_query_len == 0:
++        max_query_len = attn_metadata.max_query_len
++
++    block_table_tensor = attn_metadata.block_table_tensor[request_slice]
++    slot_mapping = attn_metadata.slot_mapping[token_slice]
++
++    num_input_tokens = token_slice.stop - token_slice.start
++    positions = slice_positions_by_token(attn_metadata.positions, token_slice)
++    attn_state = attn_metadata.attn_state
++    attn_mask = getattr(attn_metadata, "attn_mask", None)
++    spec_attn_mask = getattr(attn_metadata, "spec_attn_mask", None)
++
++    if len(attn_metadata.actual_seq_lengths_q) > 0:
++        actual_seq_lengths_q = list(
++            range(attn_metadata.decode_token_per_req, max_num_tokens + 1,
++                  attn_metadata.decode_token_per_req))
++    else:
++        actual_seq_lengths_q = []
++
++    _seq_lens_cpu_val = getattr(attn_metadata, "_seq_lens_cpu", None)
++    if _seq_lens_cpu_val is not None:
++        _seq_lens_cpu_sliced = _seq_lens_cpu_val[request_slice]
++    else:
++        _seq_lens_cpu_sliced = None
++
++    return AscendCommonAttentionMetadata(
++        query_start_loc=query_start_loc,
++        query_start_loc_cpu=query_start_loc_cpu,
++        seq_lens=seq_lens,
++        seq_lens_cpu=seq_lens_cpu,
++        _seq_lens_cpu=_seq_lens_cpu_sliced,
++        num_reqs=num_requests,
++        num_actual_tokens=num_actual_tokens,
++        num_input_tokens=num_input_tokens,
++        actual_seq_lengths_q=actual_seq_lengths_q,
++        num_computed_tokens_cpu=num_computed_tokens_cpu,
++        max_query_len=max_query_len,
++        max_seq_len=attn_metadata.max_seq_len,
++        block_table_tensor=block_table_tensor,
++        slot_mapping=slot_mapping,
++        positions=positions,
++        attn_mask=attn_mask,
++        spec_attn_mask=spec_attn_mask,
++        attn_state=attn_state,
++        graph_pad_size=attn_metadata.graph_pad_size,
++        decode_token_per_req=attn_metadata.decode_token_per_req,
++        prefill_context_parallel_metadata=getattr(attn_metadata, "prefill_context_parallel_metadata", None),
++        causal=getattr(attn_metadata, "causal", True),
++    )
++
++
++def split_attn_metadata(
++    ubatch_slices,
++    common_attn_metadata: AscendCommonAttentionMetadata,
++    max_num_tokens: int = 0,
++) -> list[AscendCommonAttentionMetadata]:
++    from vllm_ascend.inplace_split_debug import is_enabled as split_debug_enabled
++    from vllm_ascend.inplace_split_debug import log_event as split_debug_log_event
++    from vllm_ascend.inplace_split_debug import slice_info as split_debug_slice_info
++    from vllm_ascend.inplace_split_debug import metadata_tensor_info as split_debug_metadata_tensor_info
++
++    results = []
++    for idx, ubatch_slice in enumerate(ubatch_slices):
++        metadata = _make_metadata_with_slice(ubatch_slice,
++                                             common_attn_metadata,
++                                             max_num_tokens)
++        results.append(metadata)
++        if split_debug_enabled():
++            split_debug_log_event(
++                "split_metadata",
++                {
++                    "idx": idx,
++                    "source": "split_attn_metadata",
++                    "request_slice":
++                    split_debug_slice_info(ubatch_slice.request_slice),
++                    "token_slice":
++                    split_debug_slice_info(ubatch_slice.token_slice),
++                    "num_tokens": int(metadata.num_actual_tokens),
++                    "padded_num_tokens": int(max_num_tokens),
++                    "num_reqs": int(metadata.num_reqs),
++                    **split_debug_metadata_tensor_info(metadata),
++                },
++            )
++
++    return results
+diff --git a/vllm_ascend/compilation/acl_graph_diagnostics.py b/vllm_ascend/compilation/acl_graph_diagnostics.py
+new file mode 100644
+index 0000000000..0dca40e8e0
+--- /dev/null
++++ b/vllm_ascend/compilation/acl_graph_diagnostics.py
+@@ -0,0 +1,174 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++import dataclasses
++import inspect
++import os
++from typing import Any, Optional
++
++import torch
++
++_DIAG_LOG_PATH = os.environ.get("VLLM_ASCEND_SPLIT_DIAG_LOG", "")
++_diag_log_file = None
++SPLIT_INPLACE_DEBUG = os.environ.get("VLLM_ASCEND_SPLIT_INPLACE_DEBUG", "0") == "1"
++
++
++def diag_log(msg: str):
++    global _diag_log_file
++    if not _DIAG_LOG_PATH:
++        return
++    if _diag_log_file is None:
++        try:
++            _diag_log_file = open(_DIAG_LOG_PATH, "a")
++        except Exception:
++            return
++    _diag_log_file.write(msg + "\n")
++    _diag_log_file.flush()
++
++
++def safe_tensor_ptr(t: torch.Tensor) -> Optional[int]:
++    try:
++        return t.data_ptr()
++    except Exception:
++        return None
++
++
++def safe_tensor_shape(t: torch.Tensor) -> Optional[list[int]]:
++    try:
++        return list(t.shape)
++    except Exception:
++        return None
++
++
++def resolve_callable_arg_names(runnable) -> Optional[list[str]]:
++    try:
++        return list(inspect.signature(runnable).parameters.keys())
++    except Exception:
++        return None
++
++
++def resolve_callable_name(runnable) -> str:
++    if hasattr(runnable, "__qualname__"):
++        return str(getattr(runnable, "__qualname__"))
++    if hasattr(runnable, "__name__"):
++        return str(getattr(runnable, "__name__"))
++    return type(runnable).__name__
++
++
++def collect_tensor_arg_infos(
++    args: tuple[Any, ...],
++    arg_names: Optional[list[str]] = None,
++) -> tuple[list[int], list[dict[str, Any]]]:
++    addresses: list[int] = []
++    tensor_infos: list[dict[str, Any]] = []
++    for arg_index, arg in enumerate(args):
++        if not isinstance(arg, torch.Tensor):
++            continue
++        ptr = safe_tensor_ptr(arg)
++        if ptr is None:
++            ptr = -1
++        addresses.append(ptr)
++        tensor_infos.append({
++            "tensor_index": len(addresses) - 1,
++            "arg_index": arg_index,
++            "arg_name": (
++                arg_names[arg_index]
++                if arg_names is not None and arg_index < len(arg_names)
++                else None
++            ),
++            "shape": safe_tensor_shape(arg),
++            "dtype": str(arg.dtype),
++            "device": str(arg.device),
++            "stride": list(arg.stride()),
++            "is_contiguous": bool(arg.is_contiguous()),
++        })
++    return addresses, tensor_infos
++
++
++def collect_attn_metadata_tensor_infos(
++    attn_metadata: Any,
++    *,
++    max_tensors: int = 200,
++    max_depth: int = 8,
++) -> tuple[list[int], list[dict[str, Any]]]:
++    addresses: list[int] = []
++    tensor_infos: list[dict[str, Any]] = []
++    visited: set[int] = set()
++
++    def visit(value: Any, path: str, depth: int) -> None:
++        if len(addresses) >= max_tensors or depth > max_depth:
++            return
++        if isinstance(value, torch.Tensor):
++            ptr = safe_tensor_ptr(value)
++            if ptr is None:
++                ptr = -1
++            addresses.append(ptr)
++            tensor_infos.append({
++                "tensor_index": len(addresses) - 1,
++                "path": path,
++                "shape": safe_tensor_shape(value),
++                "dtype": str(value.dtype),
++                "device": str(value.device),
++                "stride": list(value.stride()),
++                "is_contiguous": bool(value.is_contiguous()),
++                "storage_offset": int(value.storage_offset()),
++            })
++            return
++
++        if value is None or isinstance(value, (str, bytes, int, float, bool)):
++            return
++        value_id = id(value)
++        if value_id in visited:
++            return
++        visited.add(value_id)
++
++        if isinstance(value, dict):
++            for key, child in value.items():
++                visit(child, f"{path}.{key}", depth + 1)
++            return
++        if isinstance(value, (list, tuple)):
++            for idx, child in enumerate(value):
++                visit(child, f"{path}[{idx}]", depth + 1)
++            return
++        if dataclasses.is_dataclass(value):
++            for fld in dataclasses.fields(value):
++                visit(getattr(value, fld.name, None),
++                      f"{path}.{fld.name}", depth + 1)
++            return
++
++        attrs = getattr(value, "__dict__", None)
++        if isinstance(attrs, dict):
++            for name, child in attrs.items():
++                if name.startswith("__"):
++                    continue
++                visit(child, f"{path}.{name}", depth + 1)
++
++    visit(attn_metadata, "attn_metadata", 0)
++    return addresses, tensor_infos
++
++
++def should_validate_inplace_metadata_ptrs(forward_context: Any) -> bool:
++    return bool(getattr(forward_context, "validate_inplace_metadata_ptrs",
++                        False))
++
++
++def validate_input_addresses(
++    entry_input_addresses: list[int] | None,
++    current_args: tuple[Any, ...],
++    runnable_name: str,
++) -> None:
++    if entry_input_addresses is None:
++        return
++    new_input_addresses = [x.data_ptr() for x in current_args if isinstance(x, torch.Tensor)]
++    if new_input_addresses != entry_input_addresses:
++        assert entry_input_addresses is not None, (
++            "input_addresses not recorded during capture")
++        assert len(new_input_addresses) == len(entry_input_addresses), (
++            f"Input address count mismatch: expected "
++            f"{len(entry_input_addresses)}, got {len(new_input_addresses)}")
++        for i, (new_addr, cached_addr) in enumerate(
++                zip(new_input_addresses, entry_input_addresses)):
++            if new_addr != cached_addr:
++                raise AssertionError(
++                    f"Input address mismatch at index {i}: "
++                    f"expected {cached_addr:#x}, got {new_addr:#x}")
+\ No newline at end of file
+diff --git a/vllm_ascend/envs.py b/vllm_ascend/envs.py
+index 4bde5bf540..9d1d45775e 100644
+--- a/vllm_ascend/envs.py
++++ b/vllm_ascend/envs.py
+@@ -212,6 +212,40 @@ env_variables: dict[str, Callable[[], Any]] = {
+     # Maximum number of times a task can be deferred before being force-processed
+     # regardless of match status. Guards against starvation. Default 3.
+     "VLLM_ASCEND_SIMLLM_MAX_DEFERRALS": lambda: int(os.getenv("VLLM_ASCEND_SIMLLM_MAX_DEFERRALS", "3")),
++
++    # -- Inplace Parallel Split Batch ---------------------------------------
++    # Synchronization policy for merging split-batch results in inplace_parallel
++    # mode. "event_wait" (default) uses lightweight NPU events; "host_sync"
++    # performs full device synchronization.
++    "VLLM_ASCEND_INPLACE_PARALLEL_MERGE_SYNC_POLICY": lambda: os.getenv(
++        "VLLM_ASCEND_INPLACE_PARALLEL_MERGE_SYNC_POLICY", "event_wait"
++    ).strip().lower(),
++
++    # Controls whether split outputs are cloned before merging.
++    # "auto": skip clone when event_wait + FULL decode + 2 splits (default);
++    # "clone": always clone; "direct": never clone.
++    "VLLM_ASCEND_INPLACE_PARALLEL_SPLIT_OUTPUT_MODE": lambda: os.getenv(
++        "VLLM_ASCEND_INPLACE_PARALLEL_SPLIT_OUTPUT_MODE", "auto"
++    ).strip().lower(),
++
++    # Whether to reuse split-0 cos/sin in split-1 for rotary embedding.
++    # "1" (default) enables reuse, "0" disables.
++    "VLLM_ASCEND_INPLACE_PARALLEL_REUSE_SPLIT0_COS_SIN": lambda: os.getenv(
++        "VLLM_ASCEND_INPLACE_PARALLEL_REUSE_SPLIT0_COS_SIN", "1"
++    ) not in ("0", "false", "False"),
++
++    # Replay stream cube/vector limits for inplace parallel.
++    # Format: "main_cube,main_vector:parallel_cube,parallel_vector"
++    # Example: "8,16:8,16"
++    "VLLM_ASCEND_INPLACE_PARALLEL_REPLAY_STREAM_LIMITS": lambda: os.getenv(
++        "VLLM_ASCEND_INPLACE_PARALLEL_REPLAY_STREAM_LIMITS", None
++    ),
++
++    # Update stream cube/vector limits for inplace parallel.
++    # Same format as REPLAY_STREAM_LIMITS.
++    "VLLM_ASCEND_INPLACE_PARALLEL_UPDATE_STREAM_LIMITS": lambda: os.getenv(
++        "VLLM_ASCEND_INPLACE_PARALLEL_UPDATE_STREAM_LIMITS", None
++    ),
+ }
+ 
+ # end-env-vars-definition
+diff --git a/vllm_ascend/inplace_split_debug.py b/vllm_ascend/inplace_split_debug.py
+new file mode 100644
+index 0000000000..f517b568ee
+--- /dev/null
++++ b/vllm_ascend/inplace_split_debug.py
+@@ -0,0 +1,123 @@
++from __future__ import annotations
++
++import json
++import os
++import time
++from itertools import count
++from typing import Any
++
++_DEBUG_ENV = "VLLM_ASCEND_SPLIT_INPLACE_DEBUG"
++_DEBUG_FILE_ENV = "VLLM_ASCEND_SPLIT_INPLACE_DEBUG_FILE"
++_DEFAULT_DEBUG_FILE = "/tmp/vllm_ascend_inplace_split.jsonl"
++
++_step_counter = count(1)
++_current_step_id: int | None = None
++
++
++def _env_truthy(name: str) -> bool:
++    return bool(int(os.getenv(name, "0")))
++
++
++def is_enabled() -> bool:
++    return _env_truthy(_DEBUG_ENV)
++
++
++def next_step_id() -> int:
++    return next(_step_counter)
++
++
++def set_current_step_id(step_id: int) -> None:
++    global _current_step_id
++    _current_step_id = step_id
++
++
++def get_current_step_id() -> int | None:
++    return _current_step_id
++
++
++def log_event(
++    event: str,
++    payload: dict[str, Any] | None = None,
++    *,
++    step_id: int | None = None,
++) -> None:
++    if not is_enabled():
++        return
++    if step_id is None:
++        step_id = get_current_step_id()
++    debug_file = os.getenv(_DEBUG_FILE_ENV, _DEFAULT_DEBUG_FILE)
++    record: dict[str, Any] = {
++        "event": event,
++        "ts_ns": time.time_ns(),
++        "pid": os.getpid(),
++    }
++    if step_id is not None:
++        record["step_id"] = step_id
++    if payload is not None:
++        record["payload"] = payload
++    try:
++        with open(debug_file, "a", encoding="utf-8") as f:
++            f.write(json.dumps(record, default=str) + "\n")
++
++    except OSError:
++        pass
++
++
++def tensor_info(tensor: Any) -> dict[str, Any] | None:
++    import torch
++    if not isinstance(tensor, torch.Tensor):
++        return None
++    return {
++        "ptr": tensor.data_ptr(),
++        "shape": list(tensor.shape),
++        "ndim": tensor.ndim,
++        "dtype": str(tensor.dtype),
++        "stride": list(tensor.stride()),
++        "device": str(tensor.device),
++        "is_contiguous": tensor.is_contiguous(),
++    }
++
++
++def batch_descriptor_info(batch_descriptor: Any) -> Any:
++    if batch_descriptor is None:
++        return None
++    info: dict[str, Any] = {
++        "num_tokens": getattr(batch_descriptor, "num_tokens", None),
++        "num_reqs": getattr(batch_descriptor, "num_reqs", None),
++        "uniform": getattr(batch_descriptor, "uniform", None),
++        "has_lora": getattr(batch_descriptor, "has_lora", None),
++    }
++    rm = getattr(batch_descriptor, "runtime_metadata", None)
++    if rm is not None:
++        info["runtime_metadata"] = {
++            "token_offset": rm.token_offset,
++            "variant": rm.variant,
++            "backend_tag": rm.backend_tag,
++            "metadata_mode": rm.metadata_mode,
++        }
++    return info
++
++
++def metadata_tensor_info(attn_metadata: Any) -> dict[str, Any]:
++    if attn_metadata is None:
++        return {}
++    info: dict[str, Any] = {}
++    for attr in ("query_start_loc", "seq_lens", "block_table_tensor"):
++        val = getattr(attn_metadata, attr, None)
++        if val is not None:
++            ti = tensor_info(val)
++            if ti is not None:
++                info[attr] = ti
++    return info
++
++
++def tensor_view_info(tensor: Any) -> dict[str, Any] | None:
++    info = tensor_info(tensor)
++    if info is None:
++        return None
++    info["data_ptr"] = info.pop("ptr")
++    return info
++
++
++def slice_info(value: slice) -> list:
++    return [value.start, value.stop, value.step]
+\ No newline at end of file
+diff --git a/vllm_ascend/ops/fused_moe/moe_runtime_args.py b/vllm_ascend/ops/fused_moe/moe_runtime_args.py
+index 55ac8fcd8a..fef14ad03f 100644
+--- a/vllm_ascend/ops/fused_moe/moe_runtime_args.py
++++ b/vllm_ascend/ops/fused_moe/moe_runtime_args.py
+@@ -59,7 +59,10 @@ from __future__ import annotations
+ 
+ import torch
+ 
+-import vllm_ascend.ops.fused_moe.moe_stage_params as _stage_params
++try:
++    import vllm_ascend.ops.fused_moe.moe_stage_params as _stage_params
++except ImportError:
++    _stage_params = None
+ from vllm_ascend.ops.fused_moe.moe_stage_contracts import (
+     MoEAllGatherCombineMetadata,
+     MoEAllToAllCombineMetadata,
+diff --git a/vllm_ascend/ops/rotary_embedding.py b/vllm_ascend/ops/rotary_embedding.py
+index ebc92de357..9cc32f4a60 100644
+--- a/vllm_ascend/ops/rotary_embedding.py
++++ b/vllm_ascend/ops/rotary_embedding.py
+@@ -21,6 +21,7 @@ import os
+ import torch
+ import torch_npu
+ from vllm.config import get_current_vllm_config
++from vllm.forward_context import get_forward_context
+ from vllm.model_executor.layers.rotary_embedding import (
+     DeepseekScalingRotaryEmbedding,
+     MRotaryEmbedding,
+@@ -54,19 +55,20 @@ _sin_mla: torch.Tensor = None
+ _cos_cache: torch.Tensor = None
+ _sin_cache: torch.Tensor = None
+ _cos_sin_cache: torch.Tensor = None
+-_cos: torch.Tensor = None
+-_sin: torch.Tensor = None
+-_cos_slice: torch.Tensor = None
+-_sin_slice: torch.Tensor = None
++_NUM_COS_SIN_SLOTS = 2
++_cos_slots: list[torch.Tensor | None] = [None] * _NUM_COS_SIN_SLOTS
++_sin_slots: list[torch.Tensor | None] = [None] * _NUM_COS_SIN_SLOTS
++_cos_slice_slots: list[torch.Tensor | None] = [None] * _NUM_COS_SIN_SLOTS
++_sin_slice_slots: list[torch.Tensor | None] = [None] * _NUM_COS_SIN_SLOTS
+ 
+ 
+ def set_cos_and_sin(vllm_config, max_num_reqs, decode_token_per_req, dtype, device):
+     global _cos_mla
+     global _sin_mla
+-    global _cos
+-    global _sin
++    global _cos_slots
++    global _sin_slots
+ 
+-    if _cos_mla is not None or _sin_mla is not None or _cos is not None or _sin is not None:
++    if _cos_mla is not None or _sin_mla is not None or _cos_slots[0] is not None or _sin_slots[0] is not None:
+         return
+ 
+     model_config = vllm_config.model_config
+@@ -78,24 +80,23 @@ def set_cos_and_sin(vllm_config, max_num_reqs, decode_token_per_req, dtype, devi
+         _sin_mla = torch.zeros(max_num_batched_tokens, 1, 1, rope_dim, dtype=dtype, device=device)
+     elif not is_vl_model(vllm_config) and has_rope(vllm_config):
+         rope_dim = model_config.get_head_size()
+-        # For models using partial rope like Qwen3-Next.
+         if hasattr(model_config.hf_text_config, "partial_rotary_factor"):
+             rope_dim = int(rope_dim * model_config.hf_text_config.partial_rotary_factor)
+         elif hasattr(model_config.hf_text_config, "rotary_dim"):
+             rope_dim = int(model_config.hf_text_config.rotary_dim)
+-        _cos = torch.ones(1, max_num_batched_tokens, 1, rope_dim, dtype=dtype, device=device)
+-        _sin = torch.zeros(1, max_num_batched_tokens, 1, rope_dim, dtype=dtype, device=device)
++        for i in range(_NUM_COS_SIN_SLOTS):
++            _cos_slots[i] = torch.ones(1, max_num_batched_tokens, 1, rope_dim, dtype=dtype, device=device)
++            _sin_slots[i] = torch.zeros(1, max_num_batched_tokens, 1, rope_dim, dtype=dtype, device=device)
+ 
+ 
+-def get_cos_and_sin_mla(positions, use_cache=False):
+-    global _cos_cache
+-    global _sin_cache
++def get_cos_and_sin_mla(positions=None, use_cache=False):
++    global _cos_mla, _sin_mla, _cos_cache, _sin_cache
++    if positions is None:
++        return _cos_mla, _sin_mla
+     cos = _cos_cache[positions].unsqueeze(1).unsqueeze(2)
+     sin = _sin_cache[positions].unsqueeze(1).unsqueeze(2)
+     if not use_cache:
+         return cos, sin
+-    global _cos_mla
+-    global _sin_mla
+     num_tokens = positions.size(0)
+     _cos_mla[:num_tokens, ...] = cos
+     _sin_mla[:num_tokens, ...] = sin
+@@ -127,28 +128,26 @@ def _record_cos_and_sin_cache_interleaved(cos_sin_cache):
+     _sin_cache = sin_cache.squeeze(1)
+ 
+ 
+-def update_cos_sin(positions):
+-    global _cos
+-    global _sin
+-    global _cos_slice
+-    global _sin_slice
++def update_cos_sin(positions, slot_id=0):
++    global _cos_slice_slots
++    global _sin_slice_slots
+ 
+-    if _cos_sin_cache is None or _cos is None or _sin is None:
++    if _cos_sin_cache is None or _cos_slots[slot_id] is None or _sin_slots[slot_id] is None:
+         return
+ 
+     num_tokens = positions.size(0)
+-    _cos[:, :num_tokens] = (
++    _cos_slots[slot_id][:, :num_tokens] = (
+         _cos_sin_cache.index_select(0, positions).view(num_tokens, 2, -1).repeat(1, 1, 2).chunk(2, dim=-2)[0]
+     )
+-    _sin[:, :num_tokens] = (
++    _sin_slots[slot_id][:, :num_tokens] = (
+         _cos_sin_cache.index_select(0, positions).view(num_tokens, 2, -1).repeat(1, 1, 2).chunk(2, dim=-2)[1]
+     )
+-    _cos_slice = _cos[:, :num_tokens]
+-    _sin_slice = _sin[:, :num_tokens]
++    _cos_slice_slots[slot_id] = _cos_slots[slot_id][:, :num_tokens]
++    _sin_slice_slots[slot_id] = _sin_slots[slot_id][:, :num_tokens]
+ 
+ 
+-def get_cos_and_sin_slice():
+-    return _cos_slice, _sin_slice
++def get_cos_and_sin_slice(slot_id=0):
++    return _cos_slice_slots[slot_id], _sin_slice_slots[slot_id]
+ 
+ 
+ def rope_forward_oot(
+@@ -175,7 +174,21 @@ def rope_forward_oot(
+             is_neox_style=is_neox_style,
+         )
+     else:
+-        if rotary_dim < head_size:
++        forward_context = get_forward_context()
++        slot_id = forward_context.cos_sin_slot_id
++        cos, sin = get_cos_and_sin_slice(slot_id=slot_id)
++        if (is_neox_style and head_size == 128
++                and cos_sin_cache.shape[-1] == 128
++                and cos is not None and sin is not None):
++            query = query.contiguous().view(1, query.shape[0], -1, head_size)
++            key = key.contiguous().view(1, key.shape[0], -1, head_size)
++            if getattr(forward_context, "dbo_enabled", False):
++                query, key = torch_npu.npu_apply_rotary_pos_emb(
++                    query, key, forward_context.cos, forward_context.sin)
++            else:
++                query, key = torch_npu.npu_apply_rotary_pos_emb(
++                    query, key, cos, sin)
++        elif rotary_dim < head_size:
+             num_tokens = query.shape[0]
+             query = query.view(num_tokens, -1, head_size)
+             key = key.view(num_tokens, -1, head_size)
+diff --git a/vllm_ascend/platform.py b/vllm_ascend/platform.py
+index 4f64690050..3d74018283 100644
+--- a/vllm_ascend/platform.py
++++ b/vllm_ascend/platform.py
+@@ -474,6 +474,43 @@ def _configure_layered_prefill(
+     ascend_config.ascend_compilation_config.enable_static_kernel = False
+ 
+ 
++class AscendCudagraphKeyStrategy:
++    """Dispatch-time admission policy for split-batch (dual-stream) keys.
++
++    Implements the core ``Platform.get_cudagraph_key_strategy`` contract:
++    core stays neutral and fail-closed, while the plugin owns the admission
++    decision and the capture lifecycle of the keys it admits.
++
++    The checks here mirror the dispatch-time conditions of the wrapper-side
++    ``is_allowed_inplace_lazy_capture`` (``vllm_ascend.compilation.
++    acl_graph_split_batch``). Per-forward flags (split execution mode,
++    lazy-capture opt-in) are re-checked by the ACL graph wrapper before a
++    lazy capture; a strategy-admitted key whose wrapper-side capture
++    preconditions are not met still fails closed to eager inside the
++    wrapper. Offset ACL graphs are captured on first replay under a bounded,
++    synchronized temporary capture window (see
++    ``vllm_ascend.compilation.acl_graph``).
++    """
++
++    _VARIANTS = ("inplace_serial", "inplace_parallel")
++    _BACKEND_TAGS = ("fia", "pa")
++
++    def admit_runtime_key(self, num_tokens: int, runtime_metadata: Any) -> bool:
++        if runtime_metadata is None:
++            return False
++        token_offset = getattr(runtime_metadata, "token_offset", 0)
++        if not isinstance(token_offset, int) or isinstance(token_offset, bool):
++            return False
++        return (
++            token_offset > 0
++            and getattr(runtime_metadata, "variant", "") in self._VARIANTS
++            and getattr(runtime_metadata, "backend_tag", "") in self._BACKEND_TAGS
++        )
++
++
++_ASCEND_CUDAGRAPH_KEY_STRATEGY = AscendCudagraphKeyStrategy()
++
++
+ class NPUPlatform(Platform):
+     _enum = PlatformEnum.OOT
+     device_name: str = "npu"
+@@ -493,6 +530,17 @@ class NPUPlatform(Platform):
+         "deepseek_v4_fp8",
+     ]
+ 
++    @classmethod
++    def get_cudagraph_key_strategy(cls, vllm_config: VllmConfig) -> Any | None:
++        """Split-batch (dual-stream) runtime key admission policy.
++
++        The plugin owns the capture lifecycle of the keys it admits: offset
++        ACL graphs are captured on first replay under a bounded, synchronized
++        temporary capture window, or the wrapper bypasses to eager when the
++        per-forward capture preconditions are not met.
++        """
++        return _ASCEND_CUDAGRAPH_KEY_STRATEGY
++
+     def is_sleep_mode_available(self) -> bool:
+         # Sleep mode is only usable when camem resolved an ACL memcpy entrypoint.
+         from vllm_ascend.device_allocator import camem
+-- 
+2.53.0.windows.3
+

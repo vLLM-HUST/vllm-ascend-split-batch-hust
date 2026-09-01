@@ -1,0 +1,22 @@
+From ecb70fb478267e4143dc74ac3bcd84248ce911f0 Mon Sep 17 00:00:00 2001
+From: Raing5Days <M202574102@hust.edu.cn>
+Date: Sun, 30 Aug 2026 15:51:10 +0000
+Subject: [PATCH] chore(catlass): pin submodule to b50cad68 for the split-batch
+ series
+
+Restores the submodule pointer recorded by the plan-0826 dual-stream
+chain (validated on-board); main currently points at 41bf90da6.
+---
+ csrc/third_party/catlass | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/csrc/third_party/catlass b/csrc/third_party/catlass
+index 41bf90da65..b50cad688e 160000
+--- a/csrc/third_party/catlass
++++ b/csrc/third_party/catlass
+@@ -1 +1 @@
+-Subproject commit 41bf90da655bba3c66d0acd7e00abe33960ecfd6
++Subproject commit b50cad688e03281c9281e421edd01369b6dd2144
+-- 
+2.53.0.windows.3
+

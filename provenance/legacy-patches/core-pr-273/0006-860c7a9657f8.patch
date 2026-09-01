@@ -1,0 +1,1049 @@
+From 860c7a9657f8ae7b55653375916a4768a3aad32f Mon Sep 17 00:00:00 2001
+From: Raing5Days <M202574102@hust.edu.cn>
+Date: Sat, 29 Aug 2026 10:55:57 +0000
+Subject: [PATCH] fix(v1): close the runtime-key capture lifecycle (bounded,
+ synchronized, fail-closed)
+
+Address PR #264 review blockers:
+
+- _dispatch_runtime_key now follows a bounded, synchronized capture
+  lifecycle: an already-admitted key replays safely, a brand-new key is
+  admitted only while the startup capture window is open, and once
+  capturing is disabled dispatch fails closed to eager with the runtime
+  metadata preserved on the no-graph descriptor. Registering a key can
+  no longer be mistaken for owning a replayable graph.
+- Wire Platform.get_cudagraph_key_strategy() into admission: None keeps
+  neutral core behavior; a rejecting/failing/protocol-violating strategy
+  fails closed. Offset/variant construction, capture scheduling and
+  eviction stay owned by the platform plugin.
+- Bound runtime keys per mode (MAX_RUNTIME_GRAPH_KEYS_PER_MODE) and make
+  admission atomic under a lock for concurrent replay workers.
+- Host tests: no-plugin equivalence, strategy missing/rejection/failure
+  fallback, duplicate-key idempotency, pre-registered replay after the
+  capture window, post-startup fail-closed, key-count bound and
+  concurrent registration safety. Wrapper-level integration regression
+  proves capture-before-replay and post-startup fail-closed (CUDA gated).
+- full_graph_parallel_test.py: no hardcoded model, env/CLI overrides,
+  failed requests fail loudly with non-zero exit, optional JSONL
+  transcript for paired baseline-vs-plugin diffing.
+---
+ .../full_graph_parallel_test.py               | 175 ++++--
+ tests/v1/cudagraph/test_cudagraph_dispatch.py | 505 +++++++++++++++++-
+ vllm/platforms/interface.py                   |  30 +-
+ vllm/v1/cudagraph_dispatcher.py               | 187 ++++++-
+ 4 files changed, 825 insertions(+), 72 deletions(-)
+
+diff --git a/examples/online_serving/full_graph_parallel_test.py b/examples/online_serving/full_graph_parallel_test.py
+index 0bb8f9534c3..78dca31e6c7 100644
+--- a/examples/online_serving/full_graph_parallel_test.py
++++ b/examples/online_serving/full_graph_parallel_test.py
+@@ -1,54 +1,127 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++"""Online correctness entry for full-graph-parallel (dual-stream) replay.
++
++This is a correctness smoke entry, NOT an acceptance or performance test:
++graph capture/replay correctness is covered by the host tests in
++``tests/v1/cudagraph/test_cudagraph_dispatch.py``.
++
++Start the server with split-batch replay enabled, then run this script to
++send concurrent chat requests. Any failed request aborts with a non-zero
++exit code. Use ``--output`` to write a JSONL transcript so two runs
++(baseline vs plugin) can be diffed for output consistency.
++
++Server flags used during development:
++
++  --additional-config '{
++      "split_batch_config": {
++        "enabled": true,
++        "mode": "inplace_parallel",
++        "num_splits": 2,
++        "enable_parallel_streams": true,
++        "enable_inplace_lazy_capture": true,
++        "inplace_split_planner_policy": "largest_lower",
++        "inplace_offset_match_policy": "exact",
++        "inplace_parallel_replay_policy": "full_graph_parallel",
++        "inplace_offset_capture_sizes": [8, 16, 32, 64],
++        "parallel_capture_sizes": [8, 16, 32, 64]
++      }
++    }'
++  --compilation-config '{"cudagraph_mode": "FULL_DECODE_ONLY",
++                         "cudagraph_capture_sizes": [8, 16, 32, 64, 128]}'
+ """
+-服务端添加参数
+- --additional-config '{
+-    "split_batch_config": {
+-      "enabled": true,
+-      "mode": "inplace_parallel",
+-      "num_splits": 2,
+-      "enable_parallel_streams": true,
+-      "enable_inplace_lazy_capture": true,
+-      "inplace_split_planner_policy": "largest_lower",
+-      "inplace_offset_match_policy": "exact",
+-      "inplace_parallel_replay_policy": "full_graph_parallel",
+-      "inplace_offset_capture_sizes": [8, 16, 32, 64],
+-      "parallel_capture_sizes": [8, 16, 32, 64]
+-    }
+-  }'
+---compilation-config '{"cudagraph_mode": "FULL_DECODE_ONLY", "cudagraph_capture_sizes": [8, 16, 32, 64, 128]}'
+-"""
++
++import argparse
++import json
++import os
++import sys
++from concurrent.futures import ThreadPoolExecutor
++
+ import openai
+-from concurrent.futures import ThreadPoolExecutor, as_completed
+-
+-client = openai.OpenAI(
+-    base_url="http://localhost:8000/v1",
+-    api_key="empty"
+-)
+-
+-model = "/workspace/data/models/qwen3-0.6b"
+-
+-messages_list = [
+-    [{"role": "user", "content": "你好，请介绍一下自己"}]
+-    for _ in range(80)
+-]
+-
+-def send_chat(messages):
+-    """发送单条聊天请求"""
+-    try:
+-        response = client.chat.completions.create(
+-            model=model,
+-            messages=messages,
+-            max_tokens=128,
+-            temperature=0,
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(
++        description="Concurrent chat-requests smoke test for "
++        "full-graph-parallel (dual-stream) replay."
++    )
++    parser.add_argument(
++        "--base-url",
++        default=os.environ.get("OPENAI_BASE_URL", "http://localhost:8000/v1"),
++    )
++    parser.add_argument("--api-key", default=os.environ.get("OPENAI_API_KEY", "empty"))
++    parser.add_argument(
++        "--model",
++        default=os.environ.get("FULL_GRAPH_PARALLEL_MODEL"),
++        help="Served model name (must match the server's --served-model-name).",
++    )
++    parser.add_argument("--num-requests", type=int, default=80)
++    parser.add_argument("--max-workers", type=int, default=80)
++    parser.add_argument("--max-tokens", type=int, default=128)
++    parser.add_argument(
++        "--output",
++        default=None,
++        help="Optional JSONL file for paired baseline-vs-plugin diffing.",
++    )
++    return parser.parse_args()
++
++
++def send_chat(
++    client: openai.OpenAI, model: str, messages: list[dict], max_tokens: int
++) -> str:
++    response = client.chat.completions.create(
++        model=model,
++        messages=messages,
++        max_tokens=max_tokens,
++        temperature=0,
++    )
++    content = response.choices[0].message.content
++    if content is None:
++        raise RuntimeError("empty response content")
++    return content
++
++
++def main() -> None:
++    args = parse_args()
++    if not args.model:
++        raise SystemExit(
++            "--model (or the FULL_GRAPH_PARALLEL_MODEL env var) is required"
+         )
+-        return response.choices[0].message.content
+-    except Exception as e:
+-        return f"Error: {e}"
+-
+-print("开始发送聊天请求...")
+-with ThreadPoolExecutor(max_workers=80) as executor:
+-    futures = [executor.submit(send_chat, msgs) for msgs in messages_list]
+-    results = [future.result() for future in futures]
+-
+-print(f"共收到 {len(results)} 个响应")
+-for i, result in enumerate(results):
+-    print(f"第 {i + 1} 个响应:", result)
+\ No newline at end of file
++
++    client = openai.OpenAI(base_url=args.base_url, api_key=args.api_key)
++    messages_list = [
++        [{"role": "user", "content": "你好，请介绍一下自己"}]
++        for _ in range(args.num_requests)
++    ]
++
++    def task(index: int, messages: list[dict]) -> tuple[int, str | None, str | None]:
++        try:
++            return index, send_chat(client, args.model, messages, args.max_tokens), None
++        except Exception as exc:
++            return index, None, f"{type(exc).__name__}: {exc}"
++
++    print(f"Sending {args.num_requests} chat requests to {args.base_url} ...")
++    with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
++        results = list(executor.map(lambda pair: task(*pair), enumerate(messages_list)))
++
++    rows = []
++    error_count = 0
++    for index, content, error in sorted(results):
++        rows.append({"index": index, "response": content, "error": error})
++        if error is not None:
++            error_count += 1
++            print(f"[{index}] ERROR: {error}")
++
++    if args.output:
++        with open(args.output, "w", encoding="utf-8") as f:
++            for row in rows:
++                f.write(json.dumps(row, ensure_ascii=False) + "\n")
++        print(f"Transcript written to {args.output}")
++
++    print(f"Received {args.num_requests - error_count}/{args.num_requests} responses")
++    if error_count:
++        sys.exit(1)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/v1/cudagraph/test_cudagraph_dispatch.py b/tests/v1/cudagraph/test_cudagraph_dispatch.py
+index 15e3b989094..7a9ab38253a 100644
+--- a/tests/v1/cudagraph/test_cudagraph_dispatch.py
++++ b/tests/v1/cudagraph/test_cudagraph_dispatch.py
+@@ -1,5 +1,6 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++from concurrent.futures import ThreadPoolExecutor
+ from dataclasses import replace
+ from unittest.mock import MagicMock, patch
+ 
+@@ -7,6 +8,7 @@ import pytest
+ import torch
+ import torch.nn as nn
+ 
++import vllm.v1.cudagraph_dispatcher as cudagraph_dispatcher_module
+ from tests.utils import create_new_process_for_each_test
+ from vllm.compilation.cuda_graph import CUDAGraphWrapper
+ from vllm.compilation.monitor import set_cudagraph_capturing_enabled
+@@ -30,6 +32,84 @@ from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
+ DEVICE_TYPE = current_platform.device_type
+ 
+ 
++@pytest.fixture(autouse=True)
++def _restore_cudagraph_capturing():
++    """Restore the global capture-window flag after every test."""
++    yield
++    set_cudagraph_capturing_enabled(True)
++
++
++class _RejectingKeyStrategy:
++    """Platform strategy that rejects every runtime key admission."""
++
++    def admit_runtime_key(
++        self, num_tokens: int, runtime_metadata: CUDAGraphRuntimeMetadata
++    ) -> bool:
++        return False
++
++
++class _RaisingKeyStrategy:
++    """Platform strategy that fails during runtime key admission."""
++
++    def admit_runtime_key(
++        self, num_tokens: int, runtime_metadata: CUDAGraphRuntimeMetadata
++    ) -> bool:
++        raise RuntimeError("plugin admission failure")
++
++
++class _AdmittingKeyStrategy:
++    """Platform strategy that owns admission of every runtime key."""
++
++    def __init__(self):
++        self.admitted = []
++
++    def admit_runtime_key(
++        self, num_tokens: int, runtime_metadata: CUDAGraphRuntimeMetadata
++    ) -> bool:
++        self.admitted.append((num_tokens, runtime_metadata))
++        return True
++
++
++def _make_full_decode_dispatcher(
++    max_num_seqs: int = 8, capture_sizes: tuple[int, ...] = (1, 8)
++) -> CudagraphDispatcher:
++    comp_config = CompilationConfig(
++        cudagraph_mode="FULL_DECODE_ONLY",
++        mode=CompilationMode.NONE,
++        cudagraph_capture_sizes=list(capture_sizes),
++    )
++    dispatcher = CudagraphDispatcher(
++        _create_vllm_config(comp_config, max_num_seqs=max_num_seqs)
++    )
++    dispatcher.initialize_cudagraph_keys(
++        comp_config.cudagraph_mode, uniform_decode_query_len=1
++    )
++    return dispatcher
++
++
++def _runtime_metadata(token_offset: int = 4) -> CUDAGraphRuntimeMetadata:
++    return CUDAGraphRuntimeMetadata(
++        token_offset=token_offset,
++        variant="parallel_replay",
++        backend_tag="test_backend",
++    )
++
++
++def _patch_key_strategy(strategy: object):
++    """Patch the concrete platform's key-strategy hook.
++
++    Patching ``type(current_platform)`` (not only the base ``Platform``)
++    matters because a platform subclass may override the hook; ``mock``'s
++    class-attribute protocol restores an inherited-vs-local attribute
++    correctly either way.
++    """
++    return patch.object(
++        type(current_platform),
++        "get_cudagraph_key_strategy",
++        classmethod(lambda cls, vllm_config, _strategy=strategy: _strategy),
++    )
++
++
+ # Helper MLP for testing
+ class SimpleMLP(nn.Module):
+     def __init__(self):
+@@ -290,21 +370,26 @@ class TestCudagraphDispatcher:
+         )
+         initial_keys = dispatcher.cudagraph_keys[CUDAGraphMode.FULL].copy()
+ 
+-        mode, descriptor = dispatcher.dispatch(
+-            num_tokens=4,
+-            uniform_decode=True,
+-            runtime_metadata=metadata,
+-        )
+-        assert mode == CUDAGraphMode.NONE
+-        assert descriptor == BatchDescriptor(num_tokens=4, runtime_metadata=metadata)
+-        assert dispatcher.cudagraph_keys[CUDAGraphMode.FULL] == initial_keys
++        # Explicit None keeps the test independent of the ambient platform
++        # strategy (the assertion below is about core's own opt-in gate).
++        with _patch_key_strategy(None):
++            mode, descriptor = dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=metadata,
++            )
++            assert mode == CUDAGraphMode.NONE
++            assert descriptor == BatchDescriptor(
++                num_tokens=4, runtime_metadata=metadata
++            )
++            assert dispatcher.cudagraph_keys[CUDAGraphMode.FULL] == initial_keys
+ 
+-        mode, descriptor = dispatcher.dispatch(
+-            num_tokens=4,
+-            uniform_decode=True,
+-            runtime_metadata=metadata,
+-            allow_runtime_key_registration=True,
+-        )
++            mode, descriptor = dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=metadata,
++                allow_runtime_key_registration=True,
++            )
+         assert mode == CUDAGraphMode.FULL
+         assert descriptor == BatchDescriptor(
+             num_tokens=4,
+@@ -432,6 +517,317 @@ class TestCudagraphDispatcher:
+         assert dispatcher.cudagraph_keys == initial_keys
+ 
+ 
++class TestRuntimeKeyCaptureLifecycle:
++    """Host-level contract for the runtime-key capture lifecycle.
++
++    A runtime key is only ever returned with a graph mode when it is
++    guaranteed to have a captured graph: either it was admitted while the
++    startup capture window was open, or it was registered (by the platform
++    plugin) before capture and is already in the key registry. Anything else
++    fails closed to eager execution without mutating the registry.
++    """
++
++    def test_no_strategy_keeps_core_neutral_admission(self):
++        # No plugin strategy (the base hook returns None, and an explicit
++        # None patch keeps the test independent of the ambient platform):
++        # core enforces only its generic schema, and the standard dispatch
++        # path is unaffected by the runtime-key machinery.
++        from vllm.platforms.interface import Platform
++
++        dispatcher = _make_full_decode_dispatcher()
++        assert Platform.get_cudagraph_key_strategy(dispatcher.vllm_config) is None
++
++        static_mode, static_desc = dispatcher.dispatch(
++            num_tokens=8, uniform_decode=True
++        )
++        assert static_mode == CUDAGraphMode.FULL
++        assert static_desc == BatchDescriptor(num_tokens=8, num_reqs=8, uniform=True)
++
++        metadata = _runtime_metadata()
++        with _patch_key_strategy(None):
++            mode, desc = dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=metadata,
++                allow_runtime_key_registration=True,
++            )
++        assert mode == CUDAGraphMode.FULL
++        assert desc == BatchDescriptor(
++            num_tokens=4, num_reqs=4, uniform=True, runtime_metadata=metadata
++        )
++        assert desc in dispatcher.cudagraph_keys[CUDAGraphMode.FULL]
++
++    @pytest.mark.parametrize(
++        "strategy", [_RejectingKeyStrategy(), _RaisingKeyStrategy()]
++    )
++    def test_strategy_rejection_or_failure_fails_closed(self, strategy):
++        dispatcher = _make_full_decode_dispatcher()
++        initial = {m: s.copy() for m, s in dispatcher.cudagraph_keys.items()}
++        metadata = _runtime_metadata()
++
++        with _patch_key_strategy(strategy):
++            mode, desc = dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=metadata,
++                allow_runtime_key_registration=True,
++            )
++
++        assert mode == CUDAGraphMode.NONE
++        assert desc == BatchDescriptor(num_tokens=4, runtime_metadata=metadata)
++        assert dispatcher.cudagraph_keys == initial
++
++    def test_duplicate_runtime_key_is_idempotent(self):
++        dispatcher = _make_full_decode_dispatcher()
++        metadata = _runtime_metadata()
++
++        with _patch_key_strategy(None):
++            first_mode, first_desc = dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=metadata,
++                allow_runtime_key_registration=True,
++            )
++            assert first_mode == CUDAGraphMode.FULL
++            size_after_first = len(dispatcher.cudagraph_keys[CUDAGraphMode.FULL])
++
++            second_mode, second_desc = dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=metadata,
++                allow_runtime_key_registration=True,
++            )
++        assert (second_mode, second_desc) == (first_mode, first_desc)
++        assert len(dispatcher.cudagraph_keys[CUDAGraphMode.FULL]) == size_after_first
++
++        # Duplicate registration through the plugin-facing API is a no-op.
++        dispatcher.add_cudagraph_key(CUDAGraphMode.FULL, first_desc)
++        assert len(dispatcher.cudagraph_keys[CUDAGraphMode.FULL]) == size_after_first
++
++    def test_pre_registered_runtime_key_replays_after_capture_window(self):
++        dispatcher = _make_full_decode_dispatcher()
++        metadata = _runtime_metadata()
++        descriptor = BatchDescriptor(
++            num_tokens=4, num_reqs=4, uniform=True, runtime_metadata=metadata
++        )
++
++        # Plugin-owned startup contract: register before capture so
++        # get_capture_descs enumerates the key for capture_model.
++        dispatcher.add_cudagraph_key(CUDAGraphMode.FULL, descriptor)
++        assert any(
++            mode == CUDAGraphMode.FULL and descriptor in descs
++            for mode, descs in dispatcher.get_capture_descs()
++        )
++
++        # Post-startup (capture disabled): the admitted key still replays.
++        set_cudagraph_capturing_enabled(False)
++        mode, dispatched = dispatcher.dispatch(
++            num_tokens=4,
++            uniform_decode=True,
++            runtime_metadata=metadata,
++            allow_runtime_key_registration=True,
++        )
++        assert mode == CUDAGraphMode.FULL
++        assert dispatched == descriptor
++
++    def test_new_runtime_key_fails_closed_after_capture_window(self):
++        dispatcher = _make_full_decode_dispatcher()
++        initial = {m: s.copy() for m, s in dispatcher.cudagraph_keys.items()}
++        metadata = _runtime_metadata()
++
++        # Simulate completed startup capture.
++        set_cudagraph_capturing_enabled(False)
++
++        with _patch_key_strategy(None):
++            mode, desc = dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=metadata,
++                allow_runtime_key_registration=True,
++            )
++        assert mode == CUDAGraphMode.NONE
++        assert desc == BatchDescriptor(num_tokens=4, runtime_metadata=metadata)
++        assert dispatcher.cudagraph_keys == initial
++
++    def test_strategy_owned_admission_after_capture_window(self):
++        """A registered platform strategy owns post-startup admission.
++
++        Admitted keys are registered (bounded, atomic); rejected keys and
++        non-opt-in requests still fail closed to eager without mutation.
++        """
++        admitted_desc = BatchDescriptor(
++            num_tokens=4,
++            num_reqs=4,
++            uniform=True,
++            runtime_metadata=_runtime_metadata(token_offset=4),
++        )
++
++        # Simulate completed startup capture.
++        set_cudagraph_capturing_enabled(False)
++
++        # Phase 1: an admitting strategy registers post-startup keys.
++        strategy = _AdmittingKeyStrategy()
++        dispatcher = _make_full_decode_dispatcher()
++        initial_full_keys = dispatcher.cudagraph_keys[CUDAGraphMode.FULL].copy()
++        with _patch_key_strategy(strategy):
++            mode, desc = dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=_runtime_metadata(token_offset=4),
++                allow_runtime_key_registration=True,
++            )
++            assert mode == CUDAGraphMode.FULL
++            assert desc == admitted_desc
++            assert desc in dispatcher.cudagraph_keys[CUDAGraphMode.FULL]
++            assert strategy.admitted == [(4, _runtime_metadata(token_offset=4))]
++
++            # Non-opt-in requests still fail closed under strategy ownership.
++            mode, _ = dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=_runtime_metadata(token_offset=16),
++                allow_runtime_key_registration=False,
++            )
++            assert mode == CUDAGraphMode.NONE
++
++        # Phase 2: a rejecting strategy fails closed for brand-new keys.
++        rejecting_dispatcher = _make_full_decode_dispatcher()
++        rejecting_initial = {
++            m: s.copy() for m, s in rejecting_dispatcher.cudagraph_keys.items()
++        }
++        with _patch_key_strategy(_RejectingKeyStrategy()):
++            mode, desc = rejecting_dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=_runtime_metadata(token_offset=8),
++                allow_runtime_key_registration=True,
++            )
++        assert mode == CUDAGraphMode.NONE
++        assert desc.runtime_metadata == _runtime_metadata(token_offset=8)
++        assert rejecting_dispatcher.cudagraph_keys == rejecting_initial
++
++        # Phase 3: a strategy-admitted key still replays post-startup (the
++        # already-registered fast path), while a fresh neutral dispatcher
++        # fail-closes brand-new keys.
++        mode, dispatched = dispatcher.dispatch(
++            num_tokens=4,
++            uniform_decode=True,
++            runtime_metadata=_runtime_metadata(token_offset=4),
++            allow_runtime_key_registration=True,
++        )
++        assert mode == CUDAGraphMode.FULL
++        assert dispatched == admitted_desc
++
++        neutral_dispatcher = _make_full_decode_dispatcher()
++        neutral_initial = {
++            m: s.copy() for m, s in neutral_dispatcher.cudagraph_keys.items()
++        }
++        with _patch_key_strategy(None):
++            mode, _ = neutral_dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=_runtime_metadata(token_offset=12),
++                allow_runtime_key_registration=True,
++            )
++        assert mode == CUDAGraphMode.NONE
++        assert neutral_dispatcher.cudagraph_keys == neutral_initial
++        assert dispatcher.cudagraph_keys[CUDAGraphMode.FULL] == (
++            initial_full_keys | {admitted_desc}
++        )
++
++    def test_runtime_key_count_is_bounded(self):
++        dispatcher = _make_full_decode_dispatcher()
++        with (
++            _patch_key_strategy(None),
++            patch.object(
++                cudagraph_dispatcher_module, "MAX_RUNTIME_GRAPH_KEYS_PER_MODE", 2
++            ),
++        ):
++            admitted = []
++            for offset in (4, 8, 12, 16):
++                mode, desc = dispatcher.dispatch(
++                    num_tokens=4,
++                    uniform_decode=True,
++                    runtime_metadata=_runtime_metadata(token_offset=offset),
++                    allow_runtime_key_registration=True,
++                )
++                if mode == CUDAGraphMode.FULL:
++                    admitted.append(desc)
++
++            assert len(admitted) == 2
++            runtime_keys = [
++                d
++                for d in dispatcher.cudagraph_keys[CUDAGraphMode.FULL]
++                if d.runtime_metadata is not None
++            ]
++            assert len(runtime_keys) == 2
++            assert dispatcher._runtime_key_cap_warned
++
++        # Releasing the test bound admits further keys again.
++        with _patch_key_strategy(None):
++            mode, _ = dispatcher.dispatch(
++                num_tokens=4,
++                uniform_decode=True,
++                runtime_metadata=_runtime_metadata(token_offset=12),
++                allow_runtime_key_registration=True,
++            )
++        assert mode == CUDAGraphMode.FULL
++
++    @pytest.mark.parametrize(
++        "use_strategy", [False, True], ids=["neutral", "strategy_owned"]
++    )
++    def test_concurrent_runtime_key_registration_is_safe(self, use_strategy):
++        if use_strategy:
++            # Post-startup with strategy ownership: admission still
++            # exercised concurrently.
++            set_cudagraph_capturing_enabled(False)
++        dispatcher = _make_full_decode_dispatcher()
++        # The neutral case pins an explicit None strategy so the test stays
++        # independent of the ambient platform.
++        strategy_patch = _patch_key_strategy(
++            _AdmittingKeyStrategy() if use_strategy else None
++        )
++        strategy_patch.start()
++        try:
++            with patch.object(
++                cudagraph_dispatcher_module, "MAX_RUNTIME_GRAPH_KEYS_PER_MODE", 8
++            ):
++                offsets = list(range(1, 33))
++                errors: list[Exception] = []
++
++                def dispatch_one(offset: int):
++                    try:
++                        mode, desc = dispatcher.dispatch(
++                            num_tokens=4,
++                            uniform_decode=True,
++                            runtime_metadata=_runtime_metadata(token_offset=offset),
++                            allow_runtime_key_registration=True,
++                        )
++                        return offset, mode, desc
++                    except Exception as exc:  # pragma: no cover - contract guard
++                        errors.append(exc)
++                        return offset, None, None
++
++                with ThreadPoolExecutor(max_workers=8) as executor:
++                    results = list(executor.map(dispatch_one, offsets))
++
++                assert not errors
++                full = {off for off, mode, _ in results if mode == CUDAGraphMode.FULL}
++                none = {off for off, mode, _ in results if mode == CUDAGraphMode.NONE}
++                assert len(full) + len(none) == len(offsets)
++
++                registered = {
++                    d.runtime_metadata.token_offset
++                    for d in dispatcher.cudagraph_keys[CUDAGraphMode.FULL]
++                    if d.runtime_metadata is not None
++                }
++                assert len(registered) == 8
++                assert full == registered
++                assert none == set(offsets) - registered
++        finally:
++            strategy_patch.stop()
++
++
+ @pytest.mark.skipif(not current_platform.is_cuda(), reason="Skip if not cuda")
+ class TestCUDAGraphWrapper:
+     def setup_method(self):
+@@ -648,6 +1044,87 @@ def test_capture_replay_bypass_logic():
+     set_cudagraph_capturing_enabled(True)
+ 
+ 
++@create_new_process_for_each_test("spawn")
++@pytest.mark.skipif(not current_platform.is_cuda(), reason="Skip if not cuda")
++def test_runtime_key_capture_before_replay_and_fail_closed_after():
++    """Integration regression for the runtime-key capture lifecycle.
++
++    A previously unseen runtime descriptor must actually be captured before
++    it is replayed (during the startup capture window), and once startup
++    capture is disabled, admitting a brand-new runtime key must fail closed
++    to eager execution instead of raising or replaying a missing graph.
++    """
++    comp_config = CompilationConfig(
++        mode=CompilationMode.VLLM_COMPILE,
++        cudagraph_mode="FULL",
++        cudagraph_capture_sizes=[1, 4],
++    )
++    vllm_config = _create_vllm_config(comp_config)
++    dispatcher = CudagraphDispatcher(vllm_config)
++    dispatcher.initialize_cudagraph_keys(
++        comp_config.cudagraph_mode, uniform_decode_query_len=1
++    )
++    model = SimpleMLP().to(DEVICE_TYPE)
++    full_wrapper = CUDAGraphWrapper(model, vllm_config, CUDAGraphMode.FULL)
++    persistent_input_buffer = torch.zeros(4, 10, device=DEVICE_TYPE)
++    input_a = persistent_input_buffer[:4]
++
++    # 0. global warmup
++    with set_forward_context(
++        attn_metadata=None,
++        vllm_config=vllm_config,
++        cudagraph_runtime_mode=CUDAGraphMode.NONE,
++        batch_descriptor=None,
++    ):
++        full_wrapper(input_a)
++
++    # 1. Capture window open: an unseen runtime key is admitted, exposed to
++    #    capture_model via get_capture_descs, captured, then replayed.
++    set_cudagraph_capturing_enabled(True)
++    metadata = CUDAGraphRuntimeMetadata(
++        token_offset=2,
++        variant="parallel_replay",
++        backend_tag="test_backend",
++    )
++    rt_mode, key = dispatcher.dispatch(
++        num_tokens=4,
++        uniform_decode=True,
++        runtime_metadata=metadata,
++        allow_runtime_key_registration=True,
++    )
++    assert rt_mode == CUDAGraphMode.FULL
++    assert key in dispatcher.cudagraph_keys[CUDAGraphMode.FULL]
++    assert any(
++        key in descs
++        for mode, descs in dispatcher.get_capture_descs()
++        if mode == CUDAGraphMode.FULL
++    )
++    action = _run_and_monitor_call(full_wrapper, input_a, rt_mode, key, vllm_config)
++    assert action == "capture_global"
++    action = _run_and_monitor_call(full_wrapper, input_a, rt_mode, key, vllm_config)
++    assert action == "replay"
++
++    # 2. Capture window closed: a brand-new runtime key fails closed to
++    #    eager. The wrapper is bypassed and must never raise or attempt to
++    #    replay a missing graph.
++    set_cudagraph_capturing_enabled(False)
++    new_metadata = CUDAGraphRuntimeMetadata(
++        token_offset=4,
++        variant="parallel_replay",
++        backend_tag="test_backend",
++    )
++    rt_mode, key = dispatcher.dispatch(
++        num_tokens=4,
++        uniform_decode=True,
++        runtime_metadata=new_metadata,
++        allow_runtime_key_registration=True,
++    )
++    assert rt_mode == CUDAGraphMode.NONE
++    assert key.runtime_metadata == new_metadata
++    action = _run_and_monitor_call(full_wrapper, input_a, rt_mode, key, vllm_config)
++    assert action == "bypass"
++
++
+ @create_new_process_for_each_test("spawn")
+ @pytest.mark.skipif(not current_platform.is_cuda(), reason="Skip if not cuda")
+ def test_nested_wrappers():
+diff --git a/vllm/platforms/interface.py b/vllm/platforms/interface.py
+index 4119a49df22..0832fdaf982 100644
+--- a/vllm/platforms/interface.py
++++ b/vllm/platforms/interface.py
+@@ -601,10 +601,32 @@ class Platform:
+     def get_cudagraph_key_strategy(cls, vllm_config: "VllmConfig") -> Any | None:
+         """Return a pluggable cudagraph key strategy, or None.
+ 
+-        The cudagraph dispatcher consults this hook for extended
+-        (split-batch / dual-stream) capture and replay key policy. Returning
+-        None lets core fall back to its default strategy. Platforms that own
+-        the policy out of tree implement this hook and return their strategy.
++        The cudagraph dispatcher consults this hook before admitting a new
++        runtime graph key (split-batch / dual-stream replay) during the
++        startup capture window. Returning None keeps the neutral core
++        behavior: only the generic ``CUDAGraphRuntimeMetadata.is_valid()``
++        schema is enforced, and any key that cannot be captured fails closed
++        to eager execution.
++
++        The returned object must implement::
++
++            admit_runtime_key(num_tokens: int,
++                              runtime_metadata: CUDAGraphRuntimeMetadata) -> bool
++
++        Returning False (or raising) rejects the key, and dispatch fails
++        closed to ``CUDAGraphMode.NONE``. A strategy that admits a key after
++        startup capture is disabled takes over its capture lifecycle: the
++        plugin must guarantee the admitted key is captured before it is
++        replayed (e.g. first-encounter capture under an explicit temporary
++        capture window), or its wrappers must bypass to eager. Core still
++        enforces the generic schema, alignment, the runtime-key bound and
++        atomic registration.
++
++        Offset/variant construction, capture scheduling and eviction policy
++        remain owned by the platform plugin out of tree: keys that should be
++        captured during startup are registered before capture (via
++        ``CudagraphDispatcher.add_cudagraph_key``) so they are enumerated by
++        ``get_capture_descs`` and captured with the standard flow.
+         """
+         return None
+ 
+diff --git a/vllm/v1/cudagraph_dispatcher.py b/vllm/v1/cudagraph_dispatcher.py
+index f5f4de4a346..345efd65466 100644
+--- a/vllm/v1/cudagraph_dispatcher.py
++++ b/vllm/v1/cudagraph_dispatcher.py
+@@ -1,8 +1,10 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++import threading
+ from collections.abc import Set as AbstractSet
+ from dataclasses import replace
+ from itertools import product
++from typing import Any
+ 
+ from vllm.config import CUDAGraphMode, VllmConfig
+ from vllm.forward_context import BatchDescriptor, CUDAGraphRuntimeMetadata
+@@ -11,6 +13,25 @@ from vllm.lora.utils import get_captured_lora_counts
+ 
+ logger = init_logger(__name__)
+ 
++# Upper bound on runtime-registered keys (descriptors carrying
++# ``runtime_metadata``) per cudagraph runtime mode. A new runtime key beyond
++# this bound fails closed to eager execution instead of being admitted.
++MAX_RUNTIME_GRAPH_KEYS_PER_MODE = 64
++
++
++class _FailClosedKeyStrategy:
++    """Internal strategy that rejects every runtime key admission.
++
++    Used when the platform strategy hook fails or returns an object that does
++    not implement the documented protocol, so a broken plugin can never
++    silently widen the capture contract.
++    """
++
++    def admit_runtime_key(
++        self, num_tokens: int, runtime_metadata: CUDAGraphRuntimeMetadata
++    ) -> bool:
++        return False
++
+ 
+ class CudagraphDispatcher:
+     """
+@@ -68,6 +89,82 @@ class CudagraphDispatcher:
+         )
+         # Default cudagraph_mode to NONE until initialize_cudagraph_keys is called
+         self.cudagraph_mode = CUDAGraphMode.NONE
++        # Runtime key admission (see _dispatch_runtime_key) may be reached
++        # concurrently (e.g. parallel replay workers); the lock keeps the
++        # bounded key registry and the admission decision atomic.
++        self._runtime_key_lock = threading.Lock()
++        self._runtime_key_cap_warned = False
++        self._runtime_key_strategy: Any | None = None
++        self._key_strategy_resolved = False
++
++    def _cudagraph_capturing_enabled(self) -> bool:
++        """Read the capture-window flag at call time.
++
++        The flag lives in ``vllm.compilation.monitor`` and is flipped to
++        False once startup capture completes. It is read dynamically (not
++        bound at import time) because it is reassigned globally.
++        """
++        from vllm.compilation.monitor import cudagraph_capturing_enabled
++
++        return cudagraph_capturing_enabled
++
++    def _resolve_key_strategy(self) -> Any | None:
++        """Resolve the platform key strategy hook once, lazily.
++
++        Returns None when the platform does not provide a strategy; core then
++        enforces only its generic ``CUDAGraphRuntimeMetadata.is_valid()``
++        schema. A hook failure or a strategy missing the documented protocol
++        resolves to an always-rejecting strategy so a broken plugin can only
++        narrow (fail closed), never widen, the capture contract.
++        """
++        if self._key_strategy_resolved:
++            return self._runtime_key_strategy
++        try:
++            from vllm.platforms import current_platform
++
++            strategy = current_platform.get_cudagraph_key_strategy(self.vllm_config)
++        except Exception:
++            logger.exception(
++                "Resolving the cudagraph key strategy failed; "
++                "runtime key admission will fail closed."
++            )
++            strategy = _FailClosedKeyStrategy()
++        if strategy is not None and not callable(
++            getattr(strategy, "admit_runtime_key", None)
++        ):
++            logger.error(
++                "Platform cudagraph key strategy %r does not implement "
++                "admit_runtime_key(num_tokens, runtime_metadata); "
++                "runtime key admission will fail closed.",
++                strategy,
++            )
++            strategy = _FailClosedKeyStrategy()
++        # Publish the strategy before the resolved flag: a concurrent reader
++        # that observes the flag must never see a stale/None strategy (which
++        # would wrongly fail closed strategy-owned keys to the neutral path).
++        self._runtime_key_strategy = strategy
++        self._key_strategy_resolved = True
++        return strategy
++
++    def _admit_runtime_key(
++        self, num_tokens: int, runtime_metadata: CUDAGraphRuntimeMetadata
++    ) -> bool:
++        """Consult the platform key strategy for platform-specific admission.
++
++        A missing strategy means core-generic admission only. A rejecting or
++        failing strategy fails closed to eager execution.
++        """
++        strategy = self._runtime_key_strategy
++        if strategy is None:
++            return True
++        try:
++            return bool(strategy.admit_runtime_key(num_tokens, runtime_metadata))
++        except Exception:
++            logger.exception(
++                "The cudagraph key strategy raised during admission; "
++                "failing closed to eager execution."
++            )
++            return False
+ 
+     def _compute_bs_to_padded_graph_size(self) -> None:
+         """Pre-compute the mapping from batch size to padded graph size."""
+@@ -185,6 +282,33 @@ class CudagraphDispatcher:
+         execution (``CUDAGraphMode.NONE``) without mutating the key registry:
+         a registered key is always a key that was explicitly admitted through
+         this gate, so backends can rely on it being safely captureable.
++
++        Capture lifecycle contract (bounded and synchronized):
++
++        - A descriptor already present in the key registry was admitted (and
++          queued for capture via ``get_capture_descs``) while capturing was
++          enabled, so returning it for replay is always safe.
++        - Without a platform key strategy (neutral core default), a
++          brand-new key is admitted only while the startup capture window is
++          open (``cudagraph_capturing_enabled`` is True). Once startup
++          capture is disabled, no new key can ever obtain a captured graph:
++          admitting one would make the wrapper attempt a runtime capture,
++          which is forbidden. Dispatch fails closed to eager and keeps the
++          metadata on the no-graph descriptor.
++        - With a platform key strategy, admission policy — and the bounded,
++          synchronized capture lifecycle it implies — is owned by the
++          plugin. A strategy-admitted key after startup capture must be
++          captured by the plugin before it is replayed (e.g. first-encounter
++          capture under an explicit temporary capture window), otherwise the
++          plugin's wrapper must bypass to eager. Core still enforces the
++          generic schema, alignment, the key bound and atomic registration.
++        - The number of runtime keys per mode is bounded by
++          ``MAX_RUNTIME_GRAPH_KEYS_PER_MODE``; a key beyond the bound fails
++          closed to eager.
++
++        Registration itself is synchronized so concurrent callers (e.g.
++        parallel replay workers) cannot exceed the bound or observe a partial
++        admission.
+         """
+         fallback = BatchDescriptor(
+             num_tokens=num_tokens,
+@@ -210,8 +334,60 @@ class CudagraphDispatcher:
+             return CUDAGraphMode.NONE, fallback
+ 
+         descriptor = self._create_runtime_batch_descriptor(num_tokens, runtime_metadata)
+-        self.add_cudagraph_key(runtime_mode, descriptor)
+-        return runtime_mode, descriptor
++
++        # Fast path: an already-admitted key was captured (or is queued for
++        # capture) during the capture window, so replaying it is safe. Set
++        # membership is safe to read without the lock; the slow path
++        # re-checks under the lock.
++        if descriptor in self.cudagraph_keys[runtime_mode]:
++            return runtime_mode, descriptor
++
++        # Resolve the platform strategy and run its admission decision before
++        # taking the lock: the hook is plugin code, its decision is a pure
++        # function of the arguments, and neither may extend the critical
++        # section. The resolved strategy is cached on the dispatcher.
++        strategy = self._resolve_key_strategy()
++        strategy_admits = self._admit_runtime_key(num_tokens, runtime_metadata)
++
++        with self._runtime_key_lock:
++            # Re-check under the lock: a concurrent caller may have admitted
++            # the same key while the strategy was consulted.
++            if descriptor in self.cudagraph_keys[runtime_mode]:
++                return runtime_mode, descriptor
++
++            # Neutral core default (no platform strategy): a brand-new key
++            # can only be admitted while the startup capture window is open.
++            # Once capture is disabled the key could never obtain a captured
++            # graph, so fail closed to eager without mutating the registry.
++            # With a registered platform strategy, the plugin owns the
++            # admission decision and the capture lifecycle of admitted keys
++            # (see the hook contract); core keeps enforcing the generic
++            # schema, the key bound and atomic registration.
++            if not strategy_admits:
++                return CUDAGraphMode.NONE, fallback
++
++            if not self._cudagraph_capturing_enabled() and strategy is None:
++                return CUDAGraphMode.NONE, fallback
++
++            runtime_key_count = sum(
++                1
++                for desc in self.cudagraph_keys[runtime_mode]
++                if desc.runtime_metadata is not None
++            )
++            if runtime_key_count >= MAX_RUNTIME_GRAPH_KEYS_PER_MODE:
++                if not self._runtime_key_cap_warned:
++                    self._runtime_key_cap_warned = True
++                    logger.warning(
++                        "Runtime cudagraph key bound "
++                        "(MAX_RUNTIME_GRAPH_KEYS_PER_MODE=%d) reached for %s; "
++                        "further runtime keys fail closed to eager execution.",
++                        MAX_RUNTIME_GRAPH_KEYS_PER_MODE,
++                        runtime_mode.name,
++                    )
++                return CUDAGraphMode.NONE, fallback
++
++            self.add_cudagraph_key(runtime_mode, descriptor)
++            return runtime_mode, descriptor
+ 
+     def add_cudagraph_key(
+         self, runtime_mode: CUDAGraphMode, batch_descriptor: BatchDescriptor
+@@ -329,7 +505,12 @@ class CudagraphDispatcher:
+                 platform-specific ``variant`` / ``backend_tag`` values.
+             allow_runtime_key_registration: Whether a validated runtime key
+                 may be registered. False fails closed to eager execution and
+-                never mutates the key registry.
++                never mutates the key registry. When True, a brand-new key is
++                only admitted while the startup capture window is open; once
++                capture is disabled, dispatch fails closed to eager unless
++                the key was already admitted (and captured) beforehand, or a
++                registered platform key strategy explicitly owns its capture
++                lifecycle (see ``Platform.get_cudagraph_key_strategy``).
+         """
+         allowed_modes = valid_modes or CUDAGraphMode.valid_runtime_modes()
+ 
+-- 
+2.53.0.windows.3
+

@@ -1,0 +1,4415 @@
+From 73c121d4c212a6eebdbd7644a7bf0aa7bafede25 Mon Sep 17 00:00:00 2001
+From: Raing5Days <M202574102@hust.edu.cn>
+Date: Sun, 30 Aug 2026 15:52:55 +0000
+Subject: [PATCH] test(ascend): split-batch examples, correctness harness and
+ unit tests
+
+- examples/: dual_inplace_parallel demo, latency bench, split-compare
+  benchmark, 2.5k-line split_batch correctness harness for NPU.
+- tests/: dual-pad planner UT, split full-graph startup test,
+  dual-stream link smoke, FIA shared-list compilation UT.
+---
+ examples/bench_split_batch_latency_npu.py    |  293 ++
+ examples/benchmark_split_compare.py          |  673 +++++
+ examples/dual_inplace_parallel.py            |   88 +
+ examples/test_split_batch_correctness_npu.py | 2540 ++++++++++++++++++
+ tests/run_dual_stream_link_smoke.py          |  221 ++
+ tests/test_dual_pad_planner.py               |  256 ++
+ tests/test_split_full_graph_startup.py       |   76 +
+ tests/ut/compilation/test_fia_shared_list.py |  186 ++
+ 8 files changed, 4333 insertions(+)
+ create mode 100644 examples/bench_split_batch_latency_npu.py
+ create mode 100644 examples/benchmark_split_compare.py
+ create mode 100644 examples/dual_inplace_parallel.py
+ create mode 100644 examples/test_split_batch_correctness_npu.py
+ create mode 100644 tests/run_dual_stream_link_smoke.py
+ create mode 100644 tests/test_dual_pad_planner.py
+ create mode 100644 tests/test_split_full_graph_startup.py
+ create mode 100644 tests/ut/compilation/test_fia_shared_list.py
+
+diff --git a/examples/bench_split_batch_latency_npu.py b/examples/bench_split_batch_latency_npu.py
+new file mode 100644
+index 0000000000..94c204620f
+--- /dev/null
++++ b/examples/bench_split_batch_latency_npu.py
+@@ -0,0 +1,293 @@
++#!/usr/bin/env python3
++# isort: skip_file
++"""Per-decode-step (steady-state) latency comparison: padding vs dual-stream split.
++
++目标:
++- 对同一个固定 decode batch, 测"单流 padding" vs "双流 split(exact)" 的
++  **稳态每步前向 TPOT (time per output token)**.
++- 正确做法: 逐 step 计时 (复刻 vllm.LLM._run_engine 骨架:
++  `while engine.has_unfinished_requests(): engine.step()`),
++  丢弃 prefill 步 + 首个 decode 步 (双流的 offset 图在此捕获/或作为 warmup),
++  对剩余 replay 步求 median/mean —— 这才是稳态 TPOT.
++
++背景 (为什么不能只测 total/max_tokens):
++- dual-inplace 的 split1 精确尺寸 offset 图是 lazy capture, 在"形状变化"时才 re-capture
++  (实测 bs=144: `inplace_capture_entry:2`, step_ids [1,7]; 跨 generate 复用)。
++- `total/max_tokens` 会把 prefill + (偶尔)re-capture 摊进每步, 污染 pad/split 比值。
++- 因此逐 step + 丢弃前导步, 给出干净稳态 TPOT。
++
++与 correctness harness 区别: 只计时不做正确性断言; 复用其 LLM 构建与 split_batch_config 构造。
++
++运行方式 (NPU, conda /root/miniconda3/envs/vllm-hust-dev):
++  python examples/bench_split_batch_latency_npu.py \
++    --model /data/shared-models/Qwen2.5-0.5B-Instruct \
++    --batch-size 144 --max-tokens 32 --reps 2 \
++    --capture-sizes 128,256 --enable-parallel-streams \
++    --offset-match-policy exact --run split --output-dir <dir>
++
++输出: <output-dir>/latency_bs<N>_<run>.json
++"""
++
++import importlib.util
++import json
++import os
++import statistics
++import sys
++import time
++
++# Matches harness behavior.
++os.environ.setdefault("VLLM_USE_MODELSCOPE", "True")
++os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
++os.environ.setdefault("ASCEND_RT_VISIBLE_DEVICES", "3")
++os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
++os.environ["TOKENIZERS_PARALLELISM"] = "false"
++
++import torch  # noqa: E402
++import torch_npu  # noqa: E402
++from vllm import SamplingParams  # noqa: E402
++
++HARNESS_PATH = os.path.join(
++    os.path.dirname(os.path.abspath(__file__)),
++    "test_split_batch_correctness_npu.py",
++)
++
++FIXED_PROMPT = "The capital of France is"
++
++
++def _load_harness():
++    spec = importlib.util.spec_from_file_location("split_harness", HARNESS_PATH)
++    mod = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(mod)
++    return mod
++
++
++def _parse_int_list(raw):
++    if raw is None:
++        return None
++    values = [int(s.strip()) for s in raw.split(",") if s.strip()]
++    if not values:
++        raise ValueError("expected at least one integer")
++    return values
++
++
++def _build_llm_args(h, *, model, capture_sizes, cudagraph_mode,
++                    max_num_seqs, max_model_len, gpu_memory_utilization,
++                    enforce_eager):
++    args = {
++        "model": model,
++        "max_model_len": max_model_len,
++        "gpu_memory_utilization": gpu_memory_utilization,
++        "enforce_eager": enforce_eager,
++        "compilation_config": {"cudagraph_mode": cudagraph_mode},
++    }
++    if capture_sizes is not None:
++        h._apply_capture_sizes(args, capture_sizes)
++    if max_num_seqs is not None:
++        args["max_num_seqs"] = max_num_seqs
++    return args
++
++
++def _time_generate(llm, prompts, sampling):
++    """Measure one llm.generate() start-to-end with device-wide sync (robust)."""
++    if hasattr(torch, "npu") and hasattr(torch.npu, "synchronize"):
++        torch.npu.synchronize()
++    t0 = time.perf_counter()
++    llm.generate(prompts, sampling)
++    if hasattr(torch, "npu") and hasattr(torch.npu, "synchronize"):
++        torch.npu.synchronize()
++    return time.perf_counter() - t0
++
++
++def _run_decode_tpot(h, *, llm_args, prompts, additional_config,
++                     warmup, reps, max_tokens):
++    """Return per-decode-token wall ms via T(1) vs T(K) subtraction.
++
++      T(1) = prefill + 1*decode      (max_tokens=1)
++      T(K) = prefill + K*decode      (max_tokens=K)
++      decode_ms = (median(TK) - median(T1)) / (K-1) * 1000
++
++    Because the prompts are identical, prefill is identical in both runs (even if
++    prefill is chunked into multiple engine steps), so subtraction removes prefill
++    entirely -> pure per-token decode time. The offset split graph is captured by
++    the warmup generate, so no recapture pollutes T(1)/T(K). Uses a single LLM
++    instance so cudagraph/offset caches are shared.
++    """
++    from vllm import SamplingParams
++    sK = SamplingParams(max_tokens=max_tokens, temperature=0.0,
++                        top_p=1.0, ignore_eos=True)
++    s1 = SamplingParams(max_tokens=1, temperature=0.0,
++                        top_p=1.0, ignore_eos=True)
++
++    llm = h._build_llm_from_args(llm_args, additional_config=additional_config)
++    # Warmup: untimed generate captures split offset graph + warms graphs.
++    for _ in range(max(warmup, 0)):
++        _time_generate(llm, prompts, sK)
++
++    t1_samples = [_time_generate(llm, prompts, s1) for _ in range(reps)]
++    tk_samples = [_time_generate(llm, prompts, sK) for _ in range(reps)]
++
++    try:
++        h._cleanup_llm(llm)
++    except Exception:
++        pass
++
++    t1_med = statistics.median(t1_samples)
++    tk_med = statistics.median(tk_samples)
++    decode_ms = ((tk_med - t1_med) / (max_tokens - 1)) * 1000.0 if max_tokens > 1 else None
++    return {
++        "t1_samples": [round(x, 4) for x in t1_samples],
++        "tk_samples": [round(x, 4) for x in tk_samples],
++        "t1_median_s": round(t1_med, 4),
++        "tk_median_s": round(tk_med, 4),
++        "decode_per_token_ms": decode_ms,
++    }
++
++
++def parse_cudagraph_mode(raw):
++    try:
++        cfg = json.loads(str(raw))
++        return cfg.get("cudagraph_mode", "FULL_DECODE_ONLY")
++    except Exception:
++        return str(raw)
++
++
++def main() -> int:
++    import argparse
++
++    p = argparse.ArgumentParser()
++    p.add_argument("--model", default="/data/shared-models/Qwen2.5-0.5B-Instruct")
++    p.add_argument("--batch-size", type=int, default=7)
++    p.add_argument("--max-tokens", type=int, default=64)
++    p.add_argument("--reps", type=int, default=1)
++    p.add_argument("--warmup", type=int, default=1,
++                   help="untimed generate() runs before timed reps (warms graphs + captures offset)")
++    p.add_argument("--capture-sizes", default="4,8")
++    p.add_argument("--parallel-capture-sizes", default=None)
++    p.add_argument("--compilation-config",
++                   default='{"cudagraph_mode":"FULL_DECODE_ONLY"}')
++    p.add_argument("--max-num-seqs", type=int, default=None)
++    p.add_argument("--max-model-len", type=int, default=8192)
++    p.add_argument("--gpu-memory-utilization", type=float, default=0.90)
++    p.add_argument("--enforce-eager", action="store_true")
++    p.add_argument("--split-mode", default="inplace_parallel")
++    p.add_argument("--enable-parallel-streams", action="store_true")
++    p.add_argument("--min-batch-size-for-split", type=int, default=4)
++    p.add_argument("--force-split", action="store_true")
++    p.add_argument("--unified-capture-sizes", default=None,
++                   help=("P11 DUAL_UNIFIED_GEMM: comma-separated exact FULL "
++                         "graph sizes (injected only for the split arm; also "
++                         "export VLLM_ASCEND_DUAL_UNIFIED_GEMM=1)."))
++    p.add_argument("--offset-match-policy", default="exact",
++                   choices=["exact", "bucket"])
++    p.add_argument("--run", default="both", choices=["both", "pad", "split"])
++    p.add_argument("--output-dir",
++                   default="/workspace/现阶段情况核实/task-b-logs/latency")
++    args = p.parse_args()
++
++    capture_sizes = _parse_int_list(args.capture_sizes)
++    parallel_capture_sizes = _parse_int_list(args.parallel_capture_sizes)
++    h = _load_harness()
++
++    max_num_seqs = args.max_num_seqs
++    if max_num_seqs is None:
++        req = int(args.batch_size)
++        if capture_sizes:
++            req = max(req, max(int(x) for x in capture_sizes))
++        max_num_seqs = req
++
++    llm_args = _build_llm_args(
++        h, model=args.model, capture_sizes=capture_sizes,
++        cudagraph_mode=parse_cudagraph_mode(args.compilation_config),
++        max_num_seqs=max_num_seqs, max_model_len=args.max_model_len,
++        gpu_memory_utilization=args.gpu_memory_utilization,
++        enforce_eager=args.enforce_eager,
++    )
++
++    prompts = h._generate_fixed_prompts(
++        batch_size=args.batch_size, prompt=FIXED_PROMPT)
++
++    def make_cfg(enabled: bool):
++        unified_sizes = None
++        if enabled and args.unified_capture_sizes:
++            from examples.test_split_batch_correctness_npu import _parse_int_list
++            unified_sizes = _parse_int_list(args.unified_capture_sizes)
++        cfg = h._build_split_additional_config(
++            enabled=enabled,
++            split_mode=args.split_mode,
++            num_splits=2,
++            enable_parallel_streams=args.enable_parallel_streams,
++            min_batch_size_for_split=args.min_batch_size_for_split,
++            parallel_capture_sizes=parallel_capture_sizes,
++            force_split=args.force_split,
++            inplace_split_planner_policy="largest_lower",
++            inplace_parallel_replay_policy="full_graph_parallel",
++            macro_graph_config=None,
++            pa_shape_list=None,
++            unified_capture_sizes=unified_sizes,
++        )
++        cfg["split_batch_config"]["inplace_offset_match_policy"] = (
++            args.offset_match_policy)
++        return cfg
++
++    results = {}
++    runs = []
++    if args.run in ("both", "pad"):
++        runs.append("pad")
++    if args.run in ("both", "split"):
++        runs.append("split")
++
++    os.makedirs(args.output_dir, exist_ok=True)
++
++    for mode in runs:
++        enabled = (mode == "split")
++        cfg = make_cfg(enabled)
++        res = _run_decode_tpot(
++            h, llm_args=llm_args, prompts=prompts,
++            additional_config=cfg, warmup=args.warmup, reps=args.reps,
++            max_tokens=args.max_tokens,
++        )
++        results[mode] = {
++            "reps": args.reps,
++            "warmup": args.warmup,
++            "max_tokens": args.max_tokens,
++            **res,
++        }
++        print(f"[{mode}] decode_per_token={res['decode_per_token_ms']:.3f}ms "
++              f"T1={res['t1_median_s']}s TK={res['tk_median_s']}s", flush=True)
++
++    pad_med = results["pad"]["decode_per_token_ms"] if "pad" in results else None
++    split_med = results["split"]["decode_per_token_ms"] if "split" in results else None
++    if pad_med is not None and split_med is not None:
++        results["cross"] = {
++            "pad_decode_ms": pad_med,
++            "split_decode_ms": split_med,
++            "split_is_faster": split_med < pad_med,
++            "speedup": round(pad_med / split_med, 4) if split_med else None,
++        }
++        print(f"[cross] pad={pad_med:.3f} split={split_med:.3f} "
++              f"speedup={results['cross']['speedup']}", flush=True)
++
++    out = {
++        "model": args.model,
++        "batch_size": args.batch_size,
++        "max_tokens": args.max_tokens,
++        "capture_sizes": capture_sizes,
++        "offset_match_policy": args.offset_match_policy,
++        "split_mode": args.split_mode,
++        "enable_parallel_streams": args.enable_parallel_streams,
++        "warmup": args.warmup,
++        "reps": args.reps,
++        "max_tokens": args.max_tokens,
++        "split_batch_config": make_cfg(True)["split_batch_config"],
++        "results": results,
++    }
++    out_path = os.path.join(
++        args.output_dir, f"latency_bs{args.batch_size}_{'_'.join(runs)}.json")
++    with open(out_path, "w", encoding="utf-8") as f:
++        json.dump(out, f, indent=2, ensure_ascii=False, default=str)
++    print(f"Wrote {out_path}", flush=True)
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/examples/benchmark_split_compare.py b/examples/benchmark_split_compare.py
+new file mode 100644
+index 0000000000..f3f5608333
+--- /dev/null
++++ b/examples/benchmark_split_compare.py
+@@ -0,0 +1,673 @@
++"""
++Offline vLLM Serving Benchmark Script
++
++Directly loads the model via vLLM's offline LLM engine (no server needed),
++runs inference on ShareGPT prompts, and measures TTFT / TPOT / ITL / E2EL
++using the per-request metrics exposed by RequestOutput.metrics.
++
++Usage:
++    # Single NPU card
++    python bench_serve_offline.py \
++        --model /workspace/data/models/qwen3-0.6b \
++        --dataset-path /workspace/data/datasets/ShareGPT_V3_unfiltered_cleaned_split/ShareGPT_V3_unfiltered_cleaned_split.json \
++        --num-prompts 1 \
++        --temperature 0 \
++        --device 0
++
++    # Multi-card (e.g. NPU 0,1 for TP=2)
++    python bench_serve_offline.py \
++        --model /workspace/data/models/qwen3-0.6b \
++        --dataset-path ... \
++        --device 0,1 \
++        --tensor-parallel-size 2
++
++    --device sets ASCEND_RT_VISIBLE_DEVICES (Ascend NPU) or
++    CUDA_VISIBLE_DEVICES (NVIDIA GPU) automatically before model loading.
++
++Dependencies:
++    pip install vllm aiohttp   # vllm provides LLM engine + tokenizer
++"""
++
++import argparse
++import json
++import math
++import os
++import random
++import statistics
++import sys
++import time
++from dataclasses import dataclass, field
++from typing import Any
++
++
++@dataclass
++class BenchmarkConfig:
++    model: str
++    dataset_path: str | None
++    num_prompts: int
++    temperature: float
++    top_p: float
++    max_tokens: int | None
++    seed: int
++    ignore_eos: bool
++    trust_remote_code: bool
++    tensor_parallel_size: int
++    gpu_memory_utilization: float
++    dtype: str
++    num_warmups: int
++    save_result: str | None
++    device: str | None
++    additional_config: dict | None
++    compilation_config: dict | None
++    input_len: int | None
++    output_len: int | None
++
++
++def load_sharegpt_dataset(
++    dataset_path: str, num_prompts: int, seed: int
++) -> list[dict]:
++    with open(dataset_path, encoding="utf-8") as f:
++        data = json.load(f)
++    data = [
++        entry
++        for entry in data
++        if "conversations" in entry and len(entry["conversations"]) >= 2
++    ]
++    random.seed(seed)
++    random.shuffle(data)
++    samples = []
++    for entry in data:
++        if len(samples) >= num_prompts:
++            break
++        prompt = entry["conversations"][0]["value"]
++        completion = entry["conversations"][1]["value"]
++        samples.append({"prompt": prompt, "completion": completion})
++    if len(samples) < num_prompts:
++        print(
++            f"WARNING: Only found {len(samples)} valid samples, "
++            f"requested {num_prompts}"
++        )
++    return samples
++
++
++SYNTHETIC_PROMPTS = [
++    "Write a short essay about the importance of artificial intelligence in modern society.",
++    "Explain the concept of machine learning in simple terms.",
++    "What are the key differences between supervised and unsupervised learning?",
++    "Describe the impact of climate change on global ecosystems.",
++    "Summarize the history of the internet in a few paragraphs.",
++    "What are the advantages and disadvantages of renewable energy sources?",
++    "Explain how neural networks work to someone with no technical background.",
++    "Discuss the role of education in economic development.",
++    "What are the ethical considerations in artificial intelligence research?",
++    "Describe the process of photosynthesis in detail.",
++    "Compare and contrast democracy and authoritarianism as forms of government.",
++    "What are the main challenges facing healthcare systems worldwide?",
++    "Explain the theory of relativity in accessible language.",
++    "Discuss the social and economic effects of globalization.",
++    "What are the potential benefits and risks of genetic engineering?",
++    "Describe the water cycle and its importance to life on Earth.",
++    "How does the human immune system protect the body from disease?",
++    "What role does creativity play in scientific discovery?",
++    "Explain the difference between correlation and causation.",
++    "Discuss the future of space exploration and its significance for humanity.",
++]
++
++
++def build_synthetic_dataset(
++    num_prompts: int, input_len: int | None, seed: int
++) -> list[dict]:
++    random.seed(seed)
++    samples = []
++    for i in range(num_prompts):
++        prompt = SYNTHETIC_PROMPTS[i % len(SYNTHETIC_PROMPTS)]
++        samples.append({"prompt": prompt, "completion": ""})
++    return samples
++
++
++def safe_mean(vals):
++    return statistics.mean(vals) if vals else 0.0
++
++
++def safe_median(vals):
++    return statistics.median(vals) if vals else 0.0
++
++
++def safe_stdev(vals):
++    return statistics.stdev(vals) if len(vals) > 1 else 0.0
++
++
++def safe_percentile(vals, p):
++    if not vals:
++        return 0.0
++    sorted_vals = sorted(vals)
++    k = (len(sorted_vals) - 1) * (p / 100.0)
++    f_idx = math.floor(k)
++    c_idx = math.ceil(k)
++    if f_idx == c_idx:
++        return sorted_vals[int(k)]
++    return sorted_vals[f_idx] * (c_idx - k) + sorted_vals[c_idx] * (k - f_idx)
++
++
++def extract_metrics_from_output(
++    output,
++    wall_clock_e2el: float | None = None,
++) -> dict[str, Any] | None:
++    has_output = output.outputs and len(output.outputs) > 0
++    num_output_tokens = 0
++    if has_output:
++        num_output_tokens = len(output.outputs[0].token_ids)
++    if num_output_tokens == 0 and output.prompt_token_ids is None and not has_output:
++        return None
++
++    prompt_len = len(output.prompt_token_ids) if output.prompt_token_ids else 0
++    generated_text = output.outputs[0].text if has_output else ""
++
++    metrics = output.metrics
++    ttft = None
++    decode_time = None
++
++    if metrics is not None:
++        ttft = getattr(metrics, "first_token_latency", None)
++        first_token_ts = getattr(metrics, "first_token_ts", None)
++        last_token_ts = getattr(metrics, "last_token_ts", None)
++        if (
++            ttft is not None
++            and first_token_ts is not None
++            and last_token_ts is not None
++        ):
++            decode_time = max(0.0, last_token_ts - first_token_ts)
++
++    if ttft is not None and decode_time is not None:
++        e2el = ttft + decode_time
++    elif wall_clock_e2el is not None:
++        e2el = wall_clock_e2el
++        if num_output_tokens > 0:
++            prefill_ratio = prompt_len / max(prompt_len + num_output_tokens, 1)
++            ttft = e2el * prefill_ratio
++            decode_time = e2el - ttft
++        else:
++            ttft = e2el
++            decode_time = 0.0
++    else:
++        e2el = 0.0
++        ttft = 0.0
++        decode_time = 0.0
++
++    tpot = 0.0
++    if num_output_tokens > 1 and decode_time > 0:
++        tpot = decode_time / (num_output_tokens - 1)
++
++    return {
++        "ttft": ttft,
++        "e2el": e2el,
++        "tpot": tpot,
++        "decode_time": decode_time,
++        "num_output_tokens": num_output_tokens,
++        "prompt_len": prompt_len,
++        "generated_text": generated_text,
++        "metrics_source": "engine" if (metrics is not None and ttft is not None) else "wall_clock",
++    }
++
++
++def detect_platform() -> str:
++    try:
++        import torch_npu  # noqa: F401
++        return "npu"
++    except ImportError:
++        pass
++    try:
++        import torch
++        if torch.cuda.is_available():
++            return "cuda"
++    except ImportError:
++        pass
++    return "unknown"
++
++
++def setup_visible_devices(device: str | None) -> None:
++    if device is None:
++        return
++    platform = detect_platform()
++    if platform == "npu":
++        os.environ["ASCEND_RT_VISIBLE_DEVICES"] = device
++        os.environ.setdefault("VLLM_ASCEND_TORCH_PREFLIGHT_DEVICE", "npu:0")
++        print(f"[device] ASCEND_RT_VISIBLE_DEVICES={device}")
++    elif platform == "cuda":
++        os.environ["CUDA_VISIBLE_DEVICES"] = device
++        print(f"[device] CUDA_VISIBLE_DEVICES={device}")
++    else:
++        os.environ["ASCEND_RT_VISIBLE_DEVICES"] = device
++        os.environ["CUDA_VISIBLE_DEVICES"] = device
++        print(f"[device] ASCEND_RT_VISIBLE_DEVICES={device}, CUDA_VISIBLE_DEVICES={device}")
++
++
++def run_benchmark(config: BenchmarkConfig) -> dict[str, Any]:
++    setup_visible_devices(config.device)
++
++    from vllm import LLM, SamplingParams
++    from vllm.inputs import TextPrompt, TokensPrompt
++
++    print(f"Loading model: {config.model}")
++    llm_kwargs: dict[str, Any] = dict(
++        model=config.model,
++        tensor_parallel_size=config.tensor_parallel_size,
++        gpu_memory_utilization=config.gpu_memory_utilization,
++        dtype=config.dtype,
++        trust_remote_code=config.trust_remote_code,
++        seed=config.seed,
++    )
++    if config.additional_config is not None:
++        llm_kwargs["additional_config"] = config.additional_config
++    if config.compilation_config is not None:
++        llm_kwargs["compilation_config"] = config.compilation_config
++    llm = LLM(**llm_kwargs)
++
++    tokenizer = llm.get_tokenizer()
++
++    if config.dataset_path:
++        samples = load_sharegpt_dataset(
++            config.dataset_path, config.num_prompts, config.seed
++        )
++    else:
++        samples = build_synthetic_dataset(
++            config.num_prompts, config.input_len, config.seed
++        )
++    if not samples:
++        print("ERROR: No valid samples found.")
++        sys.exit(1)
++
++    prompts = []
++    sampling_params_list = []
++    prompt_lens = []
++    output_lens = []
++
++    for sample in samples:
++        prompt_ids = tokenizer(sample["prompt"]).input_ids
++        prompt_len = len(prompt_ids)
++
++        use_token_ids = False
++        if config.input_len is not None and prompt_len != config.input_len:
++            if prompt_len < config.input_len:
++                prompt_ids = prompt_ids + [0] * (config.input_len - prompt_len)
++            else:
++                prompt_ids = prompt_ids[: config.input_len]
++            prompt_len = config.input_len
++            use_token_ids = True
++
++        if sample["completion"]:
++            completion_ids = tokenizer(sample["completion"]).input_ids
++            output_len = len(completion_ids)
++        else:
++            output_len = config.output_len or config.max_tokens or 128
++
++        if use_token_ids:
++            prompts.append(TokensPrompt(prompt_token_ids=prompt_ids))
++        else:
++            prompts.append(TextPrompt(prompt=sample["prompt"]))
++        max_tok = config.max_tokens if config.max_tokens is not None else output_len
++        sp = SamplingParams(
++            temperature=config.temperature,
++            top_p=config.top_p,
++            max_tokens=max_tok,
++            ignore_eos=config.ignore_eos,
++        )
++        sampling_params_list.append(sp)
++        prompt_lens.append(prompt_len)
++        output_lens.append(output_len)
++
++    dataset_label = "ShareGPT" if config.dataset_path else "synthetic"
++    print(f"\nLoaded {len(prompts)} prompts ({dataset_label}).")
++    for i in range(len(prompts)):
++        print(
++            f"  Prompt {i}: input_len={prompt_lens[i]}, "
++            f"expected_output_len={output_lens[i]}"
++        )
++
++    if config.num_warmups > 0:
++        print(f"\nWarming up with {config.num_warmups} request(s)...")
++        warmup_prompts = prompts[: config.num_warmups]
++        warmup_sp = sampling_params_list[: config.num_warmups]
++        llm.generate(warmup_prompts, warmup_sp, use_tqdm=False)
++        print("Warmup complete.")
++
++    print(f"\nRunning benchmark with {len(prompts)} prompt(s)...")
++    start_time = time.perf_counter()
++    outputs = llm.generate(prompts, sampling_params_list, use_tqdm=True)
++    end_time = time.perf_counter()
++    benchmark_duration = end_time - start_time
++
++    per_request_e2el = None
++    if len(prompts) == 1:
++        per_request_e2el = benchmark_duration
++
++    ttfts = []
++    tpots = []
++    e2els = []
++    itls = []
++    total_input = 0
++    total_output = 0
++    completed = 0
++    failed = 0
++    metrics_sources = {"engine": 0, "wall_clock": 0}
++
++    for i, output in enumerate(outputs):
++        wc_e2el = per_request_e2el
++        if wc_e2el is None and len(prompts) > 1:
++            wc_e2el = benchmark_duration / len(prompts)
++
++        m = extract_metrics_from_output(output, wall_clock_e2el=wc_e2el)
++        if m is not None and m["num_output_tokens"] > 0:
++            completed += 1
++            ttfts.append(m["ttft"])
++            e2els.append(m["e2el"])
++            tpots.append(m["tpot"])
++            total_input += m["prompt_len"]
++            total_output += m["num_output_tokens"]
++            metrics_sources[m["metrics_source"]] += 1
++
++            if m["num_output_tokens"] > 1 and m["decode_time"] > 0:
++                avg_itl = m["decode_time"] / (m["num_output_tokens"] - 1)
++                itls.extend([avg_itl] * (m["num_output_tokens"] - 1))
++        else:
++            failed += 1
++            total_input += prompt_lens[i]
++            if output.outputs:
++                num_out = len(output.outputs[0].token_ids)
++                total_output += num_out
++
++    result = {
++        "completed": completed,
++        "failed": failed,
++        "duration_s": benchmark_duration,
++        "total_input_tokens": total_input,
++        "total_output_tokens": total_output,
++        "request_throughput": completed / benchmark_duration
++        if benchmark_duration > 0
++        else 0,
++        "output_throughput": total_output / benchmark_duration
++        if benchmark_duration > 0
++        else 0,
++        "total_token_throughput": (total_input + total_output) / benchmark_duration
++        if benchmark_duration > 0
++        else 0,
++        "ttft": {
++            "mean_ms": safe_mean(ttfts) * 1000,
++            "median_ms": safe_median(ttfts) * 1000,
++            "std_ms": safe_stdev(ttfts) * 1000,
++            "p99_ms": safe_percentile(ttfts, 99) * 1000,
++        },
++        "tpot": {
++            "mean_ms": safe_mean(tpots) * 1000,
++            "median_ms": safe_median(tpots) * 1000,
++            "std_ms": safe_stdev(tpots) * 1000,
++            "p99_ms": safe_percentile(tpots, 99) * 1000,
++        },
++        "itl": {
++            "mean_ms": safe_mean(itls) * 1000,
++            "median_ms": safe_median(itls) * 1000,
++            "std_ms": safe_stdev(itls) * 1000,
++            "p99_ms": safe_percentile(itls, 99) * 1000,
++        },
++        "e2el": {
++            "mean_ms": safe_mean(e2els) * 1000,
++            "median_ms": safe_median(e2els) * 1000,
++            "std_ms": safe_stdev(e2els) * 1000,
++            "p99_ms": safe_percentile(e2els, 99) * 1000,
++        },
++        "note": "ITL in offline mode is approximated as avg decode_time / (output_tokens - 1) "
++        "per request, not per-token streaming measurement.",
++        "metrics_sources": metrics_sources,
++    }
++
++    return result
++
++
++def print_results(result: dict[str, Any]) -> None:
++    print("\n" + "=" * 55)
++    print("{s:{c}^{n}}".format(s=" Offline Serving Benchmark Result ", n=55, c="="))
++    print("=" * 55)
++    print("{:<45} {:<10}".format("Successful requests:", result["completed"]))
++    print("{:<45} {:<10}".format("Failed requests:", result["failed"]))
++    print(
++        "{:<45} {:<10.2f}".format(
++            "Benchmark duration (s):", result["duration_s"]
++        )
++    )
++    print(
++        "{:<45} {:<10}".format("Total input tokens:", result["total_input_tokens"])
++    )
++    print(
++        "{:<45} {:<10}".format(
++            "Total generated tokens:", result["total_output_tokens"]
++        )
++    )
++    print(
++        "{:<45} {:<10.2f}".format(
++            "Request throughput (req/s):", result["request_throughput"]
++        )
++    )
++    print(
++        "{:<45} {:<10.2f}".format(
++            "Output token throughput (tok/s):", result["output_throughput"]
++        )
++    )
++    print(
++        "{:<45} {:<10.2f}".format(
++            "Total token throughput (tok/s):", result["total_token_throughput"]
++        )
++    )
++
++    for metric_key, metric_name, metric_header in [
++        ("ttft", "TTFT", "Time to First Token"),
++        ("tpot", "TPOT", "Time per Output Token (excl. 1st token)"),
++        ("itl", "ITL", "Inter-token Latency (approx)"),
++        ("e2el", "E2EL", "End-to-end Latency"),
++    ]:
++        m = result[metric_key]
++        print("{s:{c}^{n}}".format(s=metric_header, n=55, c="-"))
++        print("{:<45} {:<10.2f}".format(f"Mean {metric_name} (ms):", m["mean_ms"]))
++        print(
++            "{:<45} {:<10.2f}".format(f"Median {metric_name} (ms):", m["median_ms"])
++        )
++        print("{:<45} {:<10.2f}".format(f"P99 {metric_name} (ms):", m["p99_ms"]))
++
++    print("=" * 55)
++    if "note" in result:
++        print(f"\nNote: {result['note']}")
++    src = result.get("metrics_sources", {})
++    if src.get("wall_clock", 0) > 0:
++        print(
++            f"Metrics source: engine={src.get('engine', 0)}, "
++            f"wall_clock_fallback={src.get('wall_clock', 0)}"
++        )
++        print(
++            "  (wall_clock: TTFT estimated by prefill/total token ratio, "
++            "not streaming measurement)"
++        )
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(
++        description="Offline vLLM Serving Benchmark (no server needed)"
++    )
++    parser.add_argument(
++        "--model",
++        type=str,
++        required=True,
++        help="Model name or path.",
++    )
++    parser.add_argument(
++        "--dataset-path",
++        type=str,
++        default=None,
++        help="Path to ShareGPT dataset JSON file. "
++        "If not set, uses synthetic prompts (--input-len/--output-len).",
++    )
++    parser.add_argument(
++        "--num-prompts",
++        type=int,
++        default=200,
++        help="Number of prompts to sample from dataset.",
++    )
++    parser.add_argument(
++        "--input-len",
++        type=int,
++        default=None,
++        help="Input token length for synthetic prompts. "
++        "Only used when --dataset-path is not set.",
++    )
++    parser.add_argument(
++        "--output-len",
++        type=int,
++        default=None,
++        help="Expected output token length for synthetic prompts. "
++        "Only used when --dataset-path is not set.",
++    )
++    parser.add_argument(
++        "--temperature",
++        type=float,
++        default=0.0,
++        help="Sampling temperature (0 = greedy).",
++    )
++    parser.add_argument(
++        "--top-p",
++        type=float,
++        default=1.0,
++        help="Top-p sampling parameter.",
++    )
++    parser.add_argument(
++        "--max-tokens",
++        type=int,
++        default=None,
++        help="Maximum output tokens per request. "
++        "If not set, uses the ShareGPT completion length.",
++    )
++    parser.add_argument(
++        "--seed",
++        type=int,
++        default=0,
++        help="Random seed for dataset shuffling.",
++    )
++    parser.add_argument(
++        "--ignore-eos",
++        action="store_true",
++        help="Set ignore_eos flag in requests.",
++    )
++    parser.add_argument(
++        "--trust-remote-code",
++        action="store_true",
++        help="Trust remote code when loading model.",
++    )
++    parser.add_argument(
++        "--tensor-parallel-size",
++        type=int,
++        default=1,
++        help="Tensor parallel size.",
++    )
++    parser.add_argument(
++        "--gpu-memory-utilization",
++        type=float,
++        default=0.5,
++        help="GPU memory utilization ratio.",
++    )
++    parser.add_argument(
++        "--dtype",
++        type=str,
++        default="auto",
++        help="Data type (auto, float16, bfloat16, float32).",
++    )
++    parser.add_argument(
++        "--num-warmups",
++        type=int,
++        default=0,
++        help="Number of warmup requests before benchmarking.",
++    )
++    parser.add_argument(
++        "--save-result",
++        type=str,
++        default=None,
++        help="Path to save benchmark result as JSON.",
++    )
++    parser.add_argument(
++        "--device",
++        type=str,
++        default="0",
++        help="Visible device IDs, e.g. '0' or '0,1'. "
++        "Sets ASCEND_RT_VISIBLE_DEVICES (Ascend NPU) or "
++        "CUDA_VISIBLE_DEVICES (NVIDIA GPU) automatically.",
++    )
++    parser.add_argument(
++        "--additional-config",
++        type=str,
++        default=None,
++        help="Additional engine config as JSON string, "
++        'e.g. \'{"split_batch_config": {"enabled": true}}\'',
++    )
++    parser.add_argument(
++        "--compilation-config",
++        type=str,
++        default=None,
++        help="Compilation config as JSON string, "
++        'e.g. \'{"cudagraph_mode": "FULL_DECODE_ONLY", '
++        '"cudagraph_capture_sizes": [8, 16, 32]}\'',
++    )
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++
++    config = BenchmarkConfig(
++        model=args.model,
++        dataset_path=args.dataset_path,
++        num_prompts=args.num_prompts,
++        temperature=args.temperature,
++        top_p=args.top_p,
++        max_tokens=args.max_tokens,
++        seed=args.seed,
++        ignore_eos=args.ignore_eos,
++        trust_remote_code=args.trust_remote_code,
++        tensor_parallel_size=args.tensor_parallel_size,
++        gpu_memory_utilization=args.gpu_memory_utilization,
++        dtype=args.dtype,
++        num_warmups=args.num_warmups,
++        save_result=args.save_result,
++        device=args.device,
++        additional_config=json.loads(args.additional_config) if args.additional_config else None,
++        compilation_config=json.loads(args.compilation_config) if args.compilation_config else None,
++        input_len=args.input_len,
++        output_len=args.output_len,
++    )
++
++    print("Configuration:")
++    print(f"  Model:                {config.model}")
++    print(f"  Num prompts:          {config.num_prompts}")
++    print(f"  Temperature:          {config.temperature}")
++    print(f"  Top-p:                {config.top_p}")
++    print(f"  Max tokens:           {config.max_tokens}")
++    print(f"  Dataset:              {config.dataset_path or 'synthetic'}")
++    if not config.dataset_path:
++        print(f"  Input len:            {config.input_len or '<natural>'}")
++        print(f"  Output len:           {config.output_len or config.max_tokens or 128}")
++    print(f"  Device:               {config.device or '<auto>'}")
++    print(f"  Tensor parallel:      {config.tensor_parallel_size}")
++    print(f"  GPU mem utilization:  {config.gpu_memory_utilization}")
++    print(f"  Dtype:                {config.dtype}")
++    print(f"  Num warmups:          {config.num_warmups}")
++    if config.additional_config:
++        print(f"  Additional config:    {json.dumps(config.additional_config, separators=(',', ':'))}")
++    if config.compilation_config:
++        print(f"  Compilation config:   {json.dumps(config.compilation_config, separators=(',', ':'))}")
++
++    result = run_benchmark(config)
++    print_results(result)
++
++    if config.save_result:
++        with open(config.save_result, "w", encoding="utf-8") as f:
++            json.dump(result, f, indent=2, ensure_ascii=False)
++        print(f"\nResult saved to: {config.save_result}")
++
++
++if __name__ == "__main__":
++    main()
+\ No newline at end of file
+diff --git a/examples/dual_inplace_parallel.py b/examples/dual_inplace_parallel.py
+new file mode 100644
+index 0000000000..f4497b0fc7
+--- /dev/null
++++ b/examples/dual_inplace_parallel.py
+@@ -0,0 +1,88 @@
++"""Demonstrates the Ascend split-batch (dual-stream) decode path.
++
++Passes ``additional_config={"split_batch_config": ...}`` to run the
++inplace-parallel (two NPU streams) decode path on an 80-request batch.
++See docs/source/user_guide/feature_guide/split_batch.md for the full
++configuration reference and admission conditions.
++"""
++
++import os
++
++os.environ.setdefault("ASCEND_RT_VISIBLE_DEVICES", "7")
++os.environ.setdefault("VLLM_USE_MODELSCOPE", "True")
++os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
++# Optional JSONL diagnostics for the split-batch path; disabled by default.
++if os.environ.get("SPLIT_BATCH_DEBUG", "0") == "1":
++    os.environ["VLLM_ASCEND_SPLIT_INPLACE_DEBUG"] = "1"
++    os.environ.setdefault(
++        "VLLM_ASCEND_SPLIT_INPLACE_DEBUG_FILE",
++        "/tmp/vllm_ascend_inplace_parallel.jsonl",
++    )
++
++from vllm import LLM, SamplingParams
++
++
++def main():
++    base_topics = [
++        "artificial intelligence",
++        "quantum computing",
++        "climate change",
++        "space exploration",
++        "ancient history",
++        "modern art",
++        "human psychology",
++        "economics",
++        "philosophy",
++    ]
++    batch_size = 80
++    raw_prompts = [
++        f"Explain {base_topics[i % len(base_topics)]} (variant {i})"
++        for i in range(batch_size)
++    ]
++    sampling_params = SamplingParams(max_tokens=50, temperature=0.0)
++    llm = LLM(
++        model="Qwen/Qwen3-0.6B",
++        additional_config={
++            "split_batch_config": {
++                "enabled": True,
++                "mode": "inplace_parallel",
++                "num_splits": 2,
++                "enable_parallel_streams": True,
++                "enable_inplace_lazy_capture": True,
++                "inplace_split_planner_policy": "largest_lower",
++                "inplace_offset_match_policy": "exact",
++                "inplace_parallel_replay_policy": "full_graph_parallel",
++                "inplace_offset_capture_sizes": [1, 2, 4, 8, 16, 32, 64],
++                "parallel_capture_sizes": [1, 2, 4, 8, 16, 32, 64],
++            },
++        },
++        compilation_config={
++            "cudagraph_mode": "FULL",
++            "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32, 64],
++        },
++        gpu_memory_utilization=0.8,
++    )
++
++    tokenizer = llm.get_tokenizer()
++    prompts = [
++        tokenizer.apply_chat_template(
++            [{"role": "user", "content": text}],
++            tokenize=False,
++            add_generation_prompt=True
++        )
++        for text in raw_prompts
++    ]
++    
++    outputs = llm.generate(prompts, sampling_params)
++    for output in outputs:
++        prompt = output.prompt
++        generated_text = output.outputs[0].text
++        print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
++    if os.environ.get("VLLM_ASCEND_SPLIT_INPLACE_DEBUG") == "1":
++        print(
++            ">>> Diag log: "
++            f"{os.environ.get('VLLM_ASCEND_SPLIT_INPLACE_DEBUG_FILE', '(default)')} <<<"
++        )
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/test_split_batch_correctness_npu.py b/examples/test_split_batch_correctness_npu.py
+new file mode 100644
+index 0000000000..d2d8260238
+--- /dev/null
++++ b/examples/test_split_batch_correctness_npu.py
+@@ -0,0 +1,2540 @@
++#!/usr/bin/env python3
++# isort: skip_file
++"""Offline correctness check for Ascend split-batch.
++
++目标:
++- 验证开启 split-batch 不会改变生成结果（token_ids 与 text 严格一致）。
++
++运行方式（推荐：主控模式，子进程分别跑 disabled/enabled，再做严格对比）:
++  python vllm-ascend/examples/test_split_batch_correctness_npu.py \
++    --model Qwen/Qwen2.5-0.5B-Instruct --max-tokens 64 --batch-size 8
++
++输出:
++- 会在 --output-dir 下创建时间戳子目录，保存:
++  - prompts.json
++  - outputs_split_disabled.json
++  - outputs_split_enabled.json
++  - diff.json (仅失败时)
++  - metadata.json
++  - summary.json
++  - console.log （抓取 stdout/stderr）
++
++备注:
++- 为确保 split-batch 实际生效，batch_size 应 >= min_batch_size_for_split（默认 4）。
++- 默认强制确定性解码（temperature=0），并使用 seed 生成固定 prompts。
++"""
++
++import gc
++import logging
++import json
++import os
++import random
++import subprocess
++import sys
++import time
++from datetime import datetime
++from pathlib import Path
++from typing import Any, TextIO
++
++import torch
++import torch_npu
++
++# Match existing offline example behavior.
++os.environ.setdefault("VLLM_USE_MODELSCOPE", "True")
++os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
++# Ensure a supported All2All backend is selected before vLLM config validation.
++os.environ.setdefault("ASCEND_RT_VISIBLE_DEVICES", "3")
++os.environ.setdefault("VLLM_LOGGING_LEVEL", "INFO")
++
++os.environ["TOKENIZERS_PARALLELISM"] = "false"
++
++
++from vllm import LLM, SamplingParams  # noqa: E402
++from vllm.engine.arg_utils import EngineArgs  # noqa: E402
++import vllm.logger as vllm_logger_module  # noqa: E402
++from vllm.utils.argparse_utils import FlexibleArgumentParser  # noqa: E402
++
++
++CONFIGS: dict[str, dict[str, Any]] = {
++    "split_disabled": {
++        "enabled": False,
++        "description": "Split-batch disabled",
++    },
++    "split_enabled": {
++        "enabled": True,
++        "description": "Split-batch enabled",
++    },
++}
++
++
++def _parse_int_list(raw: str | None) -> list[int] | None:
++    if raw is None:
++        return None
++    values = [int(s.strip()) for s in raw.split(",") if s.strip()]
++    if not values:
++        raise ValueError("expected at least one integer")
++    if any(v <= 0 for v in values):
++        raise ValueError("all values must be positive integers")
++    return values
++
++
++def _parse_start_graph_caps(raw: str | None) -> dict[int, int] | None:
++    if raw is None or not raw.strip():
++        return None
++    result: dict[int, int] = {}
++    for item in raw.strip().strip("'\"").split(","):
++        item = item.strip()
++        if not item:
++            continue
++        if ":" not in item:
++            raise ValueError(
++                "expected start:max_graph_tokens entries, got "
++                f"{item!r}")
++        start_raw, cap_raw = item.split(":", 1)
++        start = int(start_raw.strip())
++        cap = int(cap_raw.strip())
++        if start < 0 or cap <= 0:
++            raise ValueError(
++                "start:max_graph_tokens entries must use non-negative starts "
++                "and positive graph token caps")
++        result[start] = cap
++    return result or None
++
++
++def _parse_start_graph_allowed_sizes(raw: str | None
++                                     ) -> dict[int, list[int]] | None:
++    if raw is None or not raw.strip():
++        return None
++    result: dict[int, list[int]] = {}
++    for item in raw.strip().strip("'\"").split(";"):
++        item = item.strip().strip("'\"")
++        if not item:
++            continue
++        if ":" not in item:
++            raise ValueError(
++                "expected start:size|size entries, got "
++                f"{item!r}")
++        start_raw, sizes_raw = item.split(":", 1)
++        start = int(start_raw.strip().strip("'\""))
++        sizes = [
++            int(size.strip())
++            for size in sizes_raw.strip().strip("'\"").replace(
++                ",", "|").split("|")
++            if size.strip()
++        ]
++        if start < 0 or not sizes or any(size <= 0 for size in sizes):
++            raise ValueError(
++                "start:size|size entries must use non-negative starts and "
++                "positive graph token sizes")
++        result[start] = sorted(set(sizes))
++    return result or None
++
++
++def _parse_json_object(raw: str | None, *, arg_name: str) -> dict[str, Any] | None:
++    if raw is None or not str(raw).strip():
++        return None
++    try:
++        parsed = json.loads(str(raw))
++    except json.JSONDecodeError as exc:
++        raise ValueError(f"{arg_name} must be a JSON object") from exc
++    if not isinstance(parsed, dict):
++        raise ValueError(f"{arg_name} must be a JSON object")
++    return parsed
++
++
++def _apply_capture_sizes(args: dict[str, Any], capture_sizes: list[int]) -> None:
++    compilation_config = args.get("compilation_config") or {}
++    if not isinstance(compilation_config, dict):
++        try:
++            compilation_config = json.loads(str(compilation_config))
++        except Exception as exc:
++            raise ValueError(
++                "--capture-sizes requires compilation_config to be a dict or "
++                "JSON object string") from exc
++    compilation_config = dict(compilation_config)
++    compilation_config["cudagraph_capture_sizes"] = sorted(
++        {int(size) for size in capture_sizes})
++    args["compilation_config"] = compilation_config
++
++
++def _apply_cudagraph_mode(args: dict[str, Any], cudagraph_mode: str) -> None:
++    compilation_config = args.get("compilation_config") or {}
++    if not isinstance(compilation_config, dict):
++        try:
++            compilation_config = json.loads(str(compilation_config))
++        except Exception as exc:
++            raise ValueError(
++                "--cudagraph-mode requires compilation_config to be a dict "
++                "or JSON object string") from exc
++    compilation_config = dict(compilation_config)
++    compilation_config["cudagraph_mode"] = str(cudagraph_mode)
++    args["compilation_config"] = compilation_config
++
++
++def _ensure_fixed_batch_graph_capacity(
++    args: dict[str, Any],
++    *,
++    batch_size: int,
++    capture_sizes: list[int] | None,
++) -> None:
++    """Keep padded graph cases from being filtered by max_num_seqs.
++
++    vLLM derives valid decode graph sizes from max_num_seqs. For fixed-batch
++    split probes such as 416 -> 512 padding, max_num_seqs must cover the padded
++    graph size, not only the real request count.
++    """
++    required = int(batch_size)
++    if capture_sizes:
++        required = max(required, max(int(size) for size in capture_sizes))
++
++    max_num_seqs = args.get("max_num_seqs")
++    if max_num_seqs is None:
++        args["max_num_seqs"] = required
++    elif int(max_num_seqs) < required:
++        print(
++            "ERROR: --fixed-batch-size with --capture-sizes requires "
++            f"--max-num-seqs >= {required}, got {max_num_seqs}",
++            file=sys.stderr,
++        )
++        raise ValueError("fixed batch graph capacity is too small")
++
++
++def _expected_inplace_split(batch_size: int,
++                            capture_sizes: list[int]) -> dict[str, int] | None:
++    sizes = sorted({int(size) for size in capture_sizes if int(size) > 0})
++    if not sizes or batch_size <= 0 or batch_size > sizes[-1]:
++        return None
++    if batch_size in sizes:
++        return None
++    lower = [size for size in sizes if size < batch_size]
++    if not lower:
++        return None
++    first = max(lower)
++    second = batch_size - first
++    if second <= 0:
++        return None
++    return {
++        "total_tokens": int(batch_size),
++        "first_tokens": int(first),
++        "second_tokens": int(second),
++        "first_start_num_tokens": 0,
++        "second_start_num_tokens": int(first),
++    }
++
++
++def _load_jsonl(path: str) -> list[dict[str, Any]]:
++    if not path or not os.path.exists(path):
++        return []
++    rows: list[dict[str, Any]] = []
++    with open(path, "r", encoding="utf-8") as f:
++        for line in f:
++            line = line.strip()
++            if not line:
++                continue
++            try:
++                obj = json.loads(line)
++            except json.JSONDecodeError:
++                continue
++            if isinstance(obj, dict):
++                rows.append(obj)
++    return rows
++
++
++def _tensor_ptr(payload: dict[str, Any], *path: str) -> int | None:
++    cur = _tensor_payload(payload, *path)
++    if cur is None:
++        return None
++    ptr = cur.get("data_ptr", cur.get("ptr"))
++    return int(ptr) if ptr is not None else None
++
++
++def _tensor_payload(payload: dict[str, Any],
++                    *path: str) -> dict[str, Any] | None:
++    cur: Any = payload
++    for key in path:
++        if not isinstance(cur, dict):
++            return None
++        cur = cur.get(key)
++    if not isinstance(cur, dict):
++        return None
++    return cur
++
++
++def _split_from_step_descriptors(
++        step_descriptors: list[dict[str, Any]]) -> dict[str, int] | None:
++    """Rebuild one observed split from the current split_descriptor events.
++
++    The legacy split_slices event no longer exists; each decode step now
++    emits one split_descriptor event per microbatch (payload-nested). idx 0
++    is the head microbatch and the largest idx is the offset microbatch.
++    """
++    by_idx: dict[int, dict[str, Any]] = {}
++    for row in step_descriptors:
++        payload = row.get("payload") or {}
++        idx = payload.get("idx")
++        if idx is None:
++            continue
++        by_idx[int(idx)] = payload
++    if 0 not in by_idx or max(by_idx) < 1:
++        return None
++    first_payload = by_idx[0]
++    last_payload = by_idx[max(by_idx)]
++    first_tokens = int(first_payload.get("actual_num_tokens", 0) or 0)
++    second_tokens = int(last_payload.get("actual_num_tokens", 0) or 0)
++    second_start = int((last_payload.get("batch_descriptor") or {}).get(
++        "start_num_tokens", 0) or 0)
++    if first_tokens <= 0 or second_tokens <= 0 or second_start <= 0:
++        return None
++    return {
++        "total_tokens": first_tokens + second_tokens,
++        "first_tokens": first_tokens,
++        "second_tokens": second_tokens,
++        "first_start_num_tokens": 0,
++        "second_start_num_tokens": second_start,
++    }
++
++
++def _split_histogram_key(split: dict[str, int]) -> str:
++    return (
++        f"{split['first_tokens']}+{split['second_tokens']}"
++        f"@{split['second_start_num_tokens']}"
++    )
++
++
++def _descriptor_matches_expected(row: dict[str, Any],
++                                 expected_split: dict[str, int],
++                                 expected_graph_variant: str) -> bool:
++    payload = row.get("payload") or {}
++    descriptor = payload.get("batch_descriptor") or {}
++    # Prefer the actual (non-padded) token count. split_descriptor reports it
++    # as actual_num_tokens; inplace_lazy_capture_complete reports it as
++    # num_tokens. Fall back to the descriptor's (graph) size last.
++    actual_tokens = payload.get(
++        "actual_num_tokens",
++        payload.get("num_tokens", descriptor.get("num_tokens", 0)))
++    return (
++        int(actual_tokens or 0) == int(expected_split["second_tokens"])
++        and int(descriptor.get("start_num_tokens", 0) or 0)
++        == int(expected_split["second_start_num_tokens"])
++        and str(descriptor.get("graph_variant", expected_graph_variant))
++        == expected_graph_variant
++    )
++
++
++def _execution_matches_expected(row: dict[str, Any],
++                                expected_split: dict[str, int]) -> bool:
++    payload = row.get("payload") or {}
++    return (
++        int(payload.get("num_tokens", 0) or 0)
++        == int(expected_split["second_tokens"])
++        and int(payload.get("start_num_tokens", 0) or 0)
++        == int(expected_split["second_start_num_tokens"])
++    )
++
++
++def _summarize_split_debug_trace(
++    path: str,
++    *,
++    expected_split: dict[str, int] | None,
++    split_mode: str = "inplace_serial",
++    expected_no_split_reason: str | None = None,
++) -> dict[str, Any]:
++    rows = _load_jsonl(path)
++    event_counts: dict[str, int] = {}
++    for row in rows:
++        event = str(row.get("event"))
++        event_counts[event] = event_counts.get(event, 0) + 1
++
++    planner_decisions = [
++        row for row in rows if row.get("event") in (
++            "inplace_split_planning_result", "inplace_split_precheck_failed")
++    ]
++    fallback_reason_histogram: dict[str, int] = {}
++    for row in planner_decisions:
++        payload = row.get("payload") or {}
++        reason = payload.get("reason")
++        if reason is None:
++            continue
++        # Current schema replaced `fallback_to` with `has_plan`. Precheck
++        # failures carry no has_plan key and always mean no split happened.
++        if not payload.get("has_plan", False) or str(reason).startswith(
++                "no_split_"):
++            reason_key = str(reason)
++            fallback_reason_histogram[reason_key] = (
++                fallback_reason_histogram.get(reason_key, 0) + 1)
++    descriptors = [row for row in rows if row.get("event") == "split_descriptor"]
++    inplace_exec_events = {"inplace_serial_execution"}
++    expected_graph_variant = "inplace_serial"
++    if split_mode == "inplace_parallel":
++        inplace_exec_events.add("inplace_parallel_execution")
++        expected_graph_variant = "inplace_parallel"
++    inplace_exec = [
++        row for row in rows if row.get("event") in inplace_exec_events
++    ]
++    captures = [
++        row for row in rows
++        if row.get("event") == "acl_graph_capture"
++        and (row.get("payload") or {}).get("phase") == "post"
++        and int(((row.get("payload") or {}).get("batch_descriptor") or {}).get(
++            "start_num_tokens", 0) or 0) > 0
++    ]
++    acl_replays = [
++        row for row in rows
++        if row.get("event") == "acl_graph_replay"
++        and (row.get("payload") or {}).get("phase") == "post"
++        and int(((row.get("payload") or {}).get("batch_descriptor") or {}).get(
++            "start_num_tokens", 0) or 0) > 0
++    ]
++    lazy_capture_complete = [
++        row for row in rows
++        if row.get("event") == "inplace_lazy_capture_complete"
++        and int(((row.get("payload") or {}).get("batch_descriptor") or {}).get(
++            "start_num_tokens", 0) or 0) > 0
++    ]
++
++    observed_splits: list[dict[str, Any]] = []
++    observed_split_histogram: dict[str, int] = {}
++    # The legacy split_slices event no longer exists; rebuild each observed
++    # split from the per-step split_descriptor microbatch events instead.
++    descriptors_by_step: dict[Any, list[dict[str, Any]]] = {}
++    for row in descriptors:
++        descriptors_by_step.setdefault(row.get("step_id"), []).append(row)
++    for step_id, step_descriptors in descriptors_by_step.items():
++        split = _split_from_step_descriptors(step_descriptors)
++        if split is None:
++            continue
++        record = {
++            "step_id": step_id,
++            **split,
++        }
++        observed_splits.append(record)
++        key = _split_histogram_key(split)
++        observed_split_histogram[key] = observed_split_histogram.get(key, 0) + 1
++
++    expected_observations: list[dict[str, Any]] = []
++    expected_descriptors: list[dict[str, Any]] = []
++    expected_exec: list[dict[str, Any]] = []
++    expected_captures: list[dict[str, Any]] = []
++    expected_lazy_captures: list[dict[str, Any]] = []
++    if expected_split is not None:
++        expected_observations = [
++            row for row in observed_splits
++            if {
++                "total_tokens": row["total_tokens"],
++                "first_tokens": row["first_tokens"],
++                "second_tokens": row["second_tokens"],
++                "first_start_num_tokens": row["first_start_num_tokens"],
++                "second_start_num_tokens": row["second_start_num_tokens"],
++            } == expected_split
++        ]
++        expected_descriptors = [
++            row for row in descriptors
++            if _descriptor_matches_expected(row, expected_split,
++                                            expected_graph_variant)
++        ]
++        expected_exec = [
++            row for row in inplace_exec
++            if _execution_matches_expected(row, expected_split)
++        ]
++        expected_captures = [
++            row for row in captures
++            if _descriptor_matches_expected(row, expected_split,
++                                            expected_graph_variant)
++        ]
++        expected_lazy_captures = [
++            row for row in lazy_capture_complete
++            if _descriptor_matches_expected(row, expected_split,
++                                            expected_graph_variant)
++        ]
++
++    second_exec = expected_exec if expected_split is not None else [
++        row for row in inplace_exec
++        if int((row.get("payload") or {}).get("start_num_tokens", 0) or 0) > 0
++    ]
++    # Current inplace execution events report tensor views under `payload`.
++    # Only input_ids/positions are reliably present (the metadata tensor dict
++    # is often empty and slot_mapping/block_tables are no longer emitted), so
++    # pointer-stability validation is limited to those two fields.
++    ptr_fields = {
++        "input_ids": ("input_ids", ),
++        "positions": ("positions", ),
++    }
++    ptr_stability: dict[str, Any] = {}
++    for name, keys in ptr_fields.items():
++        tensor_payloads = [
++            info for info in (_tensor_payload(row.get("payload") or {}, *keys)
++                              for row in second_exec) if info is not None
++        ]
++        values = []
++        shapes: list[list[int]] = []
++        ndims: list[int] = []
++        storage_offsets: list[int] = []
++        for info in tensor_payloads:
++            ptr = info.get("data_ptr", info.get("ptr"))
++            if ptr is not None:
++                values.append(int(ptr))
++            shape = info.get("shape")
++            if isinstance(shape, list):
++                shapes.append([int(v) for v in shape])
++                ndims.append(int(info.get("ndim", len(shape))))
++            elif "ndim" in info:
++                ndims.append(int(info["ndim"]))
++            if info.get("storage_offset") is not None:
++                storage_offsets.append(int(info["storage_offset"]))
++        unique_shapes = sorted({tuple(shape) for shape in shapes})
++        ptr_stability[name] = {
++            "count": len(values),
++            "unique_count": len(set(values)),
++            "stable": bool(values) and len(set(values)) == 1,
++            "values": sorted(set(values))[:8],
++            "shapes": [list(shape) for shape in unique_shapes[:8]],
++            "ndims": sorted(set(ndims))[:8],
++            "storage_offsets": sorted(set(storage_offsets))[:8],
++        }
++
++    observed_split = None
++    if expected_observations:
++        observed_split = {
++            k: expected_observations[-1][k]
++            for k in (
++                "total_tokens",
++                "first_tokens",
++                "second_tokens",
++                "first_start_num_tokens",
++                "second_start_num_tokens",
++            )
++        }
++    elif observed_splits:
++        observed_split = {
++            k: observed_splits[-1][k]
++            for k in (
++                "total_tokens",
++                "first_tokens",
++                "second_tokens",
++                "first_start_num_tokens",
++                "second_start_num_tokens",
++            )
++        }
++
++    expected_capture_count = (
++        len(expected_lazy_captures) if expected_lazy_captures
++        else len(expected_captures)
++    )
++    inferred_replay_count = (
++        max(0, len(expected_exec) - expected_capture_count)
++        if expected_split is not None else 0
++    )
++    parallel_gate = {
++        "descriptor_parallel_stream_count": sum(
++            1 for row in expected_descriptors
++            if bool((row.get("payload") or {}).get("in_parallel_streams",
++                                                   False))),
++        "execution_parallel_stream_count": sum(
++            1 for row in second_exec
++            if str((row.get("payload") or {}).get("stream", "")) == "parallel"),
++        "original_offset_view_count": sum(
++            1 for row in second_exec
++            if (row.get("payload") or {}).get("buffer_source")
++            == "original_offset_view"),
++        "parallel_graph_entry_pool_count": sum(
++            1 for row in second_exec
++            if (row.get("payload") or {}).get("graph_entry_pool") == "parallel"),
++        "parallel_graph_params_pool_count": sum(
++            1 for row in second_exec
++            if (row.get("payload") or {}).get("graph_params_pool") == "parallel"),
++    }
++
++    failures: list[str] = []
++    if expected_no_split_reason is not None:
++        observed = fallback_reason_histogram.get(expected_no_split_reason, 0)
++        if observed < 1:
++            failures.append(
++                "expected no-split fallback reason not observed: "
++                f"{expected_no_split_reason}")
++        if inplace_exec:
++            failures.append(
++                "inplace execution observed despite expected no-split "
++                f"fallback: {len(inplace_exec)} events")
++    if expected_split is not None:
++        if len(expected_observations) < 3:
++            failures.append(
++                "expected split observed fewer than 3 decode steps: "
++                f"{len(expected_observations)}")
++        if not expected_descriptors:
++            failures.append(
++                f"no split-1 descriptor observed for {expected_split}")
++        if expected_capture_count < 1:
++            failures.append(
++                f"no offset lazy capture observed for {expected_split}")
++        if expected_capture_count > 1:
++            failures.append(
++                f"offset descriptor captured more than once: "
++                f"{expected_capture_count}")
++        if expected_capture_count >= 1 and inferred_replay_count < 1:
++            failures.append(
++                "no inferred replay observed after offset lazy capture")
++    if expected_split is not None and second_exec:
++        unstable = [
++            name for name, info in ptr_stability.items()
++            if info["count"] > 1 and not info["stable"]
++        ]
++        if unstable:
++            failures.append(f"unstable split-1 ptrs: {unstable}")
++        missing = [
++            name for name, info in ptr_stability.items()
++            if info["count"] == 0
++        ]
++        if missing:
++            failures.append(f"missing split-1 ptr observations: {missing}")
++    if expected_split is not None and not second_exec:
++        failures.append("no split-1 inplace execution event observed")
++    if expected_split is not None and split_mode == "inplace_parallel":
++        if parallel_gate["descriptor_parallel_stream_count"] == 0:
++            failures.append("split-1 descriptor did not use parallel stream")
++        if parallel_gate["execution_parallel_stream_count"] == 0:
++            failures.append("split-1 execution did not use parallel stream")
++        if parallel_gate["original_offset_view_count"] == 0:
++            failures.append(
++                "split-1 inplace_parallel execution did not report "
++                "original_offset_view buffer source")
++        if parallel_gate["parallel_graph_entry_pool_count"] == 0:
++            failures.append(
++                "split-1 inplace_parallel execution did not use parallel "
++                "graph entry pool")
++        if parallel_gate["parallel_graph_params_pool_count"] == 0:
++            failures.append(
++                "split-1 inplace_parallel execution did not use parallel "
++                "GraphParams pool")
++
++    return {
++        "path": path,
++        "exists": os.path.exists(path),
++        "num_events": len(rows),
++        "event_counts": event_counts,
++        "latest_planner_decision":
++        planner_decisions[-1] if planner_decisions else None,
++        "fallback_reason_histogram": fallback_reason_histogram,
++        "expected_no_split_reason": expected_no_split_reason,
++        "latest_descriptors": descriptors[-4:],
++        "expected_split": expected_split,
++        "expected_graph_variant": expected_graph_variant,
++        "expected_split_observations": {
++            "count": len(expected_observations),
++            "step_ids": [
++                row.get("step_id") for row in expected_observations
++                if row.get("step_id") is not None
++            ],
++        },
++        "observed_splits": observed_splits[-16:],
++        "observed_split_histogram": observed_split_histogram,
++        "observed_split": observed_split,
++        "offset_graph": {
++            "capture_count": expected_capture_count,
++            "acl_capture_count": len(expected_captures),
++            "lazy_capture_count": len(expected_lazy_captures),
++            "replay_count": len(acl_replays),
++            "inferred_replay_count": inferred_replay_count,
++            "unexpected_capture_count": max(0, expected_capture_count - 1),
++        },
++        "ptr_stability": ptr_stability,
++        "parallel_gate": parallel_gate,
++        "failures": failures,
++    }
++
++
++class _TeeTextIO:
++    """Write to multiple text streams (used to tee stdout/stderr to a file)."""
++
++    def __init__(self, *streams: TextIO):
++        self._streams = streams
++
++    def write(self, s: str) -> int:
++        n = 0
++        for st in self._streams:
++            try:
++                n = st.write(s)
++            except Exception:
++                # Best-effort: keep other streams working.
++                pass
++        return n
++
++    def flush(self) -> None:
++        for st in self._streams:
++            try:
++                st.flush()
++            except Exception:
++                pass
++
++    def isatty(self) -> bool:
++        for st in self._streams:
++            try:
++                if hasattr(st, "isatty") and st.isatty():
++                    return True
++            except Exception:
++                continue
++        return False
++
++
++def create_parser() -> FlexibleArgumentParser:
++    """Create a CLI parser in the same style as vLLM offline examples."""
++    parser = FlexibleArgumentParser()
++
++    # Add all standard engine/vllm args (model, tokenizer, compilation_config, etc).
++    EngineArgs.add_cli_args(parser)
++
++    # Match previous behavior in this script.
++    parser.set_defaults(trust_remote_code=True)
++
++    # Default compilation config: pass explicitly so Ascend platform sees it.
++    # IMPORTANT: Only include keys that exist on vLLM's `CompilationConfig`.
++    # vllm 0.23+ removed the `level` field (replaced by `mode`, which already
++    # defaults to VLLM_COMPILE for V1), so it must not be passed here.
++    cudagraph_sizes = [1,2,3,4,5,6,7,8]
++    compilation_config = {
++        "cudagraph_mode": "FULL_DECODE_ONLY",
++        "cudagraph_capture_sizes": cudagraph_sizes,
++    }
++    parser.set_defaults(compilation_config=compilation_config)
++
++    test_group = parser.add_argument_group("Split-batch correctness test")
++    test_group.add_argument("--max-tokens", type=int, default=64)
++    test_group.add_argument("--batch-size", type=int, default=8)
++    test_group.add_argument(
++        "--fixed-batch-size",
++        type=int,
++        default=None,
++        help=(
++            "Fixed request batch size. Overrides --batch-size and, when "
++            "--capture-sizes is omitted, defaults capture sizes to "
++            "256,384,512."
++        ),
++    )
++    test_group.add_argument(
++        "--fixed-batch-query-len",
++        type=int,
++        default=1,
++        help=(
++            "Scheduled token count per request for fixed-batch trace "
++            "expectations. Use 1 for normal decode and "
++            "1 + num_speculative_tokens for uniform spec decode."
++        ),
++    )
++    test_group.add_argument("--num-splits", type=int, default=2)
++    test_group.add_argument("--min-batch-size-for-split", type=int, default=4)
++    test_group.add_argument(
++        "--split-mode",
++        type=str,
++        default="parallel_buffer",
++        choices=["parallel_buffer", "inplace_serial", "inplace_parallel", "dual_pad"],
++        help="split_batch_config.mode for the enabled run.",
++    )
++    test_group.add_argument(
++        "--capture-sizes",
++        type=str,
++        default=None,
++        help=(
++            "Comma-separated cudagraph capture sizes. Phase-10 example: "
++            "--capture-sizes 256,384,512."
++        ),
++    )
++    test_group.add_argument(
++        "--pa-shape-list",
++        type=str,
++        default=None,
++        help=(
++            "Comma-separated ordinary graph shapes routed through paged "
++            "attention. Used for backend-policy diagnostics, for example "
++            "--pa-shape-list 512."
++        ),
++    )
++    test_group.add_argument(
++        "--enable-parallel-streams",
++        action="store_true",
++        help="Enable split parallel streams (if supported).",
++    )
++    test_group.add_argument(
++        "--parallel-capture-sizes",
++        type=str,
++        default=None,
++        help=(
++            "Comma-separated capture sizes for the parallel-stream graph pool "
++            "(split_batch_config.parallel_capture_sizes). "
++            "When omitted the parallel pool reuses cudagraph_capture_sizes. "
++            "Example: --parallel-capture-sizes 1,2,4,8,16,32,64,128"
++        ),
++    )
++    test_group.add_argument(
++        "--inplace-split-planner-policy",
++        "--inplace-split-first-tokens-policy",
++        dest="inplace_split_planner_policy",
++        choices=["largest_lower", "balanced", "macro_cube_balanced"],
++        default="largest_lower",
++        help=(
++            "Inplace split planner policy. largest_lower preserves the "
++            "current largest-lower main graph split; balanced chooses a more "
++            "even split among valid lower main graphs; macro_cube_balanced "
++            "uses split_batch_config.macro_graph_config."
++        ),
++    )
++    test_group.add_argument(
++        "--macro-graph-config-json",
++        type=str,
++        default="",
++        help=(
++            "JSON object assigned to split_batch_config.macro_graph_config. "
++            "When enabled, inplace lazy capture is disabled automatically."
++        ),
++    )
++    test_group.add_argument(
++        "--inplace-parallel-replay-policy",
++        choices=["full_graph_parallel", "piecewise_attention_parallel"],
++        default="full_graph_parallel",
++        help=(
++            "Replay policy for split_mode=inplace_parallel. "
++            "piecewise_attention_parallel requires --cudagraph-mode "
++            "PIECEWISE."
++        ),
++    )
++    test_group.add_argument(
++        "--piecewise-scheduler-sync-policy",
++        choices=["host_sync", "event_chain"],
++        default="event_chain",
++        help=(
++            "Synchronization policy for piecewise_attention_parallel. "
++            "event_chain uses device events; host_sync preserves the original "
++            "per-piece stream synchronize behavior."
++        ),
++    )
++    test_group.add_argument(
++        "--piecewise-attention-enqueue-policy",
++        choices=["per_piece_thread", "persistent_thread"],
++        default="persistent_thread",
++        help=(
++            "CPU enqueue policy for attention pieces in "
++            "piecewise_attention_parallel."
++        ),
++    )
++    test_group.add_argument(
++        "--enable-mixed-request-split",
++        action="store_true",
++        help=(
++            "Enable request-boundary mixed/prefill split planner in "
++            "split_batch_config."
++        ),
++    )
++    test_group.add_argument(
++        "--mixed-request-split-execution-mode",
++        choices=["dry_run", "serial", "piecewise_attention_parallel"],
++        default="dry_run",
++        help=(
++            "Execution mode for mixed request split. serial is the minimal "
++            "correctness path; piecewise_attention_parallel exercises the "
++            "dual-stream attention overlap path."
++        ),
++    )
++    test_group.add_argument(
++        "--mixed-request-min-total-tokens",
++        type=int,
++        default=128,
++        help="split_batch_config.mixed_request_min_total_tokens.",
++    )
++    test_group.add_argument(
++        "--mixed-request-min-tokens-per-split",
++        type=int,
++        default=64,
++        help="split_batch_config.mixed_request_min_tokens_per_split.",
++    )
++    test_group.add_argument(
++        "--mixed-request-max-single-request-ratio",
++        type=float,
++        default=0.70,
++        help="split_batch_config.mixed_request_max_single_request_ratio.",
++    )
++    test_group.add_argument(
++        "--mixed-request-max-padding-ratio-per-split",
++        type=float,
++        default=0.0,
++        help="split_batch_config.mixed_request_max_padding_ratio_per_split.",
++    )
++    test_group.add_argument(
++        "--mixed-request-min-prefill-reqs-for-prefill-split",
++        type=int,
++        default=2,
++        help=(
++            "split_batch_config."
++            "mixed_request_min_prefill_reqs_for_prefill_split."
++        ),
++    )
++    test_group.add_argument(
++        "--cudagraph-mode",
++        choices=[
++            "NONE",
++            "PIECEWISE",
++            "FULL",
++            "FULL_DECODE_ONLY",
++            "FULL_AND_PIECEWISE",
++        ],
++        default=None,
++        help=(
++            "Override compilation_config.cudagraph_mode for this run. "
++            "Use PIECEWISE for piecewise attention parallel profiling."
++        ),
++    )
++    test_group.add_argument(
++        "--inplace-offset-capture-sizes",
++        type=str,
++        default="",
++        help=(
++            "Optional comma-separated graph sizes for inplace offset buckets. "
++            "Example: 32,64,128,256."
++        ),
++    )
++    test_group.add_argument(
++        "--inplace-offset-max-graph-tokens-by-start",
++        type=str,
++        default="",
++        help=(
++            "Optional comma-separated start:max_graph_tokens caps for inplace "
++            "offset graphs. Example: 128:64,384:64."
++        ),
++    )
++    test_group.add_argument(
++        "--inplace-offset-min-graph-tokens",
++        type=int,
++        default=1,
++        help="Minimum graph size allowed for inplace offset graphs.",
++    )
++    test_group.add_argument(
++        "--inplace-offset-allowed-graph-tokens-by-start",
++        type=str,
++        default="",
++        help=(
++            "Optional semicolon-separated exact start:size-list mapping for "
++            "inplace offset graphs. Example: 32:16|32;64:16|32|64."
++        ),
++    )
++    test_group.add_argument(
++        "--force-split",
++        action="store_true",
++        help=(
++            "Force split-batch for every decode step regardless of padding "
++            "savings (split_batch_config.force_split). Useful for benchmarking "
++            "the split path on all batch sizes including exact graph hits."
++        ),
++    )
++    test_group.add_argument(
++        "--cudagraph-split-pad-threshold",
++        type=int,
++        default=0,
++        help=(
++            "DUAL_PAD only: minimum padding saved (without split vs with "
++            "split) required to actually split "
++            "(split_batch_config.cudagraph_split_pad_threshold)."
++        ),
++    )
++    test_group.add_argument(
++        "--unified-capture-sizes",
++        type=str,
++        default="",
++        help=(
++            "P11 DUAL_UNIFIED_GEMM: comma-separated exact FULL-graph sizes "
++            "injected as split_batch_config.unified_capture_sizes. Only "
++            "affects the enabled run; requires the env switch "
++            "VLLM_ASCEND_DUAL_UNIFIED_GEMM=1 to convert a committed dual_pad "
++            "decision into one exact-size single graph."
++        ),
++    )
++    test_group.add_argument(
++        "--validate-ptrs",
++        action="store_true",
++        help=(
++            "Enable inplace input/metadata pointer validation for the enabled "
++            "run (split_batch_config.inplace_validate_metadata_ptrs)."
++        ),
++    )
++    force_pa_group = test_group.add_mutually_exclusive_group()
++    force_pa_group.add_argument(
++        "--inplace-force-pa-for-offset",
++        dest="inplace_force_pa_for_offset",
++        action="store_true",
++        default=False,
++        help=(
++            "Diagnostic only: force offset inplace serial microbatches to use "
++            "PA instead of the selected attention backend."
++        ),
++    )
++    force_pa_group.add_argument(
++        "--no-inplace-force-pa-for-offset",
++        dest="inplace_force_pa_for_offset",
++        action="store_false",
++        help=(
++            "Diagnostic only: keep offset inplace serial microbatches on the "
++            "selected attention backend. This is the default."
++        ),
++    )
++    test_group.add_argument(
++        "--enable-inplace-spec-decode",
++        action="store_true",
++        help=(
++            "Allow inplace split for uniform speculative decode. Default is "
++            "off so spec decode keeps the Phase-12 fallback gate."
++        ),
++    )
++    test_group.add_argument(
++        "--enable-inplace-mrope",
++        action="store_true",
++        help=(
++            "Allow inplace_serial split for M-RoPE. Default is off so M-RoPE "
++            "keeps the Phase-12 fallback gate."
++        ),
++    )
++    test_group.add_argument(
++        "--split-debug",
++        action="store_true",
++        help="Collect VLLM_ASCEND_SPLIT_INPLACE_DEBUG JSONL for child runs.",
++    )
++    test_group.add_argument(
++        "--expect-split",
++        type=str,
++        default=None,
++        help=(
++            "Expected first,second split token counts, for example 384,32. "
++            "If omitted with --fixed-batch-size and --split-mode inplace_serial, "
++            "the value is derived from --capture-sizes."
++        ),
++    )
++    test_group.add_argument(
++        "--expect-no-split-reason",
++        type=str,
++        default=None,
++        help=(
++            "Expected no-split reason from the inplace_split_planning_result "
++            "or inplace_split_precheck_failed debug event when validating an "
++            "intentional inplace fallback, for example no_split_mrope. "
++            "When set, trace validation requires no offset inplace execution."
++        ),
++    )
++    test_group.add_argument(
++        "--force-fixed-prompts",
++        action="store_true",
++        help=(
++            "Use the same prompt for every request and ignore EOS by default, "
++            "so decode steps keep a fixed batch longer."
++        ),
++    )
++    test_group.add_argument(
++        "--fixed-prompt",
++        type=str,
++        default=(
++            "Write one concise sentence about deterministic batch scheduling."
++        ),
++        help="Prompt used when --force-fixed-prompts is set.",
++    )
++    test_group.add_argument(
++        "--ignore-eos",
++        action="store_true",
++        help="Set SamplingParams(ignore_eos=True).",
++    )
++    test_group.add_argument(
++        "--run",
++        type=str,
++        default="both",
++        choices=["both", "disabled", "enabled"],
++        help=(
++            "Which run(s) to execute: both (compare), disabled only, enabled only. "
++            "Coordinator mode runs children when run=both (default)."
++        ),
++    )
++    test_group.add_argument(
++        "--compare-mode",
++        type=str,
++        default="subprocess",
++        choices=["subprocess", "inproc"],
++        help=(
++            "When --run=both: 'subprocess' (recommended) runs two child processes and "
++            "compares saved outputs; 'inproc' runs two engines in-process."
++        ),
++    )
++    test_group.add_argument(
++        "--output-dir",
++        type=str,
++        default="./split_batch_correctness_results",
++        help=(
++            "Base output directory. This script will always create a timestamp subdir "
++            "and write all results there (including console.log). If the timestamp "
++            "name is already taken (e.g. concurrent runs started within the same "
++            "second), a numeric suffix (_1, _2, ...) is appended so runs never "
++            "share a dir."
++        ),
++    )
++    test_group.add_argument(
++        "--prompts-file",
++        type=str,
++        default=None,
++        help=(
++            "JSON file containing list[str] prompts. In coordinator mode, this is "
++            "auto-generated and passed to child runs."
++        ),
++    )
++    test_group.add_argument(
++        "--output-file",
++        type=str,
++        default=None,
++        help=(
++            "Single-run output JSON path (used by coordinator children). If set, "
++            "the output directory is derived from this path."
++        ),
++    )
++
++    prof_group = parser.add_argument_group("PyTorch Profiler (torch_npu)")
++    prof_group.add_argument(
++        "--profile",
++        action="store_true",
++        default=False,
++        help=(
++            "Enable torch_npu profiler and write TensorBoard traces. "
++            "NOTE: For meaningful NPU kernel traces with vLLM V1, run with "
++            "VLLM_ENABLE_V1_MULTIPROCESSING=0 so model executes in-process."
++        ),
++    )
++    prof_group.add_argument(
++        "--profile-dir",
++        type=str,
++        default="./torch_profiler",
++        help="Output directory for TensorBoard traces.",
++    )
++    prof_group.add_argument(
++        "--profile-target",
++        type=str,
++        default="enabled",
++        choices=["disabled", "enabled", "both"],
++        help="Which run to profile: split disabled, enabled, or both.",
++    )
++    prof_group.add_argument(
++        "--profile-record-shapes",
++        action="store_true",
++        help="Record operator input shapes (more overhead).",
++    )
++    prof_group.add_argument(
++        "--profile-with-stack",
++        action="store_true",
++        help="Record Python call stacks (more overhead).",
++    )
++    return parser
++
++
++def _build_llm_from_args(
++    llm_args: dict[str, Any],
++    *,
++    additional_config: dict[str, Any],
++) -> LLM:
++    args = dict(llm_args)
++    args["additional_config"] = additional_config
++    return LLM(**args)
++
++
++def _extract_first_output(output) -> tuple[list[int], str]:
++    # vLLM RequestOutput: output.outputs is a list (n=best_of)
++    if not output.outputs:
++        return [], ""
++    o0 = output.outputs[0]
++    token_ids = list(getattr(o0, "token_ids", []) or [])
++    text = str(getattr(o0, "text", "") or "")
++    return token_ids, text
++
++
++def _default_prompts() -> list[str]:
++    return [
++        "Hello, my name is",
++        "The capital of France is",
++        "Explain in one sentence: what is split-batch?",
++        "Write a short list of 3 items about: apples",
++        "The president of the United States is",
++        "Once upon a time in a land far away,",
++        "In computer science, a binary tree is",
++        "The quick brown fox jumps over the lazy dog.",
++    ]
++
++
++def _generate_prompts(*, batch_size: int, seed: int | None) -> list[str]:
++    base = _default_prompts()
++    prompts = (base * ((batch_size + len(base) - 1) // len(base)))[:batch_size]
++
++    # Make prompt order deterministic but seed-dependent.
++    rng = random.Random(int(seed or 0))
++    rng.shuffle(prompts)
++    return prompts
++
++
++def _generate_fixed_prompts(*, batch_size: int, prompt: str) -> list[str]:
++    return [prompt for _ in range(batch_size)]
++
++
++def _load_prompts(prompts_file: str) -> list[str]:
++    with open(prompts_file, "r", encoding="utf-8") as f:
++        prompts = json.load(f)
++    if not isinstance(prompts, list) or not all(isinstance(x, str) for x in prompts):
++        raise ValueError("--prompts-file must be a JSON list[str]")
++    return list(prompts)
++
++
++def _save_json(path: str, obj: Any) -> None:
++    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
++    with open(path, "w", encoding="utf-8") as f:
++        json.dump(obj, f, ensure_ascii=False, indent=2, default=str)
++
++
++def _make_unique_run_dir(output_dir_base: str) -> tuple[str, str]:
++    """Create and return a unique (out_dir, timestamp) run dir under base.
++
++    The dir name starts as a second-resolution timestamp. If that name is
++    already taken (e.g. concurrent runs started within the same second), a
++    numeric suffix (_1, _2, ...) is appended. Directories are created with
++    exist_ok=False so two runs can never share one dir and overwrite each
++    other's prompts.json / outputs / console.log.
++    """
++    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
++    for suffix in range(0, 1000):
++        name = timestamp if suffix == 0 else f"{timestamp}_{suffix}"
++        out_dir = os.path.join(str(output_dir_base), name)
++        try:
++            os.makedirs(out_dir)
++            return out_dir, timestamp
++        except FileExistsError:
++            continue
++    raise RuntimeError(
++        f"could not allocate a unique run dir under {output_dir_base!r} "
++        f"for timestamp {timestamp}")
++
++
++def _serialize_outputs(prompts: list[str], outputs) -> list[dict[str, Any]]:
++    rows: list[dict[str, Any]] = []
++    for i, out in enumerate(outputs):
++        token_ids, text = _extract_first_output(out)
++        rows.append(
++            {
++                "index": i,
++                "prompt": prompts[i] if i < len(prompts) else None,
++                "token_ids": token_ids,
++                "text": text,
++            }
++        )
++    return rows
++
++
++def _compare_serialized(
++    disabled_rows: list[dict[str, Any]],
++    enabled_rows: list[dict[str, Any]],
++) -> list[dict[str, Any]]:
++    mismatches: list[dict[str, Any]] = []
++
++    if len(disabled_rows) != len(enabled_rows):
++        mismatches.append(
++            {
++                "index": None,
++                "reason": "output length differs",
++                "disabled_len": len(disabled_rows),
++                "enabled_len": len(enabled_rows),
++            }
++        )
++
++    n = min(len(disabled_rows), len(enabled_rows))
++    for i in range(n):
++        a = disabled_rows[i]
++        b = enabled_rows[i]
++        if a.get("prompt") != b.get("prompt"):
++            mismatches.append(
++                {
++                    "index": i,
++                    "reason": "prompt differs",
++                    "disabled_prompt": a.get("prompt"),
++                    "enabled_prompt": b.get("prompt"),
++                }
++            )
++            continue
++
++        if a.get("token_ids") != b.get("token_ids") or a.get("text") != b.get("text"):
++            disabled_token_ids = list(a.get("token_ids") or [])
++            enabled_token_ids = list(b.get("token_ids") or [])
++            first_token_mismatch = None
++            for token_idx, (disabled_token, enabled_token) in enumerate(
++                    zip(disabled_token_ids, enabled_token_ids)):
++                if disabled_token != enabled_token:
++                    first_token_mismatch = {
++                        "position": token_idx,
++                        "disabled": disabled_token,
++                        "enabled": enabled_token,
++                    }
++                    break
++            if first_token_mismatch is None and (
++                    len(disabled_token_ids) != len(enabled_token_ids)):
++                first_token_mismatch = {
++                    "position": min(
++                        len(disabled_token_ids), len(enabled_token_ids)),
++                    "disabled_len": len(disabled_token_ids),
++                    "enabled_len": len(enabled_token_ids),
++                }
++            mismatches.append(
++                {
++                    "index": i,
++                    "prompt": a.get("prompt"),
++                    "first_token_mismatch": first_token_mismatch,
++                    "disabled": {
++                        "token_ids": disabled_token_ids,
++                        "text": a.get("text"),
++                    },
++                    "enabled": {
++                        "token_ids": enabled_token_ids,
++                        "text": b.get("text"),
++                    },
++                }
++            )
++
++    return mismatches
++
++
++def _cleanup_llm(llm: LLM) -> None:
++    """Release engine resources before starting the next run."""
++    try:
++        # vLLM's `LLM` does not expose a stable `shutdown()` method.
++        # For the V1 engine, we must explicitly shutdown the underlying
++        # EngineCore client to terminate the EngineCore subprocess(es),
++        # otherwise the first run can keep NPU memory reserved and make the
++        # second run see `Available memory: 0`.
++        engine = getattr(llm, "llm_engine", None)
++        engine_core = getattr(engine, "engine_core", None)
++        if engine_core is not None and hasattr(engine_core, "shutdown"):
++            engine_core.shutdown()
++    finally:
++        # Best-effort memory release
++        if hasattr(torch, "npu"):
++            if hasattr(torch.npu, "synchronize"):
++                torch.npu.synchronize()
++            if hasattr(torch.npu, "empty_cache"):
++                torch.npu.empty_cache()
++        gc.collect()
++
++
++def _run_with_torch_profiler(
++    *,
++    enabled: bool,
++    profile_dir: str,
++    run_name: str,
++    record_shapes: bool,
++    with_stack: bool,
++    fn,
++):
++    if not enabled:
++        return fn()
++
++    try:
++        from torch_npu import profiler as npu_profiler
++    except Exception as e:
++        raise RuntimeError(
++            "--profile was set but torch_npu.profiler is not available"
++        ) from e
++
++    os.makedirs(profile_dir, exist_ok=True)
++    ts = time.strftime("%Y%m%d_%H%M%S")
++    out_dir = os.path.join(profile_dir, f"{ts}_{run_name}")
++    os.makedirs(out_dir, exist_ok=True)
++
++    activities = [npu_profiler.ProfilerActivity.CPU, npu_profiler.ProfilerActivity.NPU]
++    trace_handler = npu_profiler.tensorboard_trace_handler(out_dir)
++
++    # Use an explicit schedule to avoid "stop while RECORD" edge cases.
++    schedule = npu_profiler.schedule(wait=0, warmup=0, active=1, repeat=1)
++
++    if hasattr(torch, "npu") and hasattr(torch.npu, "synchronize"):
++        torch.npu.synchronize()
++
++    experimental_config = torch_npu.profiler._ExperimentalConfig(
++        export_type=[
++            torch_npu.profiler.ExportType.Text
++            ],
++        profiler_level=torch_npu.profiler.ProfilerLevel.Level2,
++        mstx=False,    # 原参数名msprof_tx改为mstx，新版本依旧兼容原参数名msprof_tx
++        mstx_domain_include=[],
++        mstx_domain_exclude=[],
++        aic_metrics=torch_npu.profiler.AiCMetrics.AiCoreNone,
++        l2_cache=False,
++        op_attr=False,
++        data_simplification=False,
++        record_op_args=False,
++        gc_detect_threshold=None,
++        host_sys=[],
++        sys_io=False,
++        sys_interconnection=False
++    )
++
++    with npu_profiler.profile(
++        activities=activities,
++        schedule=schedule,
++        record_shapes=record_shapes,
++        with_stack=with_stack,
++        with_modules=True,
++        on_trace_ready=trace_handler,
++        profile_memory=False,
++        experimental_config=experimental_config
++    ) as prof:
++        result = fn()
++        if hasattr(torch, "npu") and hasattr(torch.npu, "synchronize"):
++            torch.npu.synchronize()
++        prof.step()
++        if hasattr(torch, "npu") and hasattr(torch.npu, "synchronize"):
++            torch.npu.synchronize()
++        return result
++
++
++def _build_split_additional_config(
++    *,
++    enabled: bool,
++    split_mode: str,
++    num_splits: int,
++    enable_parallel_streams: bool,
++    min_batch_size_for_split: int,
++    parallel_capture_sizes: list[int] | None = None,
++    force_split: bool = False,
++    validate_ptrs: bool = False,
++    inplace_force_pa_for_offset: bool = False,
++    enable_inplace_spec_decode: bool = False,
++    enable_inplace_mrope: bool = False,
++    inplace_split_planner_policy: str = "largest_lower",
++    inplace_offset_capture_sizes: list[int] | None = None,
++    inplace_offset_max_graph_tokens_by_start: dict[int, int] | None = None,
++    inplace_offset_min_graph_tokens: int = 1,
++    inplace_offset_allowed_graph_tokens_by_start: (
++        dict[int, list[int]] | None) = None,
++    inplace_parallel_replay_policy: str = "full_graph_parallel",
++    piecewise_scheduler_sync_policy: str = "event_chain",
++    piecewise_attention_enqueue_policy: str = "persistent_thread",
++    enable_mixed_request_split: bool = False,
++    mixed_request_split_execution_mode: str = "dry_run",
++    mixed_request_min_total_tokens: int = 128,
++    mixed_request_min_tokens_per_split: int = 64,
++    mixed_request_max_single_request_ratio: float = 0.70,
++    mixed_request_max_padding_ratio_per_split: float = 0.0,
++    mixed_request_min_prefill_reqs_for_prefill_split: int = 2,
++    macro_graph_config: dict[str, Any] | None = None,
++    pa_shape_list: list[int] | None = None,
++    cudagraph_split_pad_threshold: int = 0,
++    unified_capture_sizes: list[int] | None = None,
++) -> dict[str, Any]:
++    cfg: dict[str, Any] = {
++        "enabled": enabled,
++        "mode": split_mode,
++        "num_splits": num_splits,
++        "enable_parallel_streams": enable_parallel_streams,
++        "min_batch_size_for_split": min_batch_size_for_split,
++    }
++    macro_graph_enabled = bool(
++        macro_graph_config is not None
++        and macro_graph_config.get("enabled", False))
++    if parallel_capture_sizes is not None:
++        cfg["parallel_capture_sizes"] = parallel_capture_sizes
++    if force_split:
++        cfg["force_split"] = True
++    if split_mode == "dual_pad":
++        cfg["cudagraph_split_pad_threshold"] = int(
++            cudagraph_split_pad_threshold)
++        # P11 unified-row-graph: exact-size key whitelist (requires the env
++        # switch too). Injected only for dual_pad enabled runs.
++        if unified_capture_sizes:
++            cfg["unified_capture_sizes"] = list(unified_capture_sizes)
++    elif split_mode.startswith("inplace"):
++        cfg["enable_inplace_lazy_capture"] = not macro_graph_enabled
++        cfg["inplace_validate_metadata_ptrs"] = bool(validate_ptrs)
++        cfg["inplace_force_pa_for_offset"] = bool(
++            inplace_force_pa_for_offset)
++        cfg["enable_inplace_spec_decode"] = bool(enable_inplace_spec_decode)
++        cfg["enable_inplace_mrope"] = bool(enable_inplace_mrope)
++        cfg["inplace_split_planner_policy"] = inplace_split_planner_policy
++        cfg["inplace_split_first_tokens_policy"] = (
++            inplace_split_planner_policy)
++        cfg["inplace_parallel_replay_policy"] = (
++            inplace_parallel_replay_policy)
++        cfg["piecewise_scheduler_sync_policy"] = (
++            piecewise_scheduler_sync_policy)
++        cfg["piecewise_attention_enqueue_policy"] = (
++            piecewise_attention_enqueue_policy)
++        if enabled and enable_mixed_request_split:
++            cfg["enable_mixed_request_split"] = True
++            cfg["mixed_request_split_execution_mode"] = (
++                mixed_request_split_execution_mode)
++            cfg["mixed_request_min_total_tokens"] = int(
++                mixed_request_min_total_tokens)
++            cfg["mixed_request_min_tokens_per_split"] = int(
++                mixed_request_min_tokens_per_split)
++            cfg["mixed_request_max_single_request_ratio"] = float(
++                mixed_request_max_single_request_ratio)
++            cfg["mixed_request_max_padding_ratio_per_split"] = float(
++                mixed_request_max_padding_ratio_per_split)
++            cfg["mixed_request_min_prefill_reqs_for_prefill_split"] = int(
++                mixed_request_min_prefill_reqs_for_prefill_split)
++        cfg["inplace_offset_match_policy"] = "bucket"
++        offset_capture_sizes = (
++            inplace_offset_capture_sizes
++            if inplace_offset_capture_sizes is not None else
++            parallel_capture_sizes)
++        if offset_capture_sizes is not None:
++            cfg["inplace_offset_capture_sizes"] = list(offset_capture_sizes)
++        cfg["inplace_offset_min_graph_tokens"] = int(
++            inplace_offset_min_graph_tokens)
++        cfg["inplace_offset_max_padding_tokens"] = 127
++        cfg["inplace_offset_max_padding_ratio"] = 8.0
++        if inplace_offset_max_graph_tokens_by_start:
++            cfg["inplace_offset_max_graph_tokens_by_start"] = (
++                inplace_offset_max_graph_tokens_by_start)
++        if inplace_offset_allowed_graph_tokens_by_start:
++            cfg["inplace_offset_allowed_graph_tokens_by_start"] = (
++                inplace_offset_allowed_graph_tokens_by_start)
++        if macro_graph_config is not None:
++            cfg["macro_graph_config"] = macro_graph_config
++    additional_config: dict[str, Any] = {"split_batch_config": cfg}
++    if pa_shape_list is not None:
++        additional_config["pa_shape_list"] = list(pa_shape_list)
++    return additional_config
++
++
++def _run_single(
++    *,
++    llm_args: dict[str, Any],
++    prompts: list[str],
++    sampling: SamplingParams,
++    additional_config: dict[str, Any],
++    profile_enabled: bool,
++    profile_dir: str,
++    profile_target: str,
++    profile_record_shapes: bool,
++    profile_with_stack: bool,
++    run_name: str,
++):
++    llm = _build_llm_from_args(llm_args, additional_config=additional_config)
++    outputs = _run_with_torch_profiler(
++        enabled=profile_enabled and profile_target in (run_name, "both"),
++        profile_dir=profile_dir,
++        run_name=f"split_{run_name}",
++        record_shapes=profile_record_shapes,
++        with_stack=profile_with_stack,
++        fn=lambda: llm.generate(prompts, sampling),
++    )
++    return outputs, llm
++
++
++def _coordinator_subprocess(*, base_args: dict[str, Any], prompts: list[str], **ctx) -> int:
++    out_dir, timestamp = _make_unique_run_dir(str(ctx["output_dir_base"]))
++
++    prompts_path = os.path.join(out_dir, "prompts.json")
++    _save_json(prompts_path, prompts)
++
++    metadata = {
++        "timestamp": timestamp,
++        "model": base_args.get("model"),
++        "tokenizer": base_args.get("tokenizer") or base_args.get("model"),
++        "seed": base_args.get("seed"),
++        "batch_size": ctx["batch_size"],
++        "fixed_batch_size": ctx["fixed_batch_size"],
++        "fixed_batch_query_len": ctx["fixed_batch_query_len"],
++        "fixed_batch_total_tokens": ctx["fixed_batch_total_tokens"],
++        "max_tokens": ctx["max_tokens"],
++        "max_model_len": base_args.get("max_model_len"),
++        "gpu_memory_utilization": base_args.get("gpu_memory_utilization"),
++        "split_mode": ctx["split_mode"],
++        "num_splits": ctx["num_splits"],
++        "enable_parallel_streams": ctx["enable_parallel_streams"],
++        "min_batch_size_for_split": ctx["min_batch_size_for_split"],
++        "validate_ptrs": ctx["validate_ptrs"],
++        "enable_inplace_spec_decode": ctx["enable_inplace_spec_decode"],
++        "enable_inplace_mrope": ctx["enable_inplace_mrope"],
++        "inplace_split_planner_policy": ctx["inplace_split_planner_policy"],
++        "inplace_parallel_replay_policy": (
++            ctx["inplace_parallel_replay_policy"]),
++        "piecewise_scheduler_sync_policy": (
++            ctx["piecewise_scheduler_sync_policy"]),
++        "piecewise_attention_enqueue_policy": (
++            ctx["piecewise_attention_enqueue_policy"]),
++        "enable_mixed_request_split": ctx["enable_mixed_request_split"],
++        "mixed_request_split_execution_mode": (
++            ctx["mixed_request_split_execution_mode"]),
++        "mixed_request_min_total_tokens": (
++            ctx["mixed_request_min_total_tokens"]),
++        "mixed_request_min_tokens_per_split": (
++            ctx["mixed_request_min_tokens_per_split"]),
++        "mixed_request_max_single_request_ratio": (
++            ctx["mixed_request_max_single_request_ratio"]),
++        "mixed_request_max_padding_ratio_per_split": (
++            ctx["mixed_request_max_padding_ratio_per_split"]),
++        "mixed_request_min_prefill_reqs_for_prefill_split": (
++            ctx["mixed_request_min_prefill_reqs_for_prefill_split"]),
++        "inplace_offset_capture_sizes": ctx["inplace_offset_capture_sizes"],
++        "inplace_offset_max_graph_tokens_by_start": (
++            ctx["inplace_offset_max_graph_tokens_by_start"]),
++        "inplace_offset_min_graph_tokens": (
++            ctx["inplace_offset_min_graph_tokens"]),
++        "inplace_offset_allowed_graph_tokens_by_start": (
++            ctx["inplace_offset_allowed_graph_tokens_by_start"]),
++        "split_debug": ctx["split_debug"],
++        "expected_split": ctx["expected_split"],
++        "expected_no_split_reason": ctx["expected_no_split_reason"],
++        "pa_shape_list": ctx["pa_shape_list"],
++        "compilation_config": base_args.get("compilation_config"),
++        "compare_mode": "subprocess",
++    }
++    _save_json(os.path.join(out_dir, "metadata.json"), metadata)
++
++    outputs_disabled_path = os.path.join(out_dir, "outputs_split_disabled.json")
++    outputs_enabled_path = os.path.join(out_dir, "outputs_split_enabled.json")
++    debug_disabled_path = os.path.join(out_dir,
++                                       "split_inplace_debug_disabled.jsonl")
++    debug_enabled_path = os.path.join(out_dir,
++                                      "split_inplace_debug_enabled.jsonl")
++
++    script_path = str(Path(__file__).resolve())
++
++    # Forward argv, but remove coordinator-only flags and --run.
++    forward_argv: list[str] = []
++    skip_next = False
++    coordinator_flags_with_value = {
++        "--run",
++        "--compare-mode",
++        "--output-dir",
++        "--prompts-file",
++        "--output-file",
++    }
++    profiler_flags_with_value = {
++        "--profile-dir",
++        "--profile-target",
++    }
++    profiler_flags_bool = {
++        "--profile",
++        "--profile-record-shapes",
++        "--profile-with-stack",
++    }
++
++    for tok in sys.argv[1:]:
++        if skip_next:
++            skip_next = False
++            continue
++        if tok in coordinator_flags_with_value:
++            skip_next = True
++            continue
++        # Don't forward profiler flags by default; we attach per-child below.
++        if tok in profiler_flags_with_value:
++            skip_next = True
++            continue
++        if tok in profiler_flags_bool:
++            continue
++        forward_argv.append(tok)
++
++    def _child_cmd(*, child_run: str, child_out: str) -> list[str]:
++        cmd = [
++            sys.executable,
++            script_path,
++            *forward_argv,
++            "--run",
++            child_run,
++            "--compare-mode",
++            "inproc",
++            "--prompts-file",
++            prompts_path,
++            "--output-file",
++            child_out,
++            "--output-dir",
++            out_dir,  # ensure children write console.log into the same run dir
++        ]
++
++        if ctx["profile_enabled"] and ctx["profile_target"] in (child_run, "both"):
++            cmd.append("--profile")
++            cmd.extend(["--profile-dir", ctx["profile_dir"]])
++            cmd.extend(["--profile-target", child_run])
++            if ctx["profile_record_shapes"]:
++                cmd.append("--profile-record-shapes")
++            if ctx["profile_with_stack"]:
++                cmd.append("--profile-with-stack")
++        return cmd
++
++    def _child_env(*, child_run: str) -> dict[str, str]:
++        env = os.environ.copy()
++        if ctx["split_debug"]:
++            env["VLLM_ASCEND_SPLIT_INPLACE_DEBUG"] = "1"
++            env["VLLM_ASCEND_SPLIT_INPLACE_DEBUG_FILE"] = (
++                debug_enabled_path
++                if child_run == "enabled" else debug_disabled_path)
++        return env
++
++    print("=== Coordinator (subprocess) ===")
++    print("Output dir:", out_dir)
++
++    print("\n=== Run 1/2: split disabled (child process) ===")
++    r0 = subprocess.run(
++        _child_cmd(child_run="disabled", child_out=outputs_disabled_path),
++        env=_child_env(child_run="disabled"))
++    if r0.returncode != 0:
++        print(f"FAIL: child(disabled) exit code={r0.returncode}", file=sys.stderr)
++        _save_json(
++            os.path.join(out_dir, "summary.json"),
++            {
++                "status": "FAIL",
++                "reason": "child(disabled) non-zero exit",
++                "returncode": r0.returncode,
++            },
++        )
++        return r0.returncode or 1
++
++    print("\n=== Run 2/2: split enabled (child process) ===")
++    r1 = subprocess.run(
++        _child_cmd(child_run="enabled", child_out=outputs_enabled_path),
++        env=_child_env(child_run="enabled"))
++    if r1.returncode != 0:
++        print(f"FAIL: child(enabled) exit code={r1.returncode}", file=sys.stderr)
++        _save_json(
++            os.path.join(out_dir, "summary.json"),
++            {
++                "status": "FAIL",
++                "reason": "child(enabled) non-zero exit",
++                "returncode": r1.returncode,
++            },
++        )
++        return r1.returncode or 1
++
++    with open(outputs_disabled_path, "r", encoding="utf-8") as f:
++        disabled_obj = json.load(f)
++    with open(outputs_enabled_path, "r", encoding="utf-8") as f:
++        enabled_obj = json.load(f)
++
++    disabled_rows = disabled_obj.get("outputs", [])
++    enabled_rows = enabled_obj.get("outputs", [])
++
++    split_trace_summary = _summarize_split_debug_trace(
++        debug_enabled_path,
++        expected_split=ctx["expected_split"],
++        split_mode=ctx["split_mode"],
++        expected_no_split_reason=ctx["expected_no_split_reason"],
++    ) if ctx["split_debug"] else None
++    trace_summary_path = None
++    if split_trace_summary is not None:
++        trace_summary_path = os.path.join(out_dir, "split_trace_summary.json")
++        _save_json(trace_summary_path, split_trace_summary)
++
++    mismatches = _compare_serialized(disabled_rows, enabled_rows)
++    if mismatches:
++        diff_path = os.path.join(out_dir, "diff.json")
++        _save_json(diff_path, {"mismatches": mismatches[:50], "total": len(mismatches)})
++        _save_json(
++            os.path.join(out_dir, "summary.json"),
++            {
++                "status": "FAIL",
++                "mismatch_total": len(mismatches),
++                "diff_path": diff_path,
++                "trace_summary_path": trace_summary_path,
++                "split_trace_summary": split_trace_summary,
++            },
++        )
++        print(f"\nFAIL: {len(mismatches)} mismatches. See {diff_path}", file=sys.stderr)
++        return 1
++
++    if split_trace_summary is not None:
++        if split_trace_summary["failures"]:
++            _save_json(
++                os.path.join(out_dir, "summary.json"),
++                {
++                    "status": "FAIL",
++                    "reason": "split trace validation failed",
++                    "trace_summary_path": trace_summary_path,
++                    "trace_failures": split_trace_summary["failures"],
++                    "outputs_disabled_path": outputs_disabled_path,
++                    "outputs_enabled_path": outputs_enabled_path,
++                },
++            )
++            print(
++                "\nFAIL: split trace validation failed. See "
++                f"{trace_summary_path}",
++                file=sys.stderr)
++            return 1
++
++    sample = enabled_rows[0] if enabled_rows else {}
++    _save_json(
++        os.path.join(out_dir, "summary.json"),
++        {
++            "status": "PASS",
++            "count": len(enabled_rows),
++            "split_trace_summary": split_trace_summary,
++            "sample": {
++                "token_ids_len": len(sample.get("token_ids", []) or []),
++                "text_preview": (sample.get("text") or "")[:200],
++            },
++        },
++    )
++
++    print(f"\nPASS: {len(prompts)}/{len(prompts)} outputs match exactly")
++    print("Sample output[0] token_ids_len=", len(sample.get("token_ids", []) or []))
++    print("Sample output[0] text=", repr((sample.get("text") or "")[:200]))
++    return 0
++
++
++def _make_run_dir(*, output_dir_base: str, output_file: str | None) -> tuple[str, str]:
++    """Return (out_dir, timestamp). If output_file is set, derive out_dir from it."""
++    if output_file:
++        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
++        out_dir = os.path.dirname(str(output_file)) or "."
++        os.makedirs(out_dir, exist_ok=True)
++        return out_dir, timestamp
++    return _make_unique_run_dir(str(output_dir_base))
++
++
++def main() -> int:
++    parser = create_parser()
++    args: dict[str, Any] = vars(parser.parse_args())
++
++    max_tokens = int(args.pop("max_tokens"))
++    batch_size = int(args.pop("batch_size"))
++    fixed_batch_size = args.pop("fixed_batch_size")
++    if fixed_batch_size is not None:
++        batch_size = int(fixed_batch_size)
++    fixed_batch_query_len = int(args.pop("fixed_batch_query_len"))
++    if fixed_batch_query_len < 1:
++        print("ERROR: --fixed-batch-query-len must be >= 1",
++              file=sys.stderr)
++        return 2
++    fixed_batch_total_tokens = (
++        int(batch_size) * int(fixed_batch_query_len)
++        if fixed_batch_size is not None else None
++    )
++    num_splits = int(args.pop("num_splits"))
++    min_batch_size_for_split = int(args.pop("min_batch_size_for_split"))
++    split_mode = str(args.pop("split_mode"))
++    _capture_sizes_raw = args.pop("capture_sizes")
++    capture_sizes = _parse_int_list(_capture_sizes_raw)
++    if fixed_batch_size is not None and capture_sizes is None:
++        capture_sizes = [256, 384, 512]
++    if capture_sizes is not None:
++        _apply_capture_sizes(args, capture_sizes)
++    cudagraph_mode = args.pop("cudagraph_mode")
++    if cudagraph_mode is not None:
++        _apply_cudagraph_mode(args, cudagraph_mode)
++    pa_shape_list = _parse_int_list(args.pop("pa_shape_list"))
++    enable_parallel_streams = bool(args.pop("enable_parallel_streams"))
++    _parallel_capture_sizes_raw = args.pop("parallel_capture_sizes")
++    parallel_capture_sizes = _parse_int_list(_parallel_capture_sizes_raw)
++    inplace_split_planner_policy = str(args.pop(
++        "inplace_split_planner_policy"))
++    try:
++        macro_graph_config = _parse_json_object(
++            str(args.pop("macro_graph_config_json") or ""),
++            arg_name="--macro-graph-config-json",
++        )
++    except ValueError as exc:
++        print(f"ERROR: {exc}", file=sys.stderr)
++        return 2
++    inplace_parallel_replay_policy = str(args.pop(
++        "inplace_parallel_replay_policy"))
++    piecewise_scheduler_sync_policy = str(args.pop(
++        "piecewise_scheduler_sync_policy"))
++    piecewise_attention_enqueue_policy = str(args.pop(
++        "piecewise_attention_enqueue_policy"))
++    enable_mixed_request_split = bool(
++        args.pop("enable_mixed_request_split"))
++    mixed_request_split_execution_mode = str(
++        args.pop("mixed_request_split_execution_mode"))
++    mixed_request_min_total_tokens = int(
++        args.pop("mixed_request_min_total_tokens"))
++    mixed_request_min_tokens_per_split = int(
++        args.pop("mixed_request_min_tokens_per_split"))
++    mixed_request_max_single_request_ratio = float(
++        args.pop("mixed_request_max_single_request_ratio"))
++    mixed_request_max_padding_ratio_per_split = float(
++        args.pop("mixed_request_max_padding_ratio_per_split"))
++    mixed_request_min_prefill_reqs_for_prefill_split = int(
++        args.pop("mixed_request_min_prefill_reqs_for_prefill_split"))
++    _inplace_offset_capture_sizes_raw = str(
++        args.pop("inplace_offset_capture_sizes") or "")
++    inplace_offset_capture_sizes = (
++        _parse_int_list(_inplace_offset_capture_sizes_raw)
++        if _inplace_offset_capture_sizes_raw.strip() else None)
++    inplace_offset_max_graph_tokens_by_start = _parse_start_graph_caps(
++        str(args.pop("inplace_offset_max_graph_tokens_by_start") or ""))
++    inplace_offset_min_graph_tokens = int(
++        args.pop("inplace_offset_min_graph_tokens"))
++    inplace_offset_allowed_graph_tokens_by_start = (
++        _parse_start_graph_allowed_sizes(
++            str(args.pop("inplace_offset_allowed_graph_tokens_by_start")
++                or "")))
++    if (split_mode.startswith("inplace") and inplace_offset_capture_sizes
++            and parallel_capture_sizes is not None):
++        parallel_capture_sizes = sorted(
++            set(parallel_capture_sizes) | set(inplace_offset_capture_sizes))
++    force_split = bool(args.pop("force_split"))
++    cudagraph_split_pad_threshold = int(
++        args.pop("cudagraph_split_pad_threshold"))
++    unified_capture_sizes = _parse_int_list(
++        str(args.pop("unified_capture_sizes") or "") or None)
++    validate_ptrs = bool(args.pop("validate_ptrs"))
++    inplace_force_pa_for_offset = bool(
++        args.pop("inplace_force_pa_for_offset"))
++    enable_inplace_spec_decode = bool(args.pop("enable_inplace_spec_decode"))
++    enable_inplace_mrope = bool(args.pop("enable_inplace_mrope"))
++    split_debug = bool(args.pop("split_debug"))
++    expect_split_raw = args.pop("expect_split")
++    expected_no_split_reason = args.pop("expect_no_split_reason")
++    force_fixed_prompts = bool(args.pop("force_fixed_prompts"))
++    fixed_prompt = str(args.pop("fixed_prompt"))
++    ignore_eos = bool(args.pop("ignore_eos"))
++    run_mode = str(args.pop("run"))
++    compare_mode = str(args.pop("compare_mode"))
++    output_dir_base = str(args.pop("output_dir"))
++    prompts_file = args.pop("prompts_file")
++    output_file = args.pop("output_file")
++
++    profile_enabled = bool(args.pop("profile"))
++    profile_dir = str(args.pop("profile_dir"))
++    profile_target = str(args.pop("profile_target"))
++    profile_record_shapes = bool(args.pop("profile_record_shapes"))
++    profile_with_stack = bool(args.pop("profile_with_stack"))
++
++    if split_mode.startswith("inplace"):
++        split_debug = True if (split_debug or validate_ptrs
++                               or fixed_batch_size is not None
++                               or expected_no_split_reason) else split_debug
++    if force_fixed_prompts:
++        ignore_eos = True
++
++    if fixed_batch_size is not None:
++        try:
++            _ensure_fixed_batch_graph_capacity(
++                args,
++                batch_size=int(fixed_batch_total_tokens),
++                capture_sizes=capture_sizes,
++            )
++        except ValueError:
++            return 2
++
++    expected_split = None
++    if expect_split_raw:
++        expected_values = _parse_int_list(str(expect_split_raw))
++        if expected_values is None or len(expected_values) != 2:
++            print("ERROR: --expect-split must be first,second",
++                  file=sys.stderr)
++            return 2
++        expected_split = {
++            "total_tokens": int(sum(expected_values)),
++            "first_tokens": int(expected_values[0]),
++            "second_tokens": int(expected_values[1]),
++            "first_start_num_tokens": 0,
++            "second_start_num_tokens": int(expected_values[0]),
++        }
++    elif (fixed_batch_size is not None and split_mode.startswith("inplace")
++          and capture_sizes is not None):
++        expected_split = _expected_inplace_split(
++            int(fixed_batch_total_tokens), capture_sizes)
++
++    if expected_no_split_reason is not None:
++        if not split_mode.startswith("inplace"):
++            print("ERROR: --expect-no-split-reason requires inplace split mode",
++                  file=sys.stderr)
++            return 2
++        if expect_split_raw:
++            print(
++                "ERROR: --expect-no-split-reason cannot be combined with "
++                "--expect-split",
++                file=sys.stderr,
++            )
++            return 2
++        if expected_split is not None and not expect_split_raw:
++            expected_split = None
++
++    if expected_split is not None and max_tokens < 3:
++        print(
++            "ERROR: split trace validation needs --max-tokens >= 3 to observe "
++            "one offset capture and later replay",
++            file=sys.stderr,
++        )
++        return 2
++
++    # In vLLM V1, setting VLLM_ENABLE_V1_MULTIPROCESSING=0 forces in-proc execution.
++    # In this mode, releasing NPU memory fully between two separate engine instantiations
++    # is unreliable (weights/KV cache/graphs may stay resident).
++    v1_multiproc_env = os.getenv("VLLM_ENABLE_V1_MULTIPROCESSING")
++    inproc_v1 = v1_multiproc_env is not None and str(v1_multiproc_env) in (
++        "0",
++        "false",
++        "False",
++    )
++
++    if batch_size < 1:
++        print("ERROR: --batch-size must be >= 1", file=sys.stderr)
++        return 2
++
++    seed = args.get("seed")
++    if prompts_file:
++        prompts = _load_prompts(str(prompts_file))
++    elif force_fixed_prompts:
++        prompts = _generate_fixed_prompts(batch_size=batch_size,
++                                          prompt=fixed_prompt)
++    else:
++        prompts = _generate_prompts(batch_size=batch_size, seed=seed)
++
++    if len(prompts) != batch_size:
++        print(
++            f"ERROR: prompts length ({len(prompts)}) != batch_size ({batch_size})",
++            file=sys.stderr,
++        )
++        return 2
++
++    sampling_kwargs: dict[str, Any] = {
++        "max_tokens": max_tokens,
++        "temperature": 0.0,
++        "top_p": 1.0,
++    }
++    if ignore_eos:
++        sampling_kwargs["ignore_eos"] = True
++    sampling = SamplingParams(**sampling_kwargs)
++
++    split_disabled_cfg = _build_split_additional_config(
++        enabled=False,
++        split_mode=split_mode,
++        num_splits=num_splits,
++        enable_parallel_streams=enable_parallel_streams,
++        min_batch_size_for_split=min_batch_size_for_split,
++        parallel_capture_sizes=parallel_capture_sizes,
++        force_split=force_split,
++        validate_ptrs=validate_ptrs,
++        inplace_force_pa_for_offset=inplace_force_pa_for_offset,
++        enable_inplace_spec_decode=enable_inplace_spec_decode,
++        enable_inplace_mrope=enable_inplace_mrope,
++        inplace_split_planner_policy=inplace_split_planner_policy,
++        inplace_offset_capture_sizes=inplace_offset_capture_sizes,
++        inplace_offset_max_graph_tokens_by_start=(
++            inplace_offset_max_graph_tokens_by_start),
++        inplace_offset_min_graph_tokens=inplace_offset_min_graph_tokens,
++        inplace_offset_allowed_graph_tokens_by_start=(
++            inplace_offset_allowed_graph_tokens_by_start),
++        inplace_parallel_replay_policy=inplace_parallel_replay_policy,
++        piecewise_scheduler_sync_policy=piecewise_scheduler_sync_policy,
++        piecewise_attention_enqueue_policy=piecewise_attention_enqueue_policy,
++        enable_mixed_request_split=enable_mixed_request_split,
++        mixed_request_split_execution_mode=(
++            mixed_request_split_execution_mode),
++        mixed_request_min_total_tokens=mixed_request_min_total_tokens,
++        mixed_request_min_tokens_per_split=(
++            mixed_request_min_tokens_per_split),
++        mixed_request_max_single_request_ratio=(
++            mixed_request_max_single_request_ratio),
++        mixed_request_max_padding_ratio_per_split=(
++            mixed_request_max_padding_ratio_per_split),
++        mixed_request_min_prefill_reqs_for_prefill_split=(
++            mixed_request_min_prefill_reqs_for_prefill_split),
++        macro_graph_config=None,
++        pa_shape_list=pa_shape_list,
++        cudagraph_split_pad_threshold=cudagraph_split_pad_threshold,
++    )
++    split_enabled_cfg = _build_split_additional_config(
++        enabled=True,
++        split_mode=split_mode,
++        num_splits=num_splits,
++        enable_parallel_streams=enable_parallel_streams,
++        min_batch_size_for_split=min_batch_size_for_split,
++        parallel_capture_sizes=parallel_capture_sizes,
++        force_split=force_split,
++        validate_ptrs=validate_ptrs,
++        inplace_force_pa_for_offset=inplace_force_pa_for_offset,
++        enable_inplace_spec_decode=enable_inplace_spec_decode,
++        enable_inplace_mrope=enable_inplace_mrope,
++        inplace_split_planner_policy=inplace_split_planner_policy,
++        inplace_offset_capture_sizes=inplace_offset_capture_sizes,
++        inplace_offset_max_graph_tokens_by_start=(
++            inplace_offset_max_graph_tokens_by_start),
++        inplace_offset_min_graph_tokens=inplace_offset_min_graph_tokens,
++        inplace_offset_allowed_graph_tokens_by_start=(
++            inplace_offset_allowed_graph_tokens_by_start),
++        inplace_parallel_replay_policy=inplace_parallel_replay_policy,
++        piecewise_scheduler_sync_policy=piecewise_scheduler_sync_policy,
++        piecewise_attention_enqueue_policy=piecewise_attention_enqueue_policy,
++        enable_mixed_request_split=enable_mixed_request_split,
++        mixed_request_split_execution_mode=(
++            mixed_request_split_execution_mode),
++        mixed_request_min_total_tokens=mixed_request_min_total_tokens,
++        mixed_request_min_tokens_per_split=(
++            mixed_request_min_tokens_per_split),
++        mixed_request_max_single_request_ratio=(
++            mixed_request_max_single_request_ratio),
++        mixed_request_max_padding_ratio_per_split=(
++            mixed_request_max_padding_ratio_per_split),
++        mixed_request_min_prefill_reqs_for_prefill_split=(
++            mixed_request_min_prefill_reqs_for_prefill_split),
++        macro_graph_config=macro_graph_config,
++        pa_shape_list=pa_shape_list,
++        cudagraph_split_pad_threshold=cudagraph_split_pad_threshold,
++        unified_capture_sizes=unified_capture_sizes,
++    )
++
++    # Preferred: coordinator mode spawns 2 child processes then compares.
++    if run_mode == "both" and compare_mode == "subprocess":
++        return _coordinator_subprocess(
++            base_args=args,
++            prompts=prompts,
++            output_dir_base=output_dir_base,
++            batch_size=batch_size,
++            fixed_batch_size=fixed_batch_size,
++            fixed_batch_query_len=fixed_batch_query_len,
++            fixed_batch_total_tokens=fixed_batch_total_tokens,
++            max_tokens=max_tokens,
++            split_mode=split_mode,
++            num_splits=num_splits,
++            enable_parallel_streams=enable_parallel_streams,
++            min_batch_size_for_split=min_batch_size_for_split,
++            validate_ptrs=validate_ptrs,
++            enable_inplace_spec_decode=enable_inplace_spec_decode,
++            enable_inplace_mrope=enable_inplace_mrope,
++            inplace_split_planner_policy=inplace_split_planner_policy,
++            inplace_parallel_replay_policy=inplace_parallel_replay_policy,
++            piecewise_scheduler_sync_policy=piecewise_scheduler_sync_policy,
++            piecewise_attention_enqueue_policy=(
++                piecewise_attention_enqueue_policy),
++            enable_mixed_request_split=enable_mixed_request_split,
++            mixed_request_split_execution_mode=(
++                mixed_request_split_execution_mode),
++            mixed_request_min_total_tokens=mixed_request_min_total_tokens,
++            mixed_request_min_tokens_per_split=(
++                mixed_request_min_tokens_per_split),
++            mixed_request_max_single_request_ratio=(
++                mixed_request_max_single_request_ratio),
++            mixed_request_max_padding_ratio_per_split=(
++                mixed_request_max_padding_ratio_per_split),
++            mixed_request_min_prefill_reqs_for_prefill_split=(
++                mixed_request_min_prefill_reqs_for_prefill_split),
++            inplace_offset_capture_sizes=inplace_offset_capture_sizes,
++            inplace_offset_max_graph_tokens_by_start=(
++                inplace_offset_max_graph_tokens_by_start),
++            inplace_offset_min_graph_tokens=inplace_offset_min_graph_tokens,
++            inplace_offset_allowed_graph_tokens_by_start=(
++                inplace_offset_allowed_graph_tokens_by_start),
++            pa_shape_list=pa_shape_list,
++            split_debug=split_debug,
++            expected_split=expected_split,
++            expected_no_split_reason=expected_no_split_reason,
++            profile_enabled=profile_enabled,
++            profile_dir=profile_dir,
++            profile_target=profile_target,
++            profile_record_shapes=profile_record_shapes,
++            profile_with_stack=profile_with_stack,
++        )
++
++    # For all non-coordinator paths: always create an output dir and write all artifacts.
++    out_dir, timestamp = _make_run_dir(output_dir_base=output_dir_base, output_file=output_file)
++    prompts_path = os.path.join(out_dir, "prompts.json")
++    _save_json(prompts_path, prompts)
++
++    metadata = {
++        "timestamp": timestamp,
++        "model": args.get("model"),
++        "tokenizer": args.get("tokenizer") or args.get("model"),
++        "seed": seed,
++        "batch_size": batch_size,
++        "fixed_batch_size": fixed_batch_size,
++        "fixed_batch_query_len": fixed_batch_query_len,
++        "fixed_batch_total_tokens": fixed_batch_total_tokens,
++        "max_tokens": max_tokens,
++        "ignore_eos": ignore_eos,
++        "force_fixed_prompts": force_fixed_prompts,
++        "max_model_len": args.get("max_model_len"),
++        "gpu_memory_utilization": args.get("gpu_memory_utilization"),
++        "split_mode": split_mode,
++        "num_splits": num_splits,
++        "enable_parallel_streams": enable_parallel_streams,
++        "min_batch_size_for_split": min_batch_size_for_split,
++        "validate_ptrs": validate_ptrs,
++        "enable_inplace_spec_decode": enable_inplace_spec_decode,
++        "enable_inplace_mrope": enable_inplace_mrope,
++        "inplace_split_planner_policy": inplace_split_planner_policy,
++        "inplace_parallel_replay_policy": inplace_parallel_replay_policy,
++        "piecewise_scheduler_sync_policy": piecewise_scheduler_sync_policy,
++        "piecewise_attention_enqueue_policy": (
++            piecewise_attention_enqueue_policy),
++        "enable_mixed_request_split": enable_mixed_request_split,
++        "mixed_request_split_execution_mode": (
++            mixed_request_split_execution_mode),
++        "mixed_request_min_total_tokens": mixed_request_min_total_tokens,
++        "mixed_request_min_tokens_per_split": (
++            mixed_request_min_tokens_per_split),
++        "mixed_request_max_single_request_ratio": (
++            mixed_request_max_single_request_ratio),
++        "mixed_request_max_padding_ratio_per_split": (
++            mixed_request_max_padding_ratio_per_split),
++        "mixed_request_min_prefill_reqs_for_prefill_split": (
++            mixed_request_min_prefill_reqs_for_prefill_split),
++        "inplace_offset_capture_sizes": inplace_offset_capture_sizes,
++        "inplace_offset_max_graph_tokens_by_start": (
++            inplace_offset_max_graph_tokens_by_start),
++        "inplace_offset_min_graph_tokens": inplace_offset_min_graph_tokens,
++        "inplace_offset_allowed_graph_tokens_by_start": (
++            inplace_offset_allowed_graph_tokens_by_start),
++        "split_debug": split_debug,
++        "expected_split": expected_split,
++        "expected_no_split_reason": expected_no_split_reason,
++        "pa_shape_list": pa_shape_list,
++        "compilation_config": args.get("compilation_config"),
++        "run": run_mode,
++        "compare_mode": compare_mode,
++        "profile_enabled": profile_enabled,
++        "profile_dir": profile_dir,
++        "profile_target": profile_target,
++        "profile_record_shapes": profile_record_shapes,
++        "profile_with_stack": profile_with_stack,
++        "output_file": output_file,
++        "output_dir": out_dir,
++        "notes": {
++            "split_mode": split_mode,
++            "inproc_v1": inproc_v1,
++        },
++    }
++    _save_json(os.path.join(out_dir, "metadata.json"), metadata)
++
++    console_path = os.path.join(out_dir, "console.log")
++    debug_path = os.path.join(out_dir, f"split_inplace_debug_{run_mode}.jsonl")
++    if split_debug:
++        os.environ["VLLM_ASCEND_SPLIT_INPLACE_DEBUG"] = "1"
++        os.environ["VLLM_ASCEND_SPLIT_INPLACE_DEBUG_FILE"] = debug_path
++    os.makedirs(out_dir, exist_ok=True)
++    console_f = open(console_path, "a", encoding="utf-8")
++
++    old_stdout = sys.stdout
++    old_stderr = sys.stderr
++    sys.stdout = _TeeTextIO(old_stdout, console_f)
++    sys.stderr = _TeeTextIO(old_stderr, console_f)
++
++    # Re-bind vLLM logger streams after tee so diagnostics land in console.log.
++    try:
++        vllm_logger_module._configure_vllm_root_logger()
++        for _name in ("vllm", "vllm_ascend"):
++            _lg = logging.getLogger(_name)
++            for _h in _lg.handlers:
++                if isinstance(_h, logging.StreamHandler):
++                    _h.setStream(sys.stderr)
++    except Exception as _e:
++        print(f"Warning: failed to rebind vLLM loggers to tee stream: {_e}")
++
++    try:
++        print("=== Output ===")
++        print("Output dir:", out_dir)
++        print("Console log:", console_path)
++
++        print("\n=== Config ===")
++        print(
++            json.dumps(
++                {
++                    "model": args.get("model"),
++                    "tokenizer": args.get("tokenizer") or args.get("model"),
++                    "seed": seed,
++                    "max_model_len": args.get("max_model_len"),
++                    "gpu_memory_utilization": args.get("gpu_memory_utilization"),
++                    "batch_size": batch_size,
++                    "max_tokens": max_tokens,
++                    "ignore_eos": ignore_eos,
++                    "split_batch_config": split_enabled_cfg["split_batch_config"],
++                    "pa_shape_list": pa_shape_list,
++                    "compilation_config": args.get("compilation_config"),
++                    "expected_split": expected_split,
++                    "expected_no_split_reason": expected_no_split_reason,
++                    "enable_inplace_spec_decode":
++                    enable_inplace_spec_decode,
++                    "enable_inplace_mrope": enable_inplace_mrope,
++                    "split_debug_file": debug_path if split_debug else None,
++                    "run": run_mode,
++                    "compare_mode": compare_mode,
++                },
++                ensure_ascii=False,
++                indent=2,
++                default=str,
++            )
++        )
++
++        # In-process comparison path or single-run path.
++        out0 = None
++        out1 = None
++
++        outputs_disabled_path = os.path.join(out_dir, "outputs_split_disabled.json")
++        outputs_enabled_path = os.path.join(out_dir, "outputs_split_enabled.json")
++
++        if run_mode in ("both", "disabled"):
++            print("\n=== Run: split disabled ===")
++            out0, llm0 = _run_single(
++                llm_args=args,
++                prompts=prompts,
++                sampling=sampling,
++                additional_config=split_disabled_cfg,
++                profile_enabled=profile_enabled,
++                profile_dir=profile_dir,
++                profile_target=profile_target,
++                profile_record_shapes=profile_record_shapes,
++                profile_with_stack=profile_with_stack,
++                run_name="disabled",
++            )
++
++            disabled_payload = {
++                "config": "split_disabled",
++                "description": CONFIGS["split_disabled"]["description"],
++                "split_batch_config": split_disabled_cfg["split_batch_config"],
++                "prompts_file": prompts_file,
++                "prompts_path": prompts_path,
++                "outputs": _serialize_outputs(prompts, out0),
++            }
++            # Always write results; also honor --output-file if provided.
++            _save_json(outputs_disabled_path, disabled_payload)
++            if output_file and run_mode == "disabled":
++                _save_json(str(output_file), disabled_payload)
++
++            if run_mode == "both":
++                if inproc_v1:
++                    print(
++                        "WARNING: VLLM_ENABLE_V1_MULTIPROCESSING=0 (in-proc) may not support "
++                        "running two engines back-to-back reliably due to NPU memory fragmentation.",
++                        file=sys.stderr,
++                    )
++                _cleanup_llm(llm0)
++
++        if run_mode in ("both", "enabled"):
++            print("\n=== Run: split enabled ===")
++            out1, llm1 = _run_single(
++                llm_args=args,
++                prompts=prompts,
++                sampling=sampling,
++                additional_config=split_enabled_cfg,
++                profile_enabled=profile_enabled,
++                profile_dir=profile_dir,
++                profile_target=profile_target,
++                profile_record_shapes=profile_record_shapes,
++                profile_with_stack=profile_with_stack,
++                run_name="enabled",
++            )
++
++            enabled_payload = {
++                "config": "split_enabled",
++                "description": CONFIGS["split_enabled"]["description"],
++                "split_batch_config": split_enabled_cfg["split_batch_config"],
++                "prompts_file": prompts_file,
++                "prompts_path": prompts_path,
++                "outputs": _serialize_outputs(prompts, out1),
++            }
++            # Always write results; also honor --output-file if provided.
++            _save_json(outputs_enabled_path, enabled_payload)
++            if output_file and run_mode == "enabled":
++                _save_json(str(output_file), enabled_payload)
++
++            if run_mode == "both":
++                _cleanup_llm(llm1)
++
++            if out0 is None:
++                split_trace_summary = None
++                trace_summary_path = None
++                if split_debug:
++                    split_trace_summary = _summarize_split_debug_trace(
++                        debug_path,
++                        expected_split=expected_split,
++                        split_mode=split_mode,
++                        expected_no_split_reason=expected_no_split_reason,
++                    )
++                    trace_summary_path = os.path.join(
++                        out_dir, "split_trace_summary.json")
++                    _save_json(trace_summary_path, split_trace_summary)
++                    if split_trace_summary["failures"]:
++                        print(
++                            "\nFAIL: split trace validation failed. See "
++                            f"{trace_summary_path}",
++                            file=sys.stderr)
++                        print(
++                            json.dumps(split_trace_summary["failures"],
++                                       ensure_ascii=False,
++                                       indent=2),
++                            file=sys.stderr)
++                        _save_json(
++                            os.path.join(out_dir, "summary.json"),
++                            {
++                                "status": "FAIL",
++                                "reason": "split trace validation failed",
++                                "trace_summary_path": trace_summary_path,
++                                "trace_failures":
++                                split_trace_summary["failures"],
++                                "outputs_enabled_path": outputs_enabled_path,
++                                "console_log": console_path,
++                            },
++                        )
++                        _cleanup_llm(llm1)
++                        return 1
++                sample_ids, sample_text = _extract_first_output(out1[0])
++                print("\nDONE: ran split enabled only")
++                print("Sample output[0] token_ids_len=", len(sample_ids))
++                print("Sample output[0] text=", repr(sample_text[:200]))
++                _save_json(
++                    os.path.join(out_dir, "summary.json"),
++                    {
++                        "status": "DONE",
++                        "run": "enabled",
++                        "count": len(out1),
++                        "sample": {
++                            "token_ids_len": len(sample_ids),
++                            "text_preview": sample_text[:200],
++                        },
++                        "outputs_path": outputs_enabled_path,
++                        "console_log": console_path,
++                        "split_debug_file": debug_path if split_debug else None,
++                        "split_trace_summary": split_trace_summary,
++                    },
++                )
++                _cleanup_llm(llm1)  # ensure clean shutdown in enabled-only mode
++                return 0
++
++        if out1 is None:
++            sample_ids, sample_text = _extract_first_output(out0[0])
++            print("\nDONE: ran split disabled only")
++            print("Sample output[0] token_ids_len=", len(sample_ids))
++            print("Sample output[0] text=", repr(sample_text[:200]))
++            _save_json(
++                os.path.join(out_dir, "summary.json"),
++                {
++                    "status": "DONE",
++                    "run": "disabled",
++                    "count": len(out0),
++                    "sample": {
++                        "token_ids_len": len(sample_ids),
++                        "text_preview": sample_text[:200],
++                    },
++                    "outputs_path": outputs_disabled_path,
++                    "console_log": console_path,
++                    "split_debug_file": debug_path if split_debug else None,
++                },
++            )
++            _cleanup_llm(llm0)  # ensure clean shutdown in disabled-only mode
++            return 0
++
++        if len(out0) != len(out1):
++            msg = f"FAIL: output length differs: {len(out0)} vs {len(out1)}"
++            print(msg, file=sys.stderr)
++            _save_json(
++                os.path.join(out_dir, "summary.json"),
++                {
++                    "status": "FAIL",
++                    "reason": "output length differs",
++                    "disabled_len": len(out0),
++                    "enabled_len": len(out1),
++                    "outputs_disabled_path": outputs_disabled_path,
++                    "outputs_enabled_path": outputs_enabled_path,
++                    "console_log": console_path,
++                },
++            )
++            return 1
++
++        # Compare and write diff if needed.
++        disabled_rows = _serialize_outputs(prompts, out0)
++        enabled_rows = _serialize_outputs(prompts, out1)
++        split_trace_summary = None
++        trace_summary_path = None
++        if split_debug:
++            split_trace_summary = _summarize_split_debug_trace(
++                debug_path,
++                expected_split=expected_split,
++                split_mode=split_mode,
++                expected_no_split_reason=expected_no_split_reason,
++            )
++            trace_summary_path = os.path.join(out_dir,
++                                              "split_trace_summary.json")
++            _save_json(trace_summary_path, split_trace_summary)
++
++        mismatches = _compare_serialized(disabled_rows, enabled_rows)
++
++        if mismatches:
++            diff_path = os.path.join(out_dir, "diff.json")
++            _save_json(diff_path, {"mismatches": mismatches[:50], "total": len(mismatches)})
++            print(f"\nFAIL: {len(mismatches)}/{len(prompts)} mismatches", file=sys.stderr)
++            print(json.dumps(mismatches[:3], ensure_ascii=False, indent=2), file=sys.stderr)
++            if len(mismatches) > 3:
++                print(f"... (and {len(mismatches) - 3} more)", file=sys.stderr)
++
++            _save_json(
++                os.path.join(out_dir, "summary.json"),
++                {
++                    "status": "FAIL",
++                    "mismatch_total": len(mismatches),
++                    "diff_path": diff_path,
++                    "trace_summary_path": trace_summary_path,
++                    "split_trace_summary": split_trace_summary,
++                    "outputs_disabled_path": outputs_disabled_path,
++                    "outputs_enabled_path": outputs_enabled_path,
++                    "console_log": console_path,
++                },
++            )
++            return 1
++
++        if split_trace_summary is not None:
++            if split_trace_summary["failures"]:
++                print(
++                    "\nFAIL: split trace validation failed. See "
++                    f"{trace_summary_path}",
++                    file=sys.stderr)
++                print(
++                    json.dumps(split_trace_summary["failures"],
++                               ensure_ascii=False,
++                               indent=2),
++                    file=sys.stderr)
++                _save_json(
++                    os.path.join(out_dir, "summary.json"),
++                    {
++                        "status": "FAIL",
++                        "reason": "split trace validation failed",
++                        "trace_summary_path": trace_summary_path,
++                        "trace_failures": split_trace_summary["failures"],
++                        "outputs_disabled_path": outputs_disabled_path,
++                        "outputs_enabled_path": outputs_enabled_path,
++                        "console_log": console_path,
++                    },
++                )
++                return 1
++
++        print(f"\nPASS: {len(prompts)}/{len(prompts)} outputs match exactly")
++        sample_ids, sample_text = _extract_first_output(out1[0])
++        print("Sample output[0] token_ids_len=", len(sample_ids))
++        print("Sample output[0] text=", repr(sample_text[:200]))
++
++        _save_json(
++            os.path.join(out_dir, "summary.json"),
++            {
++                "status": "PASS",
++                "count": len(prompts),
++                "sample": {
++                    "token_ids_len": len(sample_ids),
++                    "text_preview": sample_text[:200],
++                },
++                "outputs_disabled_path": outputs_disabled_path,
++                "outputs_enabled_path": outputs_enabled_path,
++                "console_log": console_path,
++                "split_trace_summary": split_trace_summary,
++            },
++        )
++        return 0
++
++    except Exception as e:
++        try:
++            _save_json(
++                os.path.join(out_dir, "summary.json"),
++                {
++                    "status": "ERROR",
++                    "error": repr(e),
++                    "console_log": console_path,
++                },
++            )
++        except Exception:
++            pass
++        raise
++    finally:
++        try:
++            sys.stdout = old_stdout
++            sys.stderr = old_stderr
++        finally:
++            try:
++                console_f.flush()
++                console_f.close()
++            except Exception:
++                pass
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/run_dual_stream_link_smoke.py b/tests/run_dual_stream_link_smoke.py
+new file mode 100644
+index 0000000000..b15d95be40
+--- /dev/null
++++ b/tests/run_dual_stream_link_smoke.py
+@@ -0,0 +1,221 @@
++#!/usr/bin/env python3
++# isort: skip_file
++"""Dual-stream link smoke: verify the inplace_parallel split-batch path can
++run end-to-end (offline generation + OpenAI serve) without crashing.
++
++This is a *link* check, not a correctness comparison: it asserts the run
++succeeds and produces non-empty output. Use
++``examples/test_split_batch_correctness_npu.py`` for split on/off output
++consistency comparison.
++
++Exit code: 0 on PASS, 1 on FAIL — suitable for automatic self-check after
++code changes.
++
++Usage (run from the repo root):
++  python tests/run_dual_stream_link_smoke.py                # offline + serve
++  python tests/run_dual_stream_link_smoke.py --mode offline
++  python tests/run_dual_stream_link_smoke.py --mode serve
++  python tests/run_dual_stream_link_smoke.py --model <path> --no-split
++  python tests/run_dual_stream_link_smoke.py --eager        # skip cudagraph
++"""
++
++import argparse
++import json
++import os
++import sys
++from pathlib import Path
++
++# Allow running from a subdirectory while still importing repo-local helpers.
++_REPO_ROOT = Path(__file__).resolve().parents[1]
++if str(_REPO_ROOT) not in sys.path:
++    sys.path.insert(0, str(_REPO_ROOT))
++
++os.environ.setdefault("VLLM_TARGET_DEVICE", "ascend")
++os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
++os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
++os.environ["TOKENIZERS_PARALLELISM"] = "false"
++
++MODEL_DEFAULT = "/data/shared-models/Qwen2.5-0.5B-Instruct"
++PROMPTS = ["你好，请介绍一下你自己。", "What is the capital of France?"]
++
++
++def build_additional_config(split_enabled: bool, force_split: bool = False,
++                            split_mode: str = "inplace_parallel",
++                            unified_capture_sizes: list[int] | None = None) -> dict:
++    cfg = {
++        "split_batch_config": {
++            "enabled": split_enabled,
++            "mode": split_mode,
++            "num_splits": 2,
++            "enable_parallel_streams": True,
++            "min_batch_size_for_split": 4,
++        }
++    }
++    if split_mode == "inplace_parallel":
++        cfg["split_batch_config"]["enable_inplace_lazy_capture"] = True
++        cfg["split_batch_config"][
++            "inplace_parallel_replay_policy"] = "full_graph_parallel"
++    if force_split:
++        cfg["split_batch_config"]["force_split"] = True
++    # P11 unified-row-graph (requires the env switch too):
++    # ``VLLM_ASCEND_DUAL_UNIFIED_GEMM=1`` is exported by main() when this
++    # option is provided.
++    if unified_capture_sizes:
++        cfg["split_batch_config"]["unified_capture_sizes"] = list(
++            unified_capture_sizes)
++    return cfg
++
++
++def build_compilation_config(cudagraph: bool) -> dict | None:
++    if not cudagraph:
++        return None
++    return {
++        "cudagraph_mode": "FULL_DECODE_ONLY",
++        "cudagraph_capture_sizes": [1, 2, 4, 8],
++    }
++
++
++def run_offline(model: str, prompts: list[str],
++                split_enabled: bool, cudagraph: bool,
++                force_split: bool = False,
++                split_mode: str = "inplace_parallel",
++                unified_capture_sizes: list[int] | None = None) -> None:
++    from vllm import LLM, SamplingParams
++
++    kwargs = dict(
++        model=model,
++        max_model_len=1024,
++        gpu_memory_utilization=0.8,
++        enforce_eager=not cudagraph,
++        additional_config=build_additional_config(
++            split_enabled, force_split, split_mode, unified_capture_sizes),
++    )
++    if cudagraph:
++        kwargs["compilation_config"] = build_compilation_config(cudagraph)
++
++    llm = LLM(**kwargs)
++    try:
++        outputs = llm.generate(
++            prompts,
++            SamplingParams(max_tokens=16, temperature=0),
++        )
++    finally:
++        del llm
++
++    for out in outputs:
++        text = out.outputs[0].text
++        if not text.strip():
++            raise AssertionError(f"empty generation for prompt: {out.prompt!r}")
++    print(f"[offline] PASS split_enabled={split_enabled} "
++          f"cudagraph={cudagraph} outputs={len(outputs)}")
++
++
++def run_serve(model: str, split_enabled: bool, cudagraph: bool,
++              force_split: bool = False,
++              split_mode: str = "inplace_parallel") -> None:
++    import openai
++    from vllm.utils.network_utils import get_open_port
++
++    from tests.e2e.conftest import RemoteOpenAIServer
++
++    compilation_config = build_compilation_config(cudagraph)
++    port = get_open_port()
++    server_args = [
++        "--max_model_len", "1024",
++        "--gpu_memory_utilization", "0.8",
++        "--port", str(port),
++        "--additional-config",
++        json.dumps(build_additional_config(
++            split_enabled, force_split, split_mode)),
++    ]
++    if compilation_config is not None:
++        server_args += ["--compilation-config", json.dumps(compilation_config)]
++
++    with RemoteOpenAIServer(model, server_args, server_port=port,
++                            auto_port=False, max_wait_seconds=600) as server:
++        health = server.url_for("health")
++        assert health.endswith("/health"), f"unexpected health url: {health}"
++
++        client = openai.OpenAI(base_url=server.url_for("v1"), api_key="empty")
++        resp = client.chat.completions.create(
++            model=model,
++            messages=[{"role": "user", "content": PROMPTS[0]}],
++            max_tokens=16,
++            temperature=0,
++        )
++        text = resp.choices[0].message.content
++        if not text or not text.strip():
++            raise AssertionError("serve returned empty completion")
++    print(f"[serve] PASS split_enabled={split_enabled} "
++          f"cudagraph={cudagraph} reply={text.strip()[:32]!r}")
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(
++        description="Dual-stream link smoke (offline + serve).")
++    parser.add_argument("--model", default=MODEL_DEFAULT,
++                        help=f"model path (default: {MODEL_DEFAULT})")
++    parser.add_argument("--mode", choices=("offline", "serve", "both"),
++                        default="both")
++    parser.add_argument("--batch-size", type=int, default=len(PROMPTS),
++                        help="number of offline prompts (must be >= "
++                             "min_batch_size_for_split to trigger split)")
++    parser.add_argument("--no-split", action="store_true",
++                        help="run without split_batch_config (baseline)")
++    parser.add_argument("--force-split", action="store_true",
++                        help="force split even on exact graph size hit")
++    parser.add_argument("--split-mode", choices=("inplace_parallel", "dual_pad"),
++                        default="inplace_parallel",
++                        help="dual-stream execution mode (default: "
++                             "inplace_parallel; dual_pad requires --batch-size "
++                             ">= 5 to actually split with default capture sizes)")
++    parser.add_argument("--eager", action="store_true",
++                        help="skip cudagraph (enforce eager)")
++    parser.add_argument("--unified-capture-sizes", type=str, default=None,
++                        help="P11 DUAL_UNIFIED_GEMM: comma-separated exact "
++                             "sizes (e.g. '6'); exports VLLM_ASCEND_DUAL_"
++                             "UNIFIED_GEMM=1 and injects unified_capture_"
++                             "sizes into split_batch_config. Requires a "
++                             "would-be dual_pad decision hitting one of the "
++                             "declared totals.")
++    args = parser.parse_args()
++
++    unified_sizes: list[int] | None = None
++    if args.unified_capture_sizes:
++        os.environ["VLLM_ASCEND_DUAL_UNIFIED_GEMM"] = "1"
++        unified_sizes = [
++            int(s) for s in args.unified_capture_sizes.split(",") if s.strip()]
++        print(f"[unified] VLLM_ASCEND_DUAL_UNIFIED_GEMM=1, "
++              f"unified_capture_sizes={unified_sizes}")
++
++    split_enabled = not args.no_split
++    cudagraph = not args.eager
++    prompts = [PROMPTS[i % len(PROMPTS)] for i in range(args.batch_size)]
++
++    failures = []
++    if args.mode in ("offline", "both"):
++        try:
++            run_offline(args.model, prompts, split_enabled, cudagraph,
++                        force_split=args.force_split,
++                        split_mode=args.split_mode,
++                        unified_capture_sizes=unified_sizes)
++        except Exception as exc:  # noqa: BLE001 - report and continue
++            failures.append(("offline", exc))
++    if args.mode in ("serve", "both"):
++        try:
++            run_serve(args.model, split_enabled, cudagraph,
++                      force_split=args.force_split,
++                      split_mode=args.split_mode)
++        except Exception as exc:  # noqa: BLE001 - report and continue
++            failures.append(("serve", exc))
++
++    if failures:
++        for mode, exc in failures:
++            print(f"[{mode}] FAIL: {exc!r}", file=sys.stderr)
++        return 1
++    print("ALL PASS")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/test_dual_pad_planner.py b/tests/test_dual_pad_planner.py
+new file mode 100644
+index 0000000000..518f62cad9
+--- /dev/null
++++ b/tests/test_dual_pad_planner.py
+@@ -0,0 +1,256 @@
++#
++# Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
++# This file is a part of the vllm-ascend project.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++"""Pure-logic unit tests for the DUAL_PAD split planner.
++
++These tests run on CPU (no NPU required): they only exercise
++``dual_pad_utils.create_dual_pad_split_batch_slices`` and
++``dual_pad_utils.dual_pad_precheck_reason``.
++"""
++
++import numpy as np
++import pytest
++from vllm.config import CUDAGraphMode
++
++from vllm_ascend.worker.dual_pad_utils import (
++    NO_SPLIT_DP_BATCH_TOO_SMALL,
++    NO_SPLIT_DP_CUDAGRAPH_MODE_NOT_FULL,
++    NO_SPLIT_DP_EXACT_GRAPH_HIT,
++    NO_SPLIT_DP_EXCEEDS_MAX_SIZE,
++    NO_SPLIT_DP_FORCE_SPLIT_SMALLEST,
++    NO_SPLIT_DP_LORA_CONFLICT,
++    NO_SPLIT_DP_MODE_DISABLED,
++    NO_SPLIT_DP_MLA_CONFLICT,
++    NO_SPLIT_DP_MROPE_CONFLICT,
++    NO_SPLIT_DP_NON_UNIFORM_DECODE,
++    NO_SPLIT_DP_NO_CAPTURE_SIZES,
++    NO_SPLIT_DP_NO_MAIN_CAPTURE,
++    NO_SPLIT_DP_NO_PARALLEL_CAPTURE,
++    NO_SPLIT_DP_SPEC_DECODE_CONFLICT,
++    NO_SPLIT_DP_THRESHOLD,
++    create_dual_pad_split_batch_slices,
++    dual_pad_precheck_reason,
++)
++from vllm_ascend.worker.inplace_split_utils import INPLACE_SPLIT_DRY_RUN
++
++SIZES = [4, 8]
++
++
++def _tokens(num_reqs: int, query_len: int = 1) -> np.ndarray:
++    return np.full(num_reqs, query_len, dtype=np.int32)
++
++
++class _FakeSplitConfig:
++
++    def __init__(self, *, enabled=True, mode="dual_pad", min_batch_size_for_split=4):
++        self.enabled = enabled
++        self.mode = mode
++        self.min_batch_size_for_split = min_batch_size_for_split
++
++
++def test_exact_graph_hit_no_split():
++    plan, reason = create_dual_pad_split_batch_slices(
++        _tokens(8), 8, SIZES)
++    assert plan is None
++    assert reason == NO_SPLIT_DP_EXACT_GRAPH_HIT
++
++
++def test_force_split_exact_hit_splits_second_largest():
++    plan, reason = create_dual_pad_split_batch_slices(
++        _tokens(8), 8, SIZES, force_split=True)
++    assert reason == INPLACE_SPLIT_DRY_RUN
++    assert plan is not None
++    assert plan.first_tokens == 4
++    assert plan.second_tokens == 4
++    assert plan.second_graph_tokens == 4
++    assert [s.num_tokens for s in plan.split_slices] == [4, 4]
++    assert [s.graph_num_tokens for s in plan.split_slices] == [4, 4]
++    assert plan.split_slices[1].start_num_tokens == 4
++
++
++def test_threshold_not_met_no_split():
++    # total=7, sizes=[4,8]: no-split pads to 8 (1 pad), split pads remainder
++    # 3->4 (1 pad): padding_saved == 0 <= threshold 0 -> no split.
++    plan, reason = create_dual_pad_split_batch_slices(_tokens(7), 7, SIZES)
++    assert plan is None
++    assert reason == NO_SPLIT_DP_THRESHOLD
++
++
++def test_threshold_met_splits():
++    # Same batch, but negative threshold makes 0 saved > -1 -> split.
++    plan, reason = create_dual_pad_split_batch_slices(
++        _tokens(7), 7, SIZES, cudagraph_split_pad_threshold=-1)
++    assert reason == INPLACE_SPLIT_DRY_RUN
++    assert plan is not None
++    assert plan.first_tokens == 4
++    assert plan.second_tokens == 3
++    assert plan.second_graph_tokens == 4
++    assert plan.second_padding_tokens == 1
++    assert plan.split_slices[1].padded_num_tokens == 4
++    assert plan.split_slices[0].padded_num_tokens == 4
++
++
++def test_threshold_keeps_no_split_when_saving_below():
++    # threshold=1 >= saved 0 -> still no split.
++    plan, reason = create_dual_pad_split_batch_slices(
++        _tokens(7), 7, SIZES, cudagraph_split_pad_threshold=1)
++    assert plan is None
++    assert reason == NO_SPLIT_DP_THRESHOLD
++
++
++def test_force_split_bypasses_threshold():
++    # saved == 0, but force_split splits anyway.
++    plan, reason = create_dual_pad_split_batch_slices(
++        _tokens(7), 7, SIZES, force_split=True)
++    assert reason == INPLACE_SPLIT_DRY_RUN
++    assert plan is not None
++    assert [s.num_tokens for s in plan.split_slices] == [4, 3]
++    assert plan.split_slices[1].graph_num_tokens == 4
++
++
++def test_exceeds_max_size_no_split():
++    # total=10 > max main size 8: nothing to pad to without split.
++    plan, reason = create_dual_pad_split_batch_slices(_tokens(10), 10, SIZES)
++    assert plan is None
++    assert reason == NO_SPLIT_DP_EXCEEDS_MAX_SIZE
++
++
++def test_no_main_capture():
++    # total=2 smaller than every capture size.
++    plan, reason = create_dual_pad_split_batch_slices(
++        _tokens(2), 2, SIZES, force_split=True)
++    assert plan is None
++    assert reason == NO_SPLIT_DP_NO_MAIN_CAPTURE
++
++
++def test_no_capture_sizes():
++    plan, reason = create_dual_pad_split_batch_slices(_tokens(8), 8, [])
++    assert plan is None
++    assert reason == NO_SPLIT_DP_NO_CAPTURE_SIZES
++
++
++def test_no_parallel_capture():
++    # parallel pool too small for the remainder -> unsafe to split.
++    plan, reason = create_dual_pad_split_batch_slices(
++        _tokens(7), 7, SIZES, parallel_capture_sizes=[2],
++        cudagraph_split_pad_threshold=-1)
++    assert plan is None
++    assert reason == NO_SPLIT_DP_NO_PARALLEL_CAPTURE
++
++
++def test_force_split_smallest_graph():
++    # total == smallest graph size; force_split has no smaller main graph.
++    plan, reason = create_dual_pad_split_batch_slices(
++        _tokens(4), 4, SIZES, force_split=True)
++    assert plan is None
++    assert reason == NO_SPLIT_DP_FORCE_SPLIT_SMALLEST
++
++
++def test_parallel_capture_sizes_used_for_remainder():
++    # total=7, main=[4,8], parallel=[2,4,8]: remainder 3 pads to 4.
++    plan, reason = create_dual_pad_split_batch_slices(
++        _tokens(7), 7, SIZES, parallel_capture_sizes=[2, 4, 8],
++        cudagraph_split_pad_threshold=-1)
++    assert plan is not None
++    assert plan.second_graph_tokens == 4
++    assert plan.offset_capture_sizes_considered == [4, 8]
++
++
++def test_precheck_ok():
++    cfg = _FakeSplitConfig()
++    assert dual_pad_precheck_reason(
++        split_batch_config=cfg,
++        cudagraph_mode=CUDAGraphMode.FULL,
++        num_reqs=8,
++        has_lora=False,
++        is_mla=False,
++        is_mrope=False,
++        spec_decode_enabled=False,
++    ) is None
++
++
++def test_precheck_mode_disabled():
++    cfg = _FakeSplitConfig(enabled=False)
++    assert dual_pad_precheck_reason(
++        split_batch_config=cfg,
++        cudagraph_mode=CUDAGraphMode.FULL,
++        num_reqs=8,
++        has_lora=False,
++        is_mla=False,
++        is_mrope=False,
++        spec_decode_enabled=False,
++    ) == NO_SPLIT_DP_MODE_DISABLED
++
++
++def test_precheck_non_uniform():
++    cfg = _FakeSplitConfig()
++    assert dual_pad_precheck_reason(
++        split_batch_config=cfg,
++        cudagraph_mode=CUDAGraphMode.FULL,
++        num_reqs=8,
++        has_lora=False,
++        is_mla=False,
++        is_mrope=False,
++        spec_decode_enabled=False,
++        uniform_decode=False,
++    ) == NO_SPLIT_DP_NON_UNIFORM_DECODE
++
++
++@pytest.mark.parametrize(
++    "cudagraph_mode", [CUDAGraphMode.NONE, CUDAGraphMode.PIECEWISE])
++def test_precheck_mode_requires_full(cudagraph_mode):
++    cfg = _FakeSplitConfig()
++    reason = dual_pad_precheck_reason(
++        split_batch_config=cfg,
++        cudagraph_mode=cudagraph_mode,
++        num_reqs=8,
++        has_lora=False,
++        is_mla=False,
++        is_mrope=False,
++        spec_decode_enabled=False,
++    )
++    if cudagraph_mode == CUDAGraphMode.NONE:
++        assert reason == NO_SPLIT_DP_CUDAGRAPH_MODE_NOT_FULL
++    else:
++        assert reason is None
++
++
++def test_precheck_conflicts():
++    cfg = _FakeSplitConfig()
++    assert dual_pad_precheck_reason(
++        split_batch_config=cfg, cudagraph_mode=CUDAGraphMode.FULL, num_reqs=8,
++        has_lora=True, is_mla=False, is_mrope=False,
++        spec_decode_enabled=False) == NO_SPLIT_DP_LORA_CONFLICT
++    assert dual_pad_precheck_reason(
++        split_batch_config=cfg, cudagraph_mode=CUDAGraphMode.FULL, num_reqs=8,
++        has_lora=False, is_mla=True, is_mrope=False,
++        spec_decode_enabled=False) == NO_SPLIT_DP_MLA_CONFLICT
++    assert dual_pad_precheck_reason(
++        split_batch_config=cfg, cudagraph_mode=CUDAGraphMode.FULL, num_reqs=8,
++        has_lora=False, is_mla=False, is_mrope=True,
++        spec_decode_enabled=False) == NO_SPLIT_DP_MROPE_CONFLICT
++    assert dual_pad_precheck_reason(
++        split_batch_config=cfg, cudagraph_mode=CUDAGraphMode.FULL, num_reqs=8,
++        has_lora=False, is_mla=False, is_mrope=False,
++        spec_decode_enabled=True) == NO_SPLIT_DP_SPEC_DECODE_CONFLICT
++
++
++def test_precheck_batch_too_small():
++    cfg = _FakeSplitConfig()
++    assert dual_pad_precheck_reason(
++        split_batch_config=cfg, cudagraph_mode=CUDAGraphMode.FULL, num_reqs=2,
++        has_lora=False, is_mla=False, is_mrope=False,
++        spec_decode_enabled=False) == NO_SPLIT_DP_BATCH_TOO_SMALL
+diff --git a/tests/test_split_full_graph_startup.py b/tests/test_split_full_graph_startup.py
+new file mode 100644
+index 0000000000..5ae9c5999a
+--- /dev/null
++++ b/tests/test_split_full_graph_startup.py
+@@ -0,0 +1,76 @@
++#
++# Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
++# Copyright 2023 The vLLM team.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++# This file is a part of the vllm-ascend project.
++#
++
++import json
++import os
++
++import pytest
++from vllm.utils.network_utils import get_open_port
++
++from tests.e2e.conftest import RemoteOpenAIServer, wait_until_npu_memory_free
++
++_DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
++
++
++@wait_until_npu_memory_free()
++def test_split_full_graph_startup():
++    """Verify that vllm serve with FULL graph + inplace_parallel split can
++    complete profile/capture and reach /health readiness without crashing.
++
++    This is a startup smoke-test: it only checks that the server becomes
++    healthy, not inference correctness or performance.
++
++    Covers the regression where ``forward_oot()`` reading
++    ``_EXTRA_CTX.is_draft_model`` caused a Dynamo ``Unsupported`` error
++    inside the split FULL-graph capture path.
++    """
++    model = os.environ.get("VLLM_TEST_MODEL", _DEFAULT_MODEL)
++    port = get_open_port()
++
++    compilation_config = json.dumps({
++        "cudagraph_mode": "FULL",
++        "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 32, 64],
++    })
++
++    additional_config = json.dumps({
++        "split_batch_config": {
++            "enabled": True,
++            "mode": "inplace_parallel",
++            "enable_parallel_streams": True,
++            "num_splits": 2,
++            "parallel_capture_sizes": [1, 2, 4, 8, 16, 32, 64],
++        },
++    })
++
++    server_args = [
++        "--max_model_len", "1024",
++        "--gpu_memory_utilization", "0.9",
++        "--port", str(port),
++        "--compilation-config", compilation_config,
++        "--additional-config", additional_config,
++    ]
++
++    with RemoteOpenAIServer(
++        model,
++        server_args,
++        server_port=port,
++        auto_port=False,
++        max_wait_seconds=600,
++    ) as server:
++        resp = server.url_for("health")
++        assert resp.endswith("/health")
+\ No newline at end of file
+diff --git a/tests/ut/compilation/test_fia_shared_list.py b/tests/ut/compilation/test_fia_shared_list.py
+new file mode 100644
+index 0000000000..82b7e0738c
+--- /dev/null
++++ b/tests/ut/compilation/test_fia_shared_list.py
+@@ -0,0 +1,186 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM Ascend project
++
++"""Host-only unit tests for plan-0826d C1 (FIA shared seq_lens list).
++
++C1 derives the templated FIA ``seq_lens`` / ``actual_seq_lengths_q`` ONCE per
++step and reuses the same host list for every layer, guarded by a per-layer
++uniformity probe that falls back to per-layer derivation on any disagreement.
++
++These tests exercise the pure host-side helpers only (no NPU). The on-device
++guards and the env-gated off/on behavior are covered by the offline smoke + mode
++internal consistency runs described in plan-0826d step Step4.
++"""
++
++import torch
++
++from vllm_ascend.compilation.acl_graph_split_batch import (
++    _fia_layer_seq_lens,
++    _fia_shared_seq_lens_probe,
++    _get_fia_key_t,
++    maybe_template_fia_seq_lens,
++    should_template_fia_seq_lens,
++)
++
++
++class _RuntimeMetadata:
++    def __init__(self, metadata_mode="template", backend_tag="fia"):
++        self.metadata_mode = metadata_mode
++        self.backend_tag = backend_tag
++
++
++class _BatchDescriptor:
++    def __init__(self, metadata_mode="template", backend_tag="fia"):
++        self.runtime_metadata = _RuntimeMetadata(metadata_mode, backend_tag)
++
++
++class _ForwardContext:
++    def __init__(self, *, metadata_mode="template", backend_tag="fia",
++                 actual=8, graph=16):
++        self.batch_descriptor = _BatchDescriptor(metadata_mode, backend_tag)
++        self.split_actual_num_tokens = actual
++        self.split_graph_num_tokens = graph
++
++
++class _AttnMeta:
++    def __init__(self, seq_lens_list, actual_seq_lengths_q):
++        self.seq_lens_list = seq_lens_list
++        self.actual_seq_lengths_q = actual_seq_lengths_q
++
++
++def _template_ctx(actual=8, graph=16, **kwargs):
++    return _ForwardContext(actual=actual, graph=graph, **kwargs)
++
++
++# --------------------------------------------------------------------------- #
++# should_template / maybe_template / _get_fia_key_t                            #
++# --------------------------------------------------------------------------- #
++
++
++def test_should_template_true_for_fia_template_actual_lt_graph():
++    ctx = _template_ctx()
++    assert should_template_fia_seq_lens(ctx) is True
++
++
++def test_should_template_false_for_non_fia_backend():
++    assert should_template_fia_seq_lens(_template_ctx(backend_tag="pa")) is False
++
++
++def test_should_template_false_for_non_template_mode():
++    assert should_template_fia_seq_lens(_template_ctx(metadata_mode="eager")) is False
++
++
++def test_should_template_false_when_actual_ge_graph():
++    # Zero-padding split: the last seq_lens entry belongs to a real request.
++    assert should_template_fia_seq_lens(_template_ctx(actual=16, graph=16)) is False
++
++
++def test_maybe_template_replaces_last_entry_only():
++    ctx = _template_ctx()
++    out = maybe_template_fia_seq_lens(ctx, [1, 1, 1], 64)
++    assert out == [1, 1, 64]
++
++
++def test_maybe_template_non_template_returns_input_identity():
++    ctx = _template_ctx(backend_tag="pa")
++    seq = [1, 1, 1]
++    assert maybe_template_fia_seq_lens(ctx, seq, 64) is seq
++
++
++def test_maybe_template_empty_list_returns_as_is():
++    ctx = _template_ctx()
++    assert maybe_template_fia_seq_lens(ctx, [], 64) == []
++
++
++def test_get_fia_key_t_uses_ndim2_tensor_col():
++    kc = torch.zeros(4, 64)
++    assert _get_fia_key_t(kc, 64) == 64
++
++
++def test_get_fia_key_t_fallback_for_non_tensor():
++    assert _get_fia_key_t(123, 64) == 64
++
++
++# --------------------------------------------------------------------------- #
++# _fia_shared_seq_lens_probe: one derivation == per-layer derivation           #
++# --------------------------------------------------------------------------- #
++
++
++def test_probe_uniform_returns_shared_value_equal_to_per_layer():
++    ctx = _template_ctx()
++    kc = torch.zeros(4, 64)
++    metas = [_AttnMeta([8, 8, 8], [16, 16, 16]) for _ in range(3)]
++    layer_items = [(m, kc, 64) for m in metas]
++
++    seq0, act0, uniform = _fia_shared_seq_lens_probe(ctx, layer_items)
++
++    assert uniform is True
++    assert seq0 == [8, 8, 64]
++    assert act0 == [16, 16, 16]
++    # One derivation == per-layer derivation for every layer.
++    for m in metas:
++        assert _fia_layer_seq_lens(ctx, m, kc, 64, source="acl_graph_update:x") == seq0
++        assert m.actual_seq_lengths_q == act0
++
++
++def test_probe_non_uniform_actual_seq_lengths_q_falls_back():
++    ctx = _template_ctx()
++    kc = torch.zeros(4, 64)
++    metas = [
++        _AttnMeta([8, 8, 8], [16, 16, 16]),
++        _AttnMeta([8, 8, 8], [17, 17, 17]),
++    ]
++    seq0, act0, uniform = _fia_shared_seq_lens_probe(
++        ctx, [(m, kc, 64) for m in metas])
++    assert uniform is False
++
++
++def test_probe_non_uniform_seq_lens_list_falls_back():
++    ctx = _template_ctx()
++    kc = torch.zeros(4, 64)
++    metas = [
++        _AttnMeta([8, 8, 8], [16, 16, 16]),
++        _AttnMeta([8, 9, 8], [16, 16, 16]),  # non-last element differs
++    ]
++    seq0, act0, uniform = _fia_shared_seq_lens_probe(
++        ctx, [(m, kc, 64) for m in metas])
++    assert uniform is False
++
++
++def test_probe_empty_returns_none_none_false():
++    seq0, act0, uniform = _fia_shared_seq_lens_probe(_template_ctx(), [])
++    assert seq0 is None
++    assert act0 is None
++    assert uniform is False
++
++
++def test_probe_non_template_keeps_original_list():
++    ctx = _template_ctx(backend_tag="pa")
++    kc = torch.zeros(4, 64)
++    metas = [_AttnMeta([8, 8, 8], [16, 16, 16]) for _ in range(2)]
++    seq0, act0, uniform = _fia_shared_seq_lens_probe(
++        ctx, [(m, kc, 64) for m in metas])
++    assert uniform is True
++    assert seq0 == [8, 8, 8]
++
++
++# --------------------------------------------------------------------------- #
++# env-gated off switch regression (host-level contract)                        #
++# --------------------------------------------------------------------------- #
++
++
++def test_shared_value_matches_off_path_per_layer_derivation():
++    """When the env switch is off the code uses the original per-layer path;
++    the shared value must be byte-for-byte equivalent to the per-layer value in
++    the uniform case, so toggling the gate is a behavior no-op."""
++    ctx = _template_ctx()
++    kc = torch.zeros(4, 64)
++    metas = [_AttnMeta([8, 8, 8], [16, 16, 16]) for _ in range(4)]
++    seq0, _act0, uniform = _fia_shared_seq_lens_probe(
++        ctx, [(m, kc, 64) for m in metas])
++    assert uniform is True
++    for m in metas:
++        per_layer = maybe_template_fia_seq_lens(
++            ctx, m.seq_lens_list, _get_fia_key_t(kc, 64),
++            source="acl_graph_update:x")
++        assert per_layer == seq0
+-- 
+2.53.0.windows.3
+

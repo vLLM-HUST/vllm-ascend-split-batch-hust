@@ -1,0 +1,1368 @@
+From e08f79d014b6884032838e348b574091a0bf7c5b Mon Sep 17 00:00:00 2001
+From: Raing5Days <M202574102@hust.edu.cn>
+Date: Sun, 30 Aug 2026 15:52:55 +0000
+Subject: [PATCH] feat(ascend): split-batch primitive modules
+
+Split planning, output merge, workspace and replay-pool primitives
+(inplace_split_utils, inplace_split_ops, inplace_split_worker_pool,
+dual_pad_utils). Building blocks wired by the engine integration in
+the following PR of the series.
+
+Part of the split-batch series; no call sites yet (default-off).
+---
+ vllm_ascend/worker/dual_pad_utils.py          | 337 ++++++++++++
+ vllm_ascend/worker/inplace_split_ops.py       | 502 ++++++++++++++++++
+ vllm_ascend/worker/inplace_split_utils.py     | 345 ++++++++++++
+ .../worker/inplace_split_worker_pool.py       | 133 +++++
+ 4 files changed, 1317 insertions(+)
+ create mode 100644 vllm_ascend/worker/dual_pad_utils.py
+ create mode 100644 vllm_ascend/worker/inplace_split_ops.py
+ create mode 100644 vllm_ascend/worker/inplace_split_utils.py
+ create mode 100644 vllm_ascend/worker/inplace_split_worker_pool.py
+
+diff --git a/vllm_ascend/worker/dual_pad_utils.py b/vllm_ascend/worker/dual_pad_utils.py
+new file mode 100644
+index 0000000000..ca9783205f
+--- /dev/null
++++ b/vllm_ascend/worker/dual_pad_utils.py
+@@ -0,0 +1,337 @@
++#
++# Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
++# This file is a part of the vllm-ascend project.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""DUAL_PAD (dual-pad) split planning.
++
++Dual-pad is the reference implementation's split-batch flavor: the two splits
++run on separate padded input buffers (the second split uses the dedicated
++``*_parallel_streams`` buffers) and each split dispatches to an already
++captured graph size through the standard (``start_num_tokens=0``) dispatcher
++path.  Unlike dual-inplace, no offset graphs or lazy captures are involved.
++
++This module ports the reference decision logic
++(``min-zbw-parallel/vllm_ascend/worker/model_runner_v3.py`` L932-1052):
++
++- main slice = largest main-stream capture size <= total tokens
++- remainder goes to the parallel stream, padded to its own nearest graph
++- split only when ``padding_saved > cudagraph_split_pad_threshold``
++  (unless ``force_split``); ``force_split`` also splits on an exact graph hit
++  using the second-largest capture size.
++"""
++
++from __future__ import annotations
++
++from typing import Any, Optional
++
++import numpy as np
++
++from vllm.config import CUDAGraphMode
++from vllm.forward_context import BatchDescriptor
++
++from vllm_ascend.worker.inplace_split_utils import (
++    INPLACE_SPLIT_DRY_RUN,
++    UNIFIED_SINGLE_GRAPH_REASON,
++    InplaceSplitPlan,
++    SplitBatchSlice,
++)
++
++
++def make_unified_whole_batch_plan(plan: InplaceSplitPlan) -> InplaceSplitPlan:
++    """Convert a would-be dual_pad plan into a unified whole-batch plan.
++
++    The unified execution keeps ONE main-pool graph captured at the exact
++    batch token count (the joint continuous row buffer): the union of the two
++    contiguous dual_pad request slices is simply ``[0, num_reqs)``, and the
++    single slice's padded size equals the exact token count (no padding tail,
++    no parallel-pool graphs, no dual-stream replay).
++
++    Args:
++        plan: the committed dual_pad plan (non-None).
++
++    Returns:
++        A single-slice ``InplaceSplitPlan`` with ``use_unified=True``.
++    """
++    total = int(plan.total_num_tokens)
++    num_reqs = int(plan.first_reqs) + int(plan.second_reqs)
++    single = SplitBatchSlice(
++        request_slice=slice(0, num_reqs),
++        token_slice=slice(0, total),
++        padded_num_tokens=total,
++        start_num_tokens=0,
++    )
++    return InplaceSplitPlan(
++        split_slices=[single],
++        reason=UNIFIED_SINGLE_GRAPH_REASON,
++        total_num_tokens=total,
++        padded_num_tokens_without_split=total,
++        first_tokens=total,
++        second_tokens=0,
++        first_reqs=num_reqs,
++        second_reqs=0,
++        lower_capture_size=total,
++        remainder_tokens=0,
++        capture_sizes_considered=list(plan.capture_sizes_considered),
++        first_tokens_policy="unified_exact",
++        offset_match_policy="none",
++        second_actual_tokens=0,
++        second_graph_tokens=0,
++        second_padding_tokens=0,
++        offset_capture_sizes_considered=[],
++        offset_min_graph_tokens=1,
++        offset_max_graph_tokens_by_start=None,
++        offset_allowed_graph_tokens_by_start=None,
++        use_unified=True,
++    )
++
++
++def make_dual_pad_parallel_batch_descriptor(
++    num_tokens: int,
++    *,
++    has_lora: bool = False,
++    num_active_loras: int = 0,
++    uniform_decode_query_len: int = 1,
++    max_num_seqs: int | None = None,
++) -> BatchDescriptor:
++    """Exact-size BatchDescriptor for dual-pad parallel-pool graphs.
++
++    Parallel-pool graphs are keyed by the padded parallel size itself.  They
++    must not go through the main-pool cudagraph padding: the main dispatcher
++    would round the size up to the nearest main capture size, which mis-keys
++    the captured graph (runtime lookup misses) and breaks dummy metadata
++    construction at capture time (num_reqs vs padded num_reqs mismatch).
++    Mirrors CudagraphDispatcher._create_padded_batch_descriptor's uniform
++    FULL-decode num_reqs formula, minus the padding lookup.
++    """
++    if num_tokens <= 0:
++        raise ValueError(
++            "num_tokens must be positive for dual-pad parallel-pool graphs")
++    if uniform_decode_query_len <= 0:
++        raise ValueError("uniform_decode_query_len must be positive")
++    if num_tokens % uniform_decode_query_len != 0:
++        raise ValueError(
++            "num_tokens must be divisible by uniform_decode_query_len for "
++            "dual-pad parallel-pool graphs")
++    num_reqs = num_tokens // uniform_decode_query_len
++    if max_num_seqs is not None:
++        num_reqs = min(num_reqs, max_num_seqs)
++    return BatchDescriptor(
++        num_tokens=num_tokens,
++        num_reqs=num_reqs,
++        uniform=True,
++        has_lora=has_lora,
++        num_active_loras=num_active_loras,
++    )
++
++# --- dual-pad no-split reasons ----------------------------------------------
++NO_SPLIT_DP_MODE_DISABLED = "no_split_dual_pad_mode_disabled"
++NO_SPLIT_DP_NON_UNIFORM_DECODE = "no_split_dual_pad_non_uniform_decode"
++NO_SPLIT_DP_CUDAGRAPH_MODE_NOT_FULL = "no_split_dual_pad_cudagraph_mode_not_full"
++NO_SPLIT_DP_SPEC_DECODE_CONFLICT = "no_split_dual_pad_spec_decode_conflict"
++NO_SPLIT_DP_LORA_CONFLICT = "no_split_dual_pad_lora_conflict"
++NO_SPLIT_DP_MLA_CONFLICT = "no_split_dual_pad_mla_conflict"
++NO_SPLIT_DP_MROPE_CONFLICT = "no_split_dual_pad_mrope_conflict"
++NO_SPLIT_DP_BATCH_TOO_SMALL = "no_split_dual_pad_batch_too_small"
++NO_SPLIT_DP_NO_CAPTURE_SIZES = "no_split_dual_pad_no_capture_sizes"
++NO_SPLIT_DP_EXACT_GRAPH_HIT = "no_split_dual_pad_exact_graph_hit"
++NO_SPLIT_DP_FORCE_SPLIT_SMALLEST = "no_split_dual_pad_force_split_smallest"
++NO_SPLIT_DP_EXCEEDS_MAX_SIZE = "no_split_dual_pad_exceeds_max_size"
++NO_SPLIT_DP_THRESHOLD = "no_split_dual_pad_threshold_not_met"
++NO_SPLIT_DP_NO_MAIN_CAPTURE = "no_split_dual_pad_no_main_capture"
++NO_SPLIT_DP_NO_PARALLEL_CAPTURE = "no_split_dual_pad_no_parallel_capture"
++
++
++def _ceil_to_graph(n: int, sizes: list[int]) -> int:
++    """Smallest capture size >= n, or -1 when n exceeds all sizes."""
++    for s in sizes:
++        if s >= n:
++            return s
++    return -1
++
++
++def dual_pad_precheck_reason(
++    *,
++    split_batch_config: Any,
++    cudagraph_mode: CUDAGraphMode,
++    num_reqs: int,
++    has_lora: bool,
++    is_mla: bool,
++    is_mrope: bool,
++    spec_decode_enabled: bool,
++    uniform_decode: bool = True,
++) -> Optional[str]:
++    """Return the first NO_SPLIT_* reason that blocks dual-pad, or None."""
++    if getattr(split_batch_config, "mode", "") != "dual_pad":
++        return NO_SPLIT_DP_MODE_DISABLED
++    if not split_batch_config.enabled:
++        return NO_SPLIT_DP_MODE_DISABLED
++    if not uniform_decode:
++        return NO_SPLIT_DP_NON_UNIFORM_DECODE
++    if cudagraph_mode not in (CUDAGraphMode.FULL, CUDAGraphMode.PIECEWISE):
++        return NO_SPLIT_DP_CUDAGRAPH_MODE_NOT_FULL
++    if spec_decode_enabled:
++        return NO_SPLIT_DP_SPEC_DECODE_CONFLICT
++    if has_lora:
++        return NO_SPLIT_DP_LORA_CONFLICT
++    if is_mla:
++        return NO_SPLIT_DP_MLA_CONFLICT
++    if is_mrope:
++        return NO_SPLIT_DP_MROPE_CONFLICT
++    if num_reqs < split_batch_config.min_batch_size_for_split:
++        return NO_SPLIT_DP_BATCH_TOO_SMALL
++    return None
++
++
++def create_dual_pad_split_batch_slices(
++    num_scheduled_tokens_per_request: np.ndarray,
++    total_num_tokens: int,
++    cudagraph_capture_sizes: list[int] | tuple[int, ...],
++    parallel_capture_sizes: list[int] | tuple[int, ...] | None = None,
++    cudagraph_split_pad_threshold: int = 0,
++    force_split: bool = False,
++) -> tuple[Optional[InplaceSplitPlan], str]:
++    """Plan a dual-pad split (largest main graph hit + padded remainder).
++
++    Args:
++        num_scheduled_tokens_per_request: token count per request (uniform
++            decode only; used for request-slice bookkeeping).
++        total_num_tokens: total token count to split.
++        cudagraph_capture_sizes: main-stream graph sizes.
++        parallel_capture_sizes: parallel-stream graph sizes; None reuses the
++            main sizes (reference behaviour).
++        cudagraph_split_pad_threshold: minimum padding saved (without split
++            vs with split) required to actually split.
++        force_split: skip the threshold and split whenever possible; on an
++            exact graph hit, split into the second-largest graph + remainder.
++
++    Returns:
++        (plan, reason).  plan is None when the batch should not be split.
++    """
++    if not cudagraph_capture_sizes:
++        return None, NO_SPLIT_DP_NO_CAPTURE_SIZES
++
++    sorted_main = sorted(set(int(s) for s in cudagraph_capture_sizes))
++    max_main_size = sorted_main[-1]
++
++    if parallel_capture_sizes is not None:
++        sorted_parallel = sorted(set(int(s) for s in parallel_capture_sizes))
++    else:
++        sorted_parallel = sorted_main
++
++    num_reqs = int(len(num_scheduled_tokens_per_request))
++    total = int(total_num_tokens)
++    if num_reqs == 0 or total == 0:
++        return None, NO_SPLIT_DP_NO_CAPTURE_SIZES
++
++    # largest main-stream graph size that fits within total without padding
++    main_tokens = max(
++        (s for s in sorted_main if s <= total), default=0)
++    second_tokens = total - main_tokens
++
++    if main_tokens == total:
++        # Exact graph hit: normally no split.
++        if force_split and len(sorted_main) >= 2:
++            candidates = [s for s in sorted_main if s < total]
++            if not candidates:
++                # total == smallest graph size; cannot split.
++                return None, NO_SPLIT_DP_FORCE_SPLIT_SMALLEST
++            main_tokens = max(candidates)
++            second_tokens = total - main_tokens
++        else:
++            return None, NO_SPLIT_DP_EXACT_GRAPH_HIT
++    elif main_tokens <= 0:
++        # total smaller than every captured graph size.
++        return None, NO_SPLIT_DP_NO_MAIN_CAPTURE
++    elif second_tokens > 0:
++        if force_split:
++            pass
++        elif total > max_main_size:
++            # No graph to pad to without split; no split benefit.
++            return None, NO_SPLIT_DP_EXCEEDS_MAX_SIZE
++        else:
++            original_padded = _ceil_to_graph(total, sorted_main)
++            original_padding = original_padded - total
++            remainder_padded = _ceil_to_graph(second_tokens, sorted_parallel)
++            if remainder_padded < 0:
++                # Parallel pool has no size >= remainder; unsafe to split.
++                return None, NO_SPLIT_DP_NO_PARALLEL_CAPTURE
++            remainder_padding = remainder_padded - second_tokens
++            padding_saved = original_padding - remainder_padding
++            if padding_saved <= cudagraph_split_pad_threshold:
++                return None, NO_SPLIT_DP_THRESHOLD
++    else:
++        return None, NO_SPLIT_DP_NO_MAIN_CAPTURE
++
++    # At this point the split is committed: main_tokens in [1, total),
++    # second_tokens == total - main_tokens > 0.
++    main_reqs = min(num_reqs, main_tokens)
++    second_reqs = num_reqs - main_reqs
++    if second_reqs <= 0:
++        # Request slice would be empty (non-uniform token geometry); the
++        # reference implementation only supports uniform decode (1 token/req).
++        return None, NO_SPLIT_DP_NO_MAIN_CAPTURE
++    second_padded = _ceil_to_graph(second_tokens, sorted_parallel)
++    if second_padded < 0:
++        return None, NO_SPLIT_DP_NO_PARALLEL_CAPTURE
++
++    # main_tokens is itself a capture size -> zero padding on the main slice.
++    main_padded = main_tokens
++
++    split_slices = [
++        SplitBatchSlice(
++            request_slice=slice(0, main_reqs),
++            token_slice=slice(0, main_tokens),
++            padded_num_tokens=main_padded,
++            start_num_tokens=0,
++        ),
++        SplitBatchSlice(
++            request_slice=slice(main_reqs, num_reqs),
++            token_slice=slice(main_tokens, total),
++            padded_num_tokens=second_padded,
++            start_num_tokens=main_tokens,
++        ),
++    ]
++
++    padded_without_split = _ceil_to_graph(total, sorted_main)
++    if padded_without_split < 0:
++        padded_without_split = total
++
++    offset_sizes_considered = [
++        s for s in sorted_parallel if s >= second_tokens
++    ]
++
++    plan = InplaceSplitPlan(
++        split_slices=split_slices,
++        reason=INPLACE_SPLIT_DRY_RUN,
++        total_num_tokens=total,
++        padded_num_tokens_without_split=padded_without_split,
++        first_tokens=main_tokens,
++        second_tokens=second_tokens,
++        first_reqs=main_reqs,
++        second_reqs=second_reqs,
++        lower_capture_size=main_padded,
++        remainder_tokens=padded_without_split - total,
++        capture_sizes_considered=sorted_main,
++        first_tokens_policy="largest_lower",
++        offset_match_policy="bucket",
++        second_actual_tokens=second_tokens,
++        second_graph_tokens=second_padded,
++        second_padding_tokens=second_padded - second_tokens,
++        offset_capture_sizes_considered=offset_sizes_considered,
++        offset_min_graph_tokens=1,
++        offset_max_graph_tokens_by_start=None,
++        offset_allowed_graph_tokens_by_start=None,
++    )
++    return plan, INPLACE_SPLIT_DRY_RUN
+diff --git a/vllm_ascend/worker/inplace_split_ops.py b/vllm_ascend/worker/inplace_split_ops.py
+new file mode 100644
+index 0000000000..60fa3cb6e3
+--- /dev/null
++++ b/vllm_ascend/worker/inplace_split_ops.py
+@@ -0,0 +1,502 @@
++#
++# Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
++# This file is a part of the vllm-ascend project.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++from copy import copy
++from dataclasses import dataclass
++from typing import Any
++
++import torch
++from vllm.distributed import get_tensor_model_parallel_world_size
++from vllm.sequence import IntermediateTensors
++
++from vllm_ascend.attention.utils import AscendCommonAttentionMetadata
++from vllm_ascend.utils import enable_sp
++
++
++def rebind_attn_metadata_slot_mapping(attn_metadata: Any,
++                                      slot_mapping: torch.Tensor) -> Any:
++    """Point every per-layer metadata's slot_mapping at ``slot_mapping``.
++
++    Used when capturing the parallel-stream graph pool: the captured
++    ``npu_scatter_pa_kv_cache`` KV-write binds the slot_mapping address it
++    sees at capture time.  Without rebinding, parallel-pool graphs bind the
++    head of the runner's persistent slot_mapping buffer, which at runtime
++    holds split-0's slots, so split-1 would write its K/V into split-0's
++    cache slots.
++    """
++    import dataclasses
++
++    def _rebind_single(meta: Any) -> Any:
++        if meta is None or not dataclasses.is_dataclass(meta):
++            return meta
++        kwargs: dict = {}
++        if "slot_mapping" in getattr(meta, "__dataclass_fields__", {}):
++            kwargs["slot_mapping"] = slot_mapping
++        for sub_field in ("prefill", "decode", "decode_meta"):
++            sub = getattr(meta, sub_field, None)
++            if sub is not None and dataclasses.is_dataclass(sub):
++                if "slot_mapping" in getattr(sub, "__dataclass_fields__",
++                                             {}):
++                    kwargs[sub_field] = dataclasses.replace(
++                        sub, slot_mapping=slot_mapping)
++        return dataclasses.replace(meta, **kwargs) if kwargs else meta
++
++    if isinstance(attn_metadata, dict):
++        return {k: _rebind_single(v) for k, v in attn_metadata.items()}
++    if isinstance(attn_metadata, list):
++        return [
++            {k: _rebind_single(v) for k, v in d.items()}
++            if isinstance(d, dict) else _rebind_single(d)
++            for d in attn_metadata
++        ]
++    return _rebind_single(attn_metadata)
++
++
++def clone_attn_metadata_block_tables(attn_metadata: Any) -> Any:
++    import dataclasses
++
++    def _clone_single(meta: Any) -> Any:
++        if meta is None or not dataclasses.is_dataclass(meta):
++            return meta
++        kwargs: dict = {}
++        if getattr(meta, "block_tables", None) is not None:
++            kwargs["block_tables"] = meta.block_tables.clone()
++        for sub_field in ("prefill", "decode_meta"):
++            sub = getattr(meta, sub_field, None)
++            if sub is not None and dataclasses.is_dataclass(sub):
++                sub_kwargs: dict = {}
++                if getattr(sub, "block_tables", None) is not None:
++                    sub_kwargs["block_tables"] = sub.block_tables.clone()
++                if sub_kwargs:
++                    kwargs[sub_field] = dataclasses.replace(sub, **sub_kwargs)
++        return dataclasses.replace(meta, **kwargs) if kwargs else meta
++
++    if isinstance(attn_metadata, dict):
++        return {k: _clone_single(v) for k, v in attn_metadata.items()}
++    if isinstance(attn_metadata, list):
++        return [
++            {k: _clone_single(v) for k, v in d.items()}
++            if isinstance(d, dict) else _clone_single(d)
++            for d in attn_metadata
++        ]
++    return _clone_single(attn_metadata)
++
++
++@dataclass
++class AscendUbatchMetadata:
++    context: Any
++    input_ids: torch.Tensor | None
++    positions: torch.Tensor
++    inputs_embeds: torch.Tensor | None
++    intermediate_tensors: Any
++    num_tokens: int
++
++
++def dual_stream_attention_config(split_cfg: Any) -> Any:
++    if split_cfg is None:
++        return None
++    return getattr(split_cfg, "dual_stream_attention_config", None)
++
++
++
++def slice_split_batch_inputs(
++    tokens_slice: slice,
++    input_ids: torch.Tensor | None,
++    positions: torch.Tensor,
++    inputs_embeds: torch.Tensor | None,
++    intermediate_tensors: Any,
++    *,
++    vllm_config: Any = None,
++) -> tuple[torch.Tensor | None, torch.Tensor, torch.Tensor | None, Any]:
++    sliced_input_ids = input_ids[tokens_slice] if input_ids is not None else None
++    sliced_positions = positions[tokens_slice] if positions.ndim == 1 else positions[:, tokens_slice]
++    sliced_inputs_embeds = inputs_embeds[tokens_slice] if inputs_embeds is not None else None
++    if intermediate_tensors is not None:
++        tp_size = get_tensor_model_parallel_world_size() if enable_sp(vllm_config) else 1
++        if tp_size > 1:
++            start = (tokens_slice.start + tp_size - 1) // tp_size
++            stop = start + (tokens_slice.stop - tokens_slice.start + tp_size - 1) // tp_size
++            it_slice = slice(start, stop)
++        else:
++            it_slice = tokens_slice
++        sliced_intermediate_tensors = intermediate_tensors[it_slice]
++    else:
++        sliced_intermediate_tensors = None
++    return sliced_input_ids, sliced_positions, sliced_inputs_embeds, sliced_intermediate_tensors
++
++
++
++def expand_tensor_view_for_graph_slice(
++    tensor: Any,
++    graph_size: int,
++    *,
++    name: str,
++    dim: int = 0,
++    backing_tensor: torch.Tensor | None = None,
++    backing_start: int = 0,
++    allow_copy: bool = False,
++) -> Any:
++    if not isinstance(tensor, torch.Tensor):
++        return tensor
++    graph_size = int(graph_size)
++    dim = int(dim)
++    if graph_size <= int(tensor.shape[dim]):
++        if dim == 0:
++            return tensor[:graph_size]
++        if dim == 1:
++            return tensor[:, :graph_size]
++        raise ValueError(f"Unsupported dim={dim} for {name}")
++    shape = list(tensor.shape)
++    shape[dim] = graph_size
++    try:
++        return tensor.as_strided(
++            tuple(shape),
++            tensor.stride(),
++            storage_offset=tensor.storage_offset(),
++        )
++    except RuntimeError:
++        if (isinstance(backing_tensor, torch.Tensor)
++                and int(backing_tensor.shape[dim])
++                >= int(backing_start) + graph_size):
++            stop = int(backing_start) + graph_size
++            if dim == 0:
++                return backing_tensor[int(backing_start):stop]
++            if dim == 1:
++                return backing_tensor[:, int(backing_start):stop]
++            raise ValueError(f"Unsupported dim={dim} for {name}")
++        if allow_copy:
++            expanded = tensor.new_zeros(tuple(shape))
++            copy_slice = [slice(None)] * tensor.ndim
++            copy_slice[dim] = slice(0, int(tensor.shape[dim]))
++            expanded[tuple(copy_slice)].copy_(tensor)
++            return expanded
++        raise RuntimeError(
++            "Inplace offset graph requires zero-copy backing view for "
++            f"{name}: graph_size={graph_size}, dim={dim}, "
++            f"tensor_shape={tuple(tensor.shape)}, "
++            f"tensor_storage_offset={int(tensor.storage_offset())}, "
++            f"backing_start={int(backing_start)}, "
++            f"backing_shape={(None if backing_tensor is None else tuple(backing_tensor.shape))}")
++
++
++def fill_tensor_local_tail(
++    tensor: Any,
++    start: int,
++    stop: int,
++    *,
++    name: str,
++    dim: int = 0,
++) -> bool:
++    if not isinstance(tensor, torch.Tensor) or stop <= start:
++        return False
++    start = int(start)
++    stop = int(stop)
++    dim = int(dim)
++    if stop > int(tensor.shape[dim]):
++        raise RuntimeError(
++            f"Inplace offset padded local tail for {name} exceeds tensor "
++            f"shape: tail_stop={stop}, shape={tuple(tensor.shape)}, "
++            f"dim={dim}")
++    if dim == 0:
++        tensor[start:stop].fill_(0)
++    elif dim == 1:
++        tensor[:, start:stop].fill_(0)
++    else:
++        raise ValueError(f"Unsupported dim={dim} for {name}")
++    return True
++
++
++def pad_query_start_loc_for_graph(
++    tensor: torch.Tensor,
++    pad_reqs: int,
++    query_len: int,
++) -> torch.Tensor:
++    if not isinstance(tensor, torch.Tensor) or pad_reqs <= 0:
++        return tensor
++    increments = torch.arange(
++        1, pad_reqs + 1, dtype=tensor.dtype, device=tensor.device,
++    ) * int(query_len)
++    return torch.cat([tensor, tensor[-1] + increments], dim=0)
++
++
++def metadata_positions_for_graph_slice(
++    positions: Any,
++    split_slice: Any,
++    *,
++    mrope_positions_gpu: Any = None,
++    positions_gpu: Any = None,
++) -> Any:
++    if not isinstance(positions, torch.Tensor):
++        return positions
++    graph_tokens = int(split_slice.graph_num_tokens)
++    token_dim = 1 if positions.ndim == 2 else 0
++    token_start = int(split_slice.token_slice.start)
++    backing = None
++    if token_dim == 1:
++        backing = mrope_positions_gpu
++    if backing is None:
++        backing = positions_gpu
++    return expand_tensor_view_for_graph_slice(
++        positions,
++        graph_tokens,
++        name="positions",
++        dim=token_dim,
++        backing_tensor=backing,
++        backing_start=token_start,
++    )
++
++
++def stabilize_inplace_common_attn_metadata(
++    common: Any,
++    *,
++    split_idx: int,
++    split_slice: Any | None = None,
++    fill_padding: bool = True,
++    uniform_decode_query_len: int | None = None,
++    mrope_positions_gpu: Any = None,
++    positions_gpu: Any = None,
++) -> Any:
++    if split_slice is not None and split_slice.start_num_tokens > 0:
++        actual_tokens = int(split_slice.num_tokens)
++        graph_tokens = int(split_slice.graph_num_tokens)
++        query_len = int(getattr(common, "decode_token_per_req", 0)
++                       or uniform_decode_query_len or 1)
++        if query_len <= 0:
++            query_len = 1
++        pad_tokens = graph_tokens - actual_tokens
++        actual_reqs = int(common.num_reqs)
++        graph_reqs = graph_tokens // query_len
++        pad_reqs = graph_reqs - actual_reqs
++
++        padded_common = copy(common)
++        padded_common.query_start_loc = pad_query_start_loc_for_graph(
++            common.query_start_loc, pad_reqs, query_len)
++        padded_common.query_start_loc_cpu = pad_query_start_loc_for_graph(
++            common.query_start_loc_cpu, pad_reqs, query_len)
++
++        padded_common.seq_lens = expand_tensor_view_for_graph_slice(
++            common.seq_lens, graph_reqs, name="seq_lens")
++        padded_common.seq_lens_cpu = expand_tensor_view_for_graph_slice(
++            common.seq_lens_cpu, graph_reqs, name="seq_lens_cpu")
++        _seq_lens_cpu = getattr(common, "_seq_lens_cpu", None)
++        if _seq_lens_cpu is not None:
++            padded_common._seq_lens_cpu = expand_tensor_view_for_graph_slice(
++                _seq_lens_cpu, graph_reqs, name="_seq_lens_cpu")
++        padded_common.num_computed_tokens_cpu = expand_tensor_view_for_graph_slice(
++            common.num_computed_tokens_cpu, graph_reqs,
++            name="num_computed_tokens_cpu")
++        padded_common.block_table_tensor = expand_tensor_view_for_graph_slice(
++            common.block_table_tensor, graph_reqs,
++            name="block_table_tensor")
++        padded_common.slot_mapping = expand_tensor_view_for_graph_slice(
++            common.slot_mapping, graph_tokens, name="slot_mapping")
++        padded_common.positions = metadata_positions_for_graph_slice(
++            common.positions, split_slice,
++            mrope_positions_gpu=mrope_positions_gpu,
++            positions_gpu=positions_gpu)
++
++        if fill_padding:
++            fill_tensor_local_tail(
++                padded_common.seq_lens, actual_reqs, graph_reqs,
++                name="seq_lens")
++            fill_tensor_local_tail(
++                padded_common.seq_lens_cpu, actual_reqs, graph_reqs,
++                name="seq_lens_cpu")
++            if getattr(padded_common, "_seq_lens_cpu", None) is not None:
++                fill_tensor_local_tail(
++                    padded_common._seq_lens_cpu, actual_reqs, graph_reqs,
++                    name="_seq_lens_cpu")
++            fill_tensor_local_tail(
++                padded_common.num_computed_tokens_cpu, actual_reqs,
++                graph_reqs, name="num_computed_tokens_cpu")
++            fill_tensor_local_tail(
++                padded_common.block_table_tensor, actual_reqs,
++                graph_reqs, name="block_table_tensor")
++            fill_tensor_local_tail(
++                padded_common.slot_mapping, actual_tokens, graph_tokens,
++                name="slot_mapping")
++            positions_dim = 1 if (
++                isinstance(padded_common.positions, torch.Tensor)
++                and padded_common.positions.ndim == 2) else 0
++            fill_tensor_local_tail(
++                padded_common.positions, actual_tokens, graph_tokens,
++                name="positions", dim=positions_dim)
++
++        padded_common.num_reqs = graph_reqs
++        padded_common.num_actual_tokens = graph_tokens
++        padded_common.num_input_tokens = graph_tokens
++        padded_common.max_query_len = max(int(common.max_query_len), query_len)
++        padded_common.actual_seq_lengths_q = list(
++            range(query_len, graph_tokens + 1, query_len))
++        padded_common.graph_pad_size = graph_reqs
++        return padded_common
++    return common
++
++
++def stabilize_inplace_common_attn_metadata_list(
++    common_attn_metadata_list: list[Any],
++    *,
++    split_mode: str,
++    inplace_split_plan: Any | None,
++    uniform_decode_query_len: int | None = None,
++    mrope_positions_gpu: Any = None,
++    positions_gpu: Any = None,
++) -> list[Any]:
++    if split_mode not in ("inplace_serial", "inplace_parallel", "dual_pad") or inplace_split_plan is None:
++        return common_attn_metadata_list
++    stabilized: list[Any] = []
++    for split_idx, common_attn_metadata in enumerate(common_attn_metadata_list):
++        split_slice = inplace_split_plan.split_slices[split_idx]
++        stabilized.append(
++            stabilize_inplace_common_attn_metadata(
++                common_attn_metadata,
++                split_idx=split_idx,
++                split_slice=split_slice,
++                uniform_decode_query_len=uniform_decode_query_len,
++                mrope_positions_gpu=mrope_positions_gpu,
++                positions_gpu=positions_gpu))
++    return stabilized
++
++
++def trim_split_output(output: Any, num_tokens: int) -> Any:
++    if isinstance(output, torch.Tensor):
++        return output[:num_tokens]
++    if isinstance(output, list):
++        return [trim_split_output(item, num_tokens) for item in output]
++    if isinstance(output, tuple):
++        return tuple(trim_split_output(item, num_tokens) for item in output)
++    if isinstance(output, IntermediateTensors):
++        return IntermediateTensors({k: v[:num_tokens] for k, v in output.tensors.items()})
++    return output
++
++
++def clone_split_output(output: Any) -> Any:
++    if isinstance(output, torch.Tensor):
++        return output.clone()
++    if isinstance(output, list):
++        return [clone_split_output(item) for item in output]
++    if isinstance(output, tuple):
++        return tuple(clone_split_output(item) for item in output)
++    if isinstance(output, IntermediateTensors):
++        return IntermediateTensors({k: v.clone() for k, v in output.tensors.items()})
++    return output
++
++
++def merge_split_outputs(outputs: list[Any]) -> Any:
++    if not outputs:
++        return None
++    first = outputs[0]
++    if isinstance(first, torch.Tensor):
++        return torch.cat(outputs, dim=0)
++    if isinstance(first, IntermediateTensors):
++        return merge_intermediate_tensors(outputs)
++    if isinstance(first, (list, tuple)):
++        if any(len(output) != len(first) for output in outputs):
++            raise RuntimeError("Cannot merge split outputs with different container lengths")
++        merged = [
++            merge_split_outputs([output[idx] for output in outputs])
++            for idx in range(len(first))
++        ]
++        return type(first)(merged)
++    return first
++
++
++def merge_intermediate_tensors(tensor_list: list[IntermediateTensors]) -> IntermediateTensors:
++    result = {}
++    for key in tensor_list[0].tensors:
++        result[key] = torch.cat([t.tensors[key] for t in tensor_list], dim=0)
++    return IntermediateTensors(result)
++
++
++def graph_token_slice_for_split(split_slice: Any) -> slice:
++    start = int(split_slice.token_slice.start)
++    return slice(start, start + int(split_slice.graph_num_tokens))
++
++
++def padding_tail_slice_for_split(split_slice: Any) -> slice | None:
++    actual_stop = int(split_slice.token_slice.stop)
++    graph_stop = int(split_slice.token_slice.start) + int(split_slice.graph_num_tokens)
++    if graph_stop <= actual_stop:
++        return None
++    return slice(actual_stop, graph_stop)
++
++
++def fill_tensor_token_tail(
++    tensor: torch.Tensor | None,
++    tail_slice: slice,
++    *,
++    name: str,
++    token_dim: int = 0,
++) -> bool:
++    if tensor is None:
++        return False
++    if tail_slice.stop > int(tensor.shape[token_dim]):
++        raise RuntimeError(
++            f"Inplace offset padded tail for {name} exceeds tensor "
++            f"shape: tail_stop={tail_slice.stop}, "
++            f"shape={tuple(tensor.shape)}, token_dim={token_dim}")
++    if token_dim == 0:
++        tensor[tail_slice].fill_(0)
++    elif token_dim == 1:
++        tensor[:, tail_slice].fill_(0)
++    else:
++        raise ValueError(f"Unsupported token_dim={token_dim} for {name}")
++    return True
++
++
++def maybe_expand_tensor_for_graph_slice(
++    tensor: torch.Tensor | None,
++    backing_tensor: torch.Tensor | None,
++    graph_stop: int,
++    *,
++    name: str,
++    token_dim: int = 0,
++) -> torch.Tensor | None:
++    if tensor is None:
++        return None
++    if graph_stop <= int(tensor.shape[token_dim]):
++        return tensor
++    if backing_tensor is None:
++        raise RuntimeError(
++            f"Inplace offset graph requires input backing buffer: "
++            f"name={name}, graph_stop={int(graph_stop)}, "
++            f"tensor_shape={tuple(tensor.shape)}, token_dim={token_dim}, "
++            f"backing_shape=None")
++    if graph_stop > int(backing_tensor.shape[token_dim]):
++        raise RuntimeError(
++            f"Inplace offset graph input backing buffer is too small: "
++            f"name={name}, graph_stop={int(graph_stop)}, "
++            f"tensor_shape={tuple(tensor.shape)}, token_dim={token_dim}, "
++            f"backing_shape={tuple(backing_tensor.shape)}")
++    if token_dim == 0:
++        return backing_tensor[:graph_stop]
++    if token_dim == 1:
++        return backing_tensor[:, :graph_stop]
++    raise ValueError(f"Unsupported token_dim={token_dim} for {name}")
++
++
++def tokens_slice_for_inplace_execution(split_slice: Any) -> slice:
++    if split_slice.start_num_tokens > 0:
++        return graph_token_slice_for_split(split_slice)
++    return split_slice.token_slice
++
++
++def context_ubatch_slices_for_inplace(split_batch_slices) -> list:
++    from vllm.v1.worker.ubatch_utils import UBatchSlice
++    return [
++        UBatchSlice(s.request_slice, tokens_slice_for_inplace_execution(s))
++        for s in split_batch_slices
++    ]
+\ No newline at end of file
+diff --git a/vllm_ascend/worker/inplace_split_utils.py b/vllm_ascend/worker/inplace_split_utils.py
+new file mode 100644
+index 0000000000..efb67b9478
+--- /dev/null
++++ b/vllm_ascend/worker/inplace_split_utils.py
+@@ -0,0 +1,345 @@
++from __future__ import annotations
++
++from dataclasses import dataclass, field
++from typing import Any, Callable, Optional
++
++import numpy as np
++
++INPLACE_SPLIT_DRY_RUN = "inplace_split_dry_run"
++NO_SPLIT_EXACT_GRAPH_HIT = "no_split_exact_graph_hit"
++NO_SPLIT_NO_LOWER_CAPTURE_SIZE = "no_split_no_lower_capture_size"
++NO_SPLIT_SECOND_EMPTY = "no_split_second_empty"
++NO_SPLIT_REMAINDER_TOO_LARGE = "no_split_remainder_too_large"
++NO_SPLIT_NON_UNIFORM_DECODE = "no_split_non_uniform_decode"
++NO_SPLIT_INVALID_QUERY_LEN = "no_split_invalid_query_len"
++NO_SPLIT_NO_CAPTURE_SIZES = "no_split_no_capture_sizes"
++NO_SPLIT_ATTENTION_BACKEND_MISMATCH = "no_split_attention_backend_mismatch"
++NO_SPLIT_NO_OFFSET_CAPTURE_SIZE = "no_split_no_offset_capture_size"
++
++NO_SPLIT_OFFSET_PADDING_TOO_LARGE = "no_split_offset_padding_too_large"
++
++NO_SPLIT_OFFSET_GRAPH_EXCEEDS_START_CAP = "no_split_offset_graph_exceeds_start_cap"
++NO_SPLIT_OFFSET_GRAPH_BELOW_MIN_SIZE = "no_split_offset_graph_below_min_size"
++NO_SPLIT_INVALID_OFFSET_MATCH_POLICY = "no_split_invalid_offset_match_policy"
++NO_SPLIT_INVALID_FIRST_TOKENS_POLICY = "no_split_invalid_first_tokens_policy"
++
++NO_SPLIT_MODE_NOT_INPLACE = "no_split_mode_not_inplace"
++NO_SPLIT_PARALLEL_STREAMS_DISABLED = "no_split_parallel_streams_disabled"
++NO_SPLIT_CUDAGRAPH_MODE_NOT_FULL = "no_split_cudagraph_mode_not_full"
++NO_SPLIT_SPEC_DECODE_CONFLICT = "no_split_spec_decode_conflict"
++NO_SPLIT_LORA_CONFLICT = "no_split_lora_conflict"
++NO_SPLIT_MLA_CONFLICT = "no_split_mla_conflict"
++NO_SPLIT_MROPE_CONFLICT = "no_split_mrope_conflict"
++NO_SPLIT_BATCH_TOO_SMALL = "no_split_batch_too_small"
++
++_INPLACE_SPLIT_MODES = ("inplace_serial", "inplace_parallel")
++
++
++@dataclass
++class SplitBatchSlice:
++    request_slice: slice
++    token_slice: slice
++    padded_num_tokens: int = 0
++    start_num_tokens: int = 0
++
++    def __post_init__(self):
++        if self.padded_num_tokens == 0:
++            self.padded_num_tokens = self.num_tokens
++
++    @property
++    def num_requests(self) -> int:
++        return self.request_slice.stop - self.request_slice.start
++
++    @property
++    def num_tokens(self) -> int:
++        return self.token_slice.stop - self.token_slice.start
++
++    @property
++    def graph_num_tokens(self) -> int:
++        return self.padded_num_tokens
++
++    def is_empty(self) -> bool:
++        return (
++            self.request_slice.start == self.request_slice.stop
++            or self.token_slice.start == self.token_slice.stop
++        )
++
++
++
++@dataclass(frozen=True)
++class InplaceSplitPlan:
++    split_slices: list[SplitBatchSlice]
++    reason: str
++    total_num_tokens: int
++    padded_num_tokens_without_split: int
++    first_tokens: int
++    second_tokens: int
++    first_reqs: int
++    second_reqs: int
++    lower_capture_size: int
++    remainder_tokens: int
++    capture_sizes_considered: list[int]
++    first_tokens_policy: str
++    offset_match_policy: str
++    second_actual_tokens: int
++    second_graph_tokens: int
++    second_padding_tokens: int
++    offset_capture_sizes_considered: list[int]
++    offset_min_graph_tokens: int
++    offset_max_graph_tokens_by_start: dict[int, int] | None
++    offset_allowed_graph_tokens_by_start: dict[int, list[int]] | None
++    # P11 unified-row-graph marker: when True the plan carries a single
++    # whole-batch slice and executes as ONE main-pool graph at the exact
++    # token count (no dual-stream replay, no parallel pool).
++    use_unified: bool = False
++
++
++# Reason tag for a would-be dual_pad decision converted to the unified
++# single-graph execution path (VLLM_ASCEND_DUAL_UNIFIED_GEMM=1).
++UNIFIED_SINGLE_GRAPH_REASON = "unified_single_graph_conversion"
++
++
++
++def _padded_graph_size(total_tokens: int, capture_sizes: list[int]) -> int:
++    for cs in capture_sizes:
++        if cs >= total_tokens:
++            return cs
++    return total_tokens
++
++
++def _balanced_inplace_split_score(
++    first_tokens: int,
++    second_tokens: int,
++    first_padding: int,
++    second_padding: int,
++) -> float:
++    total_waste = first_padding + second_padding
++    balance_penalty = abs(first_tokens - second_tokens) / max(first_tokens + second_tokens, 1)
++    return total_waste + balance_penalty * 0.5
++
++
++def create_inplace_split_batch_slices(
++    num_scheduled_tokens_per_request: np.ndarray,
++    total_num_tokens: int,
++    uniform_decode_query_len: int,
++    cudagraph_capture_sizes: list[int] | tuple[int, ...],
++    inplace_max_remainder_tokens: int | None = None,
++    *,
++    force_split: bool = False,
++    offset_match_policy: str = "exact",
++    offset_capture_sizes: list[int] | tuple[int, ...] | None = None,
++    offset_min_graph_tokens: int = 1,
++    offset_max_padding_tokens: int | None = None,
++    offset_max_padding_ratio: float | None = None,
++    offset_max_graph_tokens_by_start: dict[int, int] | None = None,
++    offset_allowed_graph_tokens_by_start: dict[int, list[int]] | None = None,
++    first_tokens_policy: str = "largest_lower",
++) -> tuple[InplaceSplitPlan | None, str]:
++    if uniform_decode_query_len < 1:
++        return None, NO_SPLIT_INVALID_QUERY_LEN
++
++    if not cudagraph_capture_sizes:
++        return None, NO_SPLIT_NO_CAPTURE_SIZES
++
++    sorted_capture_sizes = sorted(set(cudagraph_capture_sizes))
++    padded_without_split = _padded_graph_size(total_num_tokens, sorted_capture_sizes)
++
++    if padded_without_split == total_num_tokens and not force_split:
++        return None, NO_SPLIT_EXACT_GRAPH_HIT
++
++    num_reqs = len(num_scheduled_tokens_per_request)
++    if num_reqs == 0:
++        return None, NO_SPLIT_NO_CAPTURE_SIZES
++
++    valid_lower_sizes = [
++        cs for cs in sorted_capture_sizes
++        if cs < total_num_tokens and cs % uniform_decode_query_len == 0
++    ]
++
++    if not valid_lower_sizes:
++        return None, NO_SPLIT_NO_LOWER_CAPTURE_SIZE
++
++    if first_tokens_policy not in ("largest_lower", "balanced"):
++        return None, NO_SPLIT_INVALID_FIRST_TOKENS_POLICY
++
++    if offset_match_policy not in ("exact", "bucket"):
++        return None, NO_SPLIT_INVALID_OFFSET_MATCH_POLICY
++
++    normalized_offset_capture_sizes: list[int] | None = None
++    if offset_capture_sizes is not None:
++        normalized_offset_capture_sizes = sorted(set(offset_capture_sizes))
++
++    best_plan: InplaceSplitPlan | None = None
++    best_score: float = float("inf")
++
++    if first_tokens_policy == "largest_lower":
++        candidate_sizes = [valid_lower_sizes[-1]]
++    else:
++        candidate_sizes = valid_lower_sizes
++
++    for lower_size in candidate_sizes:
++        first_tokens = lower_size
++        if first_tokens % uniform_decode_query_len != 0:
++            continue
++
++        first_reqs = first_tokens // uniform_decode_query_len
++        if first_reqs > num_reqs:
++            continue
++
++        second_tokens = total_num_tokens - first_tokens
++        if second_tokens <= 0:
++            if first_tokens_policy == "largest_lower":
++                return None, NO_SPLIT_SECOND_EMPTY
++            continue
++
++        second_reqs = num_reqs - first_reqs
++        remainder_tokens = padded_without_split - total_num_tokens
++
++        if inplace_max_remainder_tokens is not None and remainder_tokens > inplace_max_remainder_tokens:
++            if first_tokens_policy == "largest_lower":
++                return None, NO_SPLIT_REMAINDER_TOO_LARGE
++            continue
++
++        second_graph_tokens = second_tokens
++        offset_sizes_considered: list[int] = []
++
++        if offset_match_policy == "bucket":
++            if normalized_offset_capture_sizes is None:
++                return None, NO_SPLIT_NO_OFFSET_CAPTURE_SIZE
++            for ocs in normalized_offset_capture_sizes:
++                if ocs >= second_tokens:
++                    second_graph_tokens = ocs
++                    offset_sizes_considered = [
++                        ocs2 for ocs2 in normalized_offset_capture_sizes if ocs2 >= second_tokens
++                    ]
++                    break
++            else:
++                if first_tokens_policy == "largest_lower":
++                    return None, NO_SPLIT_NO_OFFSET_CAPTURE_SIZE
++                continue
++
++        if second_graph_tokens < offset_min_graph_tokens:
++            if first_tokens_policy == "largest_lower":
++                return None, NO_SPLIT_OFFSET_GRAPH_BELOW_MIN_SIZE
++            continue
++
++        second_padding_tokens = second_graph_tokens - second_tokens
++
++        if offset_max_padding_tokens is not None and second_padding_tokens > offset_max_padding_tokens:
++            if first_tokens_policy == "largest_lower":
++                return None, NO_SPLIT_OFFSET_PADDING_TOO_LARGE
++            continue
++
++        if offset_max_padding_ratio is not None and second_graph_tokens > 0:
++            actual_ratio = second_padding_tokens / second_graph_tokens
++            if actual_ratio > offset_max_padding_ratio:
++                if first_tokens_policy == "largest_lower":
++                    return None, NO_SPLIT_OFFSET_PADDING_TOO_LARGE
++                continue
++
++        if offset_max_graph_tokens_by_start is not None:
++            max_allowed = offset_max_graph_tokens_by_start.get(first_tokens)
++            if max_allowed is not None and second_graph_tokens > max_allowed:
++                if first_tokens_policy == "largest_lower":
++                    return None, NO_SPLIT_OFFSET_GRAPH_EXCEEDS_START_CAP
++                continue
++
++        if offset_allowed_graph_tokens_by_start is not None:
++            allowed = offset_allowed_graph_tokens_by_start.get(first_tokens)
++            if allowed is not None and second_graph_tokens not in allowed:
++                if first_tokens_policy == "largest_lower":
++                    return None, NO_SPLIT_OFFSET_GRAPH_EXCEEDS_START_CAP
++                continue
++
++        split_slices = [
++            SplitBatchSlice(
++                request_slice=slice(0, first_reqs),
++                token_slice=slice(0, first_tokens),
++                padded_num_tokens=first_tokens,
++                start_num_tokens=0,
++            ),
++            SplitBatchSlice(
++                request_slice=slice(first_reqs, num_reqs),
++                token_slice=slice(first_tokens, total_num_tokens),
++                padded_num_tokens=second_graph_tokens,
++                start_num_tokens=first_tokens,
++            ),
++        ]
++
++        plan = InplaceSplitPlan(
++            split_slices=split_slices,
++            reason=INPLACE_SPLIT_DRY_RUN,
++            total_num_tokens=total_num_tokens,
++            padded_num_tokens_without_split=padded_without_split,
++            first_tokens=first_tokens,
++            second_tokens=second_tokens,
++            first_reqs=first_reqs,
++            second_reqs=second_reqs,
++            lower_capture_size=lower_size,
++            remainder_tokens=remainder_tokens,
++            capture_sizes_considered=valid_lower_sizes,
++            first_tokens_policy=first_tokens_policy,
++            offset_match_policy=offset_match_policy,
++            second_actual_tokens=second_tokens,
++            second_graph_tokens=second_graph_tokens,
++            second_padding_tokens=second_padding_tokens,
++            offset_capture_sizes_considered=offset_sizes_considered,
++            offset_min_graph_tokens=offset_min_graph_tokens,
++            offset_max_graph_tokens_by_start=offset_max_graph_tokens_by_start,
++            offset_allowed_graph_tokens_by_start=offset_allowed_graph_tokens_by_start,
++        )
++
++        if first_tokens_policy == "largest_lower":
++            return plan, INPLACE_SPLIT_DRY_RUN
++
++        first_padding = first_tokens - split_slices[0].num_tokens
++        score = _balanced_inplace_split_score(
++            first_tokens, second_tokens, first_padding, second_padding_tokens
++        )
++        if score < best_score:
++            best_score = score
++            best_plan = plan
++
++    if best_plan is not None:
++        return best_plan, INPLACE_SPLIT_DRY_RUN
++
++    return None, NO_SPLIT_NO_LOWER_CAPTURE_SIZE
++
++
++def inplace_split_preserves_attention_backend(
++    inplace_split_plan: InplaceSplitPlan,
++    uses_paged_attention: Callable[[int], bool],
++) -> bool:
++    """Return whether split graphs keep the unsplit attention backend.
++
++    Some Ascend decode shapes route to paged attention while others route to
++    fused infer attention. Inplace split must not silently change that routing,
++    because graph capture records backend-specific task params.
++    """
++    unsplit_uses_pa = uses_paged_attention(
++        inplace_split_plan.padded_num_tokens_without_split)
++    return all(
++        uses_paged_attention(split_slice.graph_num_tokens) == unsplit_uses_pa
++        for split_slice in inplace_split_plan.split_slices)
++
++
++def inplace_split_first_graph_matches_attention_backend(
++    inplace_split_plan: InplaceSplitPlan,
++    uses_paged_attention: Callable[[int], bool],
++) -> bool:
++    """Return whether split-0 can safely reuse its ordinary graph backend."""
++    if not inplace_split_plan.split_slices:
++        return False
++    unsplit_uses_pa = uses_paged_attention(
++        inplace_split_plan.padded_num_tokens_without_split)
++    first_split = inplace_split_plan.split_slices[0]
++    return uses_paged_attention(first_split.graph_num_tokens) == unsplit_uses_pa
++
++
++def select_inplace_attention_backend(
++    inplace_split_plan: InplaceSplitPlan,
++    uses_paged_attention: Callable[[int], bool],
++) -> str:
++    """Select attention backend for inplace split based on unsplit behavior."""
++    return ("pa" if uses_paged_attention(
++        inplace_split_plan.padded_num_tokens_without_split) else "fia")
+\ No newline at end of file
+diff --git a/vllm_ascend/worker/inplace_split_worker_pool.py b/vllm_ascend/worker/inplace_split_worker_pool.py
+new file mode 100644
+index 0000000000..7ee90e524e
+--- /dev/null
++++ b/vllm_ascend/worker/inplace_split_worker_pool.py
+@@ -0,0 +1,133 @@
++#
++# Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
++# This file is a part of the vllm-ascend project.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++"""Persistent worker threads for dual-stream split replay.
++
++Per decode step, ``run_inplace_parallel`` / ``run_dual_pad`` used to create and
++join one fresh ``threading.Thread`` per split (2 starts + 2 joins every step).
++Thread creation/join shows up as measurable host time in profiler traces of
++small-batch steady-state decode, where the whole step budget is only tens of
++microseconds of device work.
++
++This module keeps two long-lived worker threads alive for the lifetime of the
++engine process.  Each step dispatches one zero-arg closure per split to its
++dedicated worker and waits for completion; semantics are identical to the
++previous per-step threads (same calling thread per stream slot, same
++error funnel ordered by split index).
++"""
++
++import threading
++from collections.abc import Callable
++
++from vllm.logger import logger
++
++
++class _WorkerSlot:
++    """One persistent thread consuming zero-arg closures from an inbox."""
++
++    def __init__(self, name: str):
++        self._inbox: list[Callable[[], None]] = []
++        self._cv = threading.Condition()
++        self._stop = False
++        self._thread = threading.Thread(
++            target=self._loop, name=name, daemon=True)
++        self._thread.start()
++
++    def submit(self, fn: Callable[[], None]) -> None:
++        """Queue zero-arg ``fn``; raises RuntimeError if the worker died."""
++        with self._cv:
++            if self._stop or not self._thread.is_alive():
++                raise RuntimeError("split replay worker is not alive")
++            self._inbox.append(fn)
++            self._cv.notify()
++
++    def shutdown(self) -> None:
++        with self._cv:
++            self._stop = True
++            self._cv.notify_all()
++
++    def _loop(self) -> None:  # pragma: no cover - thread body
++        while True:
++            with self._cv:
++                while not self._inbox and not self._stop:
++                    self._cv.wait()
++                if not self._inbox:
++                    return  # stopped
++                fn = self._inbox.pop(0)
++            # Execute outside the condition lock so submit() during execution
++            # only queues behind the next round.
++            fn()
++
++
++class SplitReplayWorkerPool:
++    """Fixed-size pool of persistent split-replay workers.
++
++    ``dispatch`` runs one callable per split in parallel on distinct
++    persistent threads and blocks until all have finished.  Exceptions are
++    re-raised on the caller thread ordered by split index, matching the
++    previous per-step-thread behaviour.
++    """
++
++    def __init__(self, num_workers: int = 2):
++        self._slots = [
++            _WorkerSlot(f"split-replay-{i}") for i in range(num_workers)
++        ]
++        self._done_cv = threading.Condition()
++        logger.debug("SplitReplayWorkerPool started with %d workers",
++                     num_workers)
++
++    def dispatch(self, fns: list[Callable[[], None]]) -> None:
++        """Run ``fns[i]`` on worker ``i`` concurrently; block until all done."""
++        n = len(fns)
++        if n == 0:
++            return
++        if n > len(self._slots):
++            raise ValueError(
++                f"requested {n} splits but pool has {len(self._slots)} workers")
++
++        remaining = n
++        errors: dict[int, BaseException] = {}
++        cv = self._done_cv
++
++        def _run_one(idx: int) -> None:
++            nonlocal remaining
++            try:
++                fns[idx]()
++            except BaseException as exc:  # noqa: BLE001 - funneled to caller
++                with cv:
++                    errors[idx] = exc
++            finally:
++                with cv:
++                    remaining -= 1
++                    if remaining == 0:
++                        cv.notify_all()
++
++        for i in range(n):
++            # Bind i via default arg: submitted closures must be zero-arg.
++            self._slots[i].submit(lambda i=i: _run_one(i))
++
++        with cv:
++            while remaining > 0:
++                cv.wait()
++
++        if errors:
++            first = min(errors)
++            raise RuntimeError(
++                "split replay worker failed at "
++                f"slice_idx={first}: {errors[first]}") from errors[first]
++
++    def shutdown(self) -> None:
++        for slot in self._slots:
++            slot.shutdown()
+-- 
+2.53.0.windows.3
+
