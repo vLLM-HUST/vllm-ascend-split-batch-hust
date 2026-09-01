@@ -1,0 +1,27 @@
+From ab3a536aac3ae7fb6642df2ad1969820fb5d21bb Mon Sep 17 00:00:00 2001
+From: Raing5Days <M202574102@hust.edu.cn>
+Date: Sat, 29 Aug 2026 15:02:25 +0000
+Subject: [PATCH] style: add missing EOF newline in test_forward_context.py
+
+Fixes the pre-commit CI failure on PR #273: ruff format (repo-pinned
+v0.14.0) flags the file for lacking a trailing newline. The file was
+introduced by the ported host tests commit and was not in the local
+pre-commit --files scope, so it slipped through.
+---
+ tests/test_forward_context.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/test_forward_context.py b/tests/test_forward_context.py
+index 8457735fa5d..ba155b5e609 100644
+--- a/tests/test_forward_context.py
++++ b/tests/test_forward_context.py
+@@ -56,4 +56,4 @@ def test_forward_context_is_isolated_between_threads():
+         assert get_forward_context() is main_context
+ 
+     assert worker_result == (True, True, True)
+-    assert not is_forward_context_available()
+\ No newline at end of file
++    assert not is_forward_context_available()
+-- 
+2.53.0.windows.3
+

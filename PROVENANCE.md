@@ -14,4 +14,6 @@ Primary history:
 - [Ascend #282 OPEN 3/4](https://github.com/intellistream/vllm-ascend-hust-legacy-20260831/pull/282)
 - [Ascend #283 OPEN 4/4](https://github.com/intellistream/vllm-ascend-hust-legacy-20260831/pull/283)
 
+Original commit patches are preserved under `provenance/legacy-patches/`.
+
 Closed does not mean merged, and open does not mean accepted. These references are migration evidence, not a release receipt. Exact commits, files, authors, licenses, tests, constraints, and benchmark receipts must be recorded before implementation code is accepted.

@@ -1,0 +1,860 @@
+From 1a9eb1a14d353a0f4e2b9e3bca96343992a23eb0 Mon Sep 17 00:00:00 2001
+From: Raing5Days <M202574102@hust.edu.cn>
+Date: Wed, 26 Aug 2026 12:07:53 +0000
+Subject: [PATCH] feat(v1): adopt platform-neutral runtime-graph-metadata
+ contract
+
+Replace the split-batch/unified DUAL_INPLACE key policy with a platform-neutral
+runtime graph metadata contract, aligning with the earlier full-graph parallel
+replay draft (#123):
+
+- Add CUDAGraphRuntimeMetadata (opaque, is_valid() schema validation) and
+  BatchDescriptor.runtime_metadata; drop the scattered DUAL_INPLACE fields so
+  core no longer carries platform-specific key semantics.
+- dispatch() takes runtime_metadata + allow_runtime_key_registration: a
+  validated runtime key is registered only after explicit opt-in, otherwise it
+  fails closed to eager without mutating the key registry (safe capture
+  lifecycle).
+- Remove the default InplaceSplitKeyStrategy / CudagraphKeyStrategy from core;
+  capture/replay policy is owned by the platform plugin. Core default is now
+  neutral and fail-closed. Keep Platform.get_cudagraph_key_strategy() as the
+  dispatcher hook.
+- Forward-context isolation stays on threading.local (contextvars.ContextVar is
+  incompatible with torch.compile(fullgraph=True) per Ascend precedent).
+- initialize_cudagraph_keys now syncs uniform_decode_query_len to the instance
+  (alignment/capacity validation relies on it).
+- Port #123's dependency-free host tests (forward-context isolation + runtime
+  key opt-in / fail-closed / no-mutation / alignment / capacity).
+
+Co-authored-by: converges PR #264 per review.
+---
+ tests/test_forward_context.py                 |  59 ++++
+ tests/v1/cudagraph/test_cudagraph_dispatch.py | 166 ++++++++++-
+ vllm/forward_context.py                       |  65 +++--
+ vllm/v1/cudagraph_dispatcher.py               | 140 +++++----
+ vllm/v1/cudagraph_key_strategy.py             | 266 ------------------
+ 5 files changed, 346 insertions(+), 350 deletions(-)
+ create mode 100644 tests/test_forward_context.py
+ delete mode 100644 vllm/v1/cudagraph_key_strategy.py
+
+diff --git a/tests/test_forward_context.py b/tests/test_forward_context.py
+new file mode 100644
+index 00000000000..8457735fa5d
+--- /dev/null
++++ b/tests/test_forward_context.py
+@@ -0,0 +1,59 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++from concurrent.futures import ThreadPoolExecutor
++
++import pytest
++
++from vllm.forward_context import (
++    ForwardContext,
++    get_forward_context,
++    is_forward_context_available,
++    override_forward_context,
++)
++
++
++def _context(marker: str) -> ForwardContext:
++    return ForwardContext(
++        no_compile_layers={},
++        attn_metadata={},
++        slot_mapping={},
++        additional_kwargs={"marker": marker},
++    )
++
++
++def test_forward_context_nested_exception_restores_previous_value():
++    outer = _context("outer")
++    inner = _context("inner")
++
++    assert not is_forward_context_available()
++    with override_forward_context(outer):
++        assert get_forward_context() is outer
++        with (
++            pytest.raises(RuntimeError, match="expected"),
++            override_forward_context(inner),
++        ):
++            assert get_forward_context() is inner
++            raise RuntimeError("expected")
++        assert get_forward_context() is outer
++    assert not is_forward_context_available()
++
++
++def test_forward_context_is_isolated_between_threads():
++    main_context = _context("main")
++    worker_context = _context("worker")
++
++    def run_worker() -> tuple[bool, bool, bool]:
++        unavailable_before = not is_forward_context_available()
++        with override_forward_context(worker_context):
++            owns_worker_context = get_forward_context() is worker_context
++        unavailable_after = not is_forward_context_available()
++        return unavailable_before, owns_worker_context, unavailable_after
++
++    with override_forward_context(main_context):
++        with ThreadPoolExecutor(max_workers=1) as executor:
++            worker_result = executor.submit(run_worker).result()
++        assert get_forward_context() is main_context
++
++    assert worker_result == (True, True, True)
++    assert not is_forward_context_available()
+\ No newline at end of file
+diff --git a/tests/v1/cudagraph/test_cudagraph_dispatch.py b/tests/v1/cudagraph/test_cudagraph_dispatch.py
+index c10835821f5..15e3b989094 100644
+--- a/tests/v1/cudagraph/test_cudagraph_dispatch.py
++++ b/tests/v1/cudagraph/test_cudagraph_dispatch.py
+@@ -19,7 +19,11 @@ from vllm.config import (
+     VllmConfig,
+ )
+ from vllm.config.lora import LoRAConfig
+-from vllm.forward_context import BatchDescriptor, set_forward_context
++from vllm.forward_context import (
++    BatchDescriptor,
++    CUDAGraphRuntimeMetadata,
++    set_forward_context,
++)
+ from vllm.platforms import current_platform
+ from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
+ 
+@@ -267,6 +271,166 @@ class TestCudagraphDispatcher:
+ 
+         assert dispatcher.get_capture_descs() == []
+ 
++    def test_runtime_key_registration_is_explicit(self):
++        comp_config = CompilationConfig(
++            cudagraph_mode="FULL_DECODE_ONLY",
++            mode=CompilationMode.NONE,
++            cudagraph_capture_sizes=[1, 8],
++        )
++        dispatcher = CudagraphDispatcher(
++            _create_vllm_config(comp_config, max_num_seqs=8)
++        )
++        dispatcher.initialize_cudagraph_keys(
++            comp_config.cudagraph_mode, uniform_decode_query_len=1
++        )
++        metadata = CUDAGraphRuntimeMetadata(
++            token_offset=4,
++            variant="parallel_replay",
++            backend_tag="test_backend",
++        )
++        initial_keys = dispatcher.cudagraph_keys[CUDAGraphMode.FULL].copy()
++
++        mode, descriptor = dispatcher.dispatch(
++            num_tokens=4,
++            uniform_decode=True,
++            runtime_metadata=metadata,
++        )
++        assert mode == CUDAGraphMode.NONE
++        assert descriptor == BatchDescriptor(num_tokens=4, runtime_metadata=metadata)
++        assert dispatcher.cudagraph_keys[CUDAGraphMode.FULL] == initial_keys
++
++        mode, descriptor = dispatcher.dispatch(
++            num_tokens=4,
++            uniform_decode=True,
++            runtime_metadata=metadata,
++            allow_runtime_key_registration=True,
++        )
++        assert mode == CUDAGraphMode.FULL
++        assert descriptor == BatchDescriptor(
++            num_tokens=4,
++            num_reqs=4,
++            uniform=True,
++            runtime_metadata=metadata,
++        )
++        assert descriptor in dispatcher.cudagraph_keys[CUDAGraphMode.FULL]
++
++    @pytest.mark.parametrize(
++        ("metadata", "dispatch_kwargs"),
++        [
++            ("invalid_metadata", {}),
++            (
++                CUDAGraphRuntimeMetadata(0, "parallel_replay", "test_backend"),
++                {},
++            ),
++            (
++                CUDAGraphRuntimeMetadata(True, "parallel_replay", "test_backend"),
++                {},
++            ),
++            (CUDAGraphRuntimeMetadata(4, "", "test_backend"), {}),
++            (CUDAGraphRuntimeMetadata(4, "parallel_replay", ""), {}),
++            (
++                CUDAGraphRuntimeMetadata(4, " parallel_replay", "test_backend"),
++                {},
++            ),
++            (
++                CUDAGraphRuntimeMetadata(4, "parallel replay", "test_backend"),
++                {},
++            ),
++            (
++                CUDAGraphRuntimeMetadata(
++                    4, "parallel_replay", "test_backend", " metadata"
++                ),
++                {},
++            ),
++            (
++                CUDAGraphRuntimeMetadata(4, "parallel_replay", "test_backend"),
++                {"uniform_decode": False},
++            ),
++            (
++                CUDAGraphRuntimeMetadata(4, "parallel_replay", "test_backend"),
++                {"has_lora": True},
++            ),
++            (
++                CUDAGraphRuntimeMetadata(4, "parallel_replay", "test_backend"),
++                {"num_active_loras": 1},
++            ),
++            (
++                CUDAGraphRuntimeMetadata(4, "parallel_replay", "test_backend"),
++                {"invalid_modes": {CUDAGraphMode.FULL}},
++            ),
++        ],
++    )
++    def test_invalid_runtime_key_fails_without_mutation(
++        self,
++        metadata: object,
++        dispatch_kwargs: dict,
++    ):
++        comp_config = CompilationConfig(
++            cudagraph_mode="FULL_DECODE_ONLY",
++            mode=CompilationMode.NONE,
++            cudagraph_capture_sizes=[1, 8],
++        )
++        dispatcher = CudagraphDispatcher(
++            _create_vllm_config(comp_config, max_num_seqs=8)
++        )
++        dispatcher.initialize_cudagraph_keys(
++            comp_config.cudagraph_mode, uniform_decode_query_len=1
++        )
++        initial_keys = {
++            mode: keys.copy() for mode, keys in dispatcher.cudagraph_keys.items()
++        }
++
++        kwargs = {
++            "num_tokens": 4,
++            "uniform_decode": True,
++            "runtime_metadata": metadata,
++            "allow_runtime_key_registration": True,
++        }
++        kwargs.update(dispatch_kwargs)
++        mode, _ = dispatcher.dispatch(
++            **kwargs,
++        )
++
++        assert mode == CUDAGraphMode.NONE
++        assert dispatcher.cudagraph_keys == initial_keys
++
++    @pytest.mark.parametrize(
++        ("num_tokens", "token_offset"),
++        [(3, 2), (4, 3), (10, 2)],
++    )
++    def test_runtime_key_alignment_and_capacity_fail_closed(
++        self, num_tokens: int, token_offset: int
++    ):
++        comp_config = CompilationConfig(
++            cudagraph_mode="FULL_DECODE_ONLY",
++            mode=CompilationMode.NONE,
++            cudagraph_capture_sizes=[2, 10],
++        )
++        dispatcher = CudagraphDispatcher(
++            _create_vllm_config(comp_config, max_num_seqs=4)
++        )
++        dispatcher.initialize_cudagraph_keys(
++            comp_config.cudagraph_mode, uniform_decode_query_len=2
++        )
++        initial_keys = {
++            mode: keys.copy() for mode, keys in dispatcher.cudagraph_keys.items()
++        }
++        metadata = CUDAGraphRuntimeMetadata(
++            token_offset=token_offset,
++            variant="parallel_replay",
++            backend_tag="test_backend",
++        )
++
++        mode, _ = dispatcher.dispatch(
++            num_tokens=num_tokens,
++            uniform_decode=True,
++            runtime_metadata=metadata,
++            allow_runtime_key_registration=True,
++        )
++
++        assert mode == CUDAGraphMode.NONE
++        assert dispatcher.cudagraph_keys == initial_keys
++
+ 
+ @pytest.mark.skipif(not current_platform.is_cuda(), reason="Skip if not cuda")
+ class TestCUDAGraphWrapper:
+diff --git a/vllm/forward_context.py b/vllm/forward_context.py
+index a6105a0115f..ce8d75fbc92 100644
+--- a/vllm/forward_context.py
++++ b/vllm/forward_context.py
+@@ -27,6 +27,45 @@ batchsize_logging_interval: float = envs.VLLM_LOG_BATCHSIZE_INTERVAL
+ batchsize_forward_time: defaultdict = defaultdict(list)
+ 
+ 
++@dataclass(frozen=True)
++class CUDAGraphRuntimeMetadata:
++    """Opaque metadata that distinguishes runtime-registered graph keys.
++
++    Split-batch (dual-stream) replay registers graph keys at runtime for
++    offset/variant views into the original buffer. Core treats the metadata as
++    opaque: it validates the generic schema (via :meth:`is_valid`) and uses the
++    value only for key hashing/lookup, it does not interpret platform-specific
++    ``variant`` / ``backend_tag`` semantics.
++    """
++
++    token_offset: int
++    variant: str
++    backend_tag: str
++    metadata_mode: str = ""
++
++    def is_valid(self) -> bool:
++        """Return whether the metadata satisfies the core schema."""
++
++        def valid_tag(value: object, *, required: bool) -> bool:
++            if not isinstance(value, str) or len(value) > 128:
++                return False
++            if required and not value:
++                return False
++            return not any(char.isspace() for char in value)
++
++        if (
++            not isinstance(self.token_offset, int)
++            or isinstance(self.token_offset, bool)
++            or self.token_offset <= 0
++        ):
++            return False
++        if not valid_tag(self.variant, required=True) or not valid_tag(
++            self.backend_tag, required=True
++        ):
++            return False
++        return valid_tag(self.metadata_mode, required=False)
++
++
+ @dataclass(frozen=True)
+ class BatchDescriptor:
+     """
+@@ -57,28 +96,12 @@ class BatchDescriptor:
+     (like fused_moe_lora) whose grid size depends on num_active_loras
+     to be properly captured.
+     """
+-    start_num_tokens: int = 0
+-    """
+-    Extended graph key metadata: the starting token offset for an offset view
+-    (e.g. the second split of an inplace split-batch replay) into the original
+-    buffer. 0 (default) means a normal (non-offset) key. This metadata is
+-    produced by the pluggable cudagraph key strategy and participates in the
+-    versioned key lookup (hash/eq); core does not interpret its value.
+-    """
+-    graph_variant: str = ""
+-    """
+-    Extended graph key metadata: split mode variant tag (e.g. "inplace_serial"
+-    or "inplace_parallel"). Empty string for standard keys.
+-    """
+-    attention_backend: str = ""
+-    """
+-    Extended graph key metadata: attention backend tag (e.g. "fia", "pa")
+-    used during graph capture. Empty string for standard keys.
+-    """
+-    capture_metadata_mode: str = ""
++    runtime_metadata: CUDAGraphRuntimeMetadata | None = None
+     """
+-    Extended graph key metadata: the metadata mode used during graph capture.
+-    Empty string for standard keys.
++    Opaque, validated runtime graph key metadata (split-batch / dual-stream).
++    None for statically captured and eager batches. When present, this is the
++    canonical extended-key representation; core does not interpret the
++    platform-specific ``variant`` / ``backend_tag`` values.
+     """
+ 
+ 
+diff --git a/vllm/v1/cudagraph_dispatcher.py b/vllm/v1/cudagraph_dispatcher.py
+index 6260588b648..f5f4de4a346 100644
+--- a/vllm/v1/cudagraph_dispatcher.py
++++ b/vllm/v1/cudagraph_dispatcher.py
+@@ -5,10 +5,9 @@ from dataclasses import replace
+ from itertools import product
+ 
+ from vllm.config import CUDAGraphMode, VllmConfig
+-from vllm.forward_context import BatchDescriptor
++from vllm.forward_context import BatchDescriptor, CUDAGraphRuntimeMetadata
+ from vllm.logger import init_logger
+ from vllm.lora.utils import get_captured_lora_counts
+-from vllm.v1.cudagraph_key_strategy import resolve_cudagraph_key_strategy
+ 
+ logger = init_logger(__name__)
+ 
+@@ -69,11 +68,6 @@ class CudagraphDispatcher:
+         )
+         # Default cudagraph_mode to NONE until initialize_cudagraph_keys is called
+         self.cudagraph_mode = CUDAGraphMode.NONE
+-        # Extended (split-batch / dual-stream) key policy is pluggable.
+-        # The default strategy replicates the previous inline DUAL_INPLACE
+-        # behavior; platforms may own it via
+-        # Platform.get_cudagraph_key_strategy().
+-        self.key_strategy = resolve_cudagraph_key_strategy(vllm_config)
+ 
+     def _compute_bs_to_padded_graph_size(self) -> None:
+         """Pre-compute the mapping from batch size to padded graph size."""
+@@ -141,10 +135,6 @@ class CudagraphDispatcher:
+         uniform_decode: bool,
+         has_lora: bool,
+         num_active_loras: int = 0,
+-        start_num_tokens: int = 0,
+-        graph_variant: str = "",
+-        attention_backend: str = "",
+-        capture_metadata_mode: str = "",
+     ) -> BatchDescriptor:
+         max_num_seqs = self.vllm_config.scheduler_config.max_num_seqs
+         uniform_decode_query_len = self.uniform_decode_query_len
+@@ -163,12 +153,66 @@ class CudagraphDispatcher:
+             uniform=uniform_decode,
+             has_lora=has_lora,
+             num_active_loras=num_active_loras,
+-            start_num_tokens=start_num_tokens,
+-            graph_variant=graph_variant,
+-            attention_backend=attention_backend,
+-            capture_metadata_mode=capture_metadata_mode,
+         )
+ 
++    def _create_runtime_batch_descriptor(
++        self,
++        num_tokens: int,
++        runtime_metadata: CUDAGraphRuntimeMetadata,
++    ) -> BatchDescriptor:
++        """Create an exact descriptor for a validated runtime graph key."""
++        return BatchDescriptor(
++            num_tokens=num_tokens,
++            num_reqs=num_tokens // self.uniform_decode_query_len,
++            uniform=True,
++            runtime_metadata=runtime_metadata,
++        )
++
++    def _dispatch_runtime_key(
++        self,
++        num_tokens: int,
++        uniform_decode: bool,
++        has_lora: bool,
++        num_active_loras: int,
++        allowed_modes: AbstractSet[CUDAGraphMode],
++        runtime_metadata: CUDAGraphRuntimeMetadata,
++        allow_runtime_key_registration: bool,
++    ) -> tuple[CUDAGraphMode, BatchDescriptor]:
++        """Dispatch an explicitly registered runtime graph key.
++
++        The key is registered only after the request is validated. Any
++        unsupported / malformed / non-opt-in request fails closed to eager
++        execution (``CUDAGraphMode.NONE``) without mutating the key registry:
++        a registered key is always a key that was explicitly admitted through
++        this gate, so backends can rely on it being safely captureable.
++        """
++        fallback = BatchDescriptor(
++            num_tokens=num_tokens,
++            runtime_metadata=runtime_metadata,
++        )
++        runtime_mode = self.cudagraph_mode.decode_mode()
++        invalid_request = (
++            not allow_runtime_key_registration
++            or not isinstance(runtime_metadata, CUDAGraphRuntimeMetadata)
++            or not runtime_metadata.is_valid()
++            or not uniform_decode
++            or has_lora
++            or num_active_loras != 0
++            or num_tokens <= 0
++            or num_tokens % self.uniform_decode_query_len != 0
++            or runtime_metadata.token_offset % self.uniform_decode_query_len != 0
++            or num_tokens // self.uniform_decode_query_len
++            > self.vllm_config.scheduler_config.max_num_seqs
++            or runtime_mode not in (CUDAGraphMode.FULL, CUDAGraphMode.PIECEWISE)
++            or runtime_mode not in allowed_modes
++        )
++        if invalid_request:
++            return CUDAGraphMode.NONE, fallback
++
++        descriptor = self._create_runtime_batch_descriptor(num_tokens, runtime_metadata)
++        self.add_cudagraph_key(runtime_mode, descriptor)
++        return runtime_mode, descriptor
++
+     def add_cudagraph_key(
+         self, runtime_mode: CUDAGraphMode, batch_descriptor: BatchDescriptor
+     ):
+@@ -183,6 +227,10 @@ class CudagraphDispatcher:
+         # This should be called only after attention backend is initialized. So we can
+         # get the correct cudagraph mode after backend support is resolved.
+         self.cudagraph_mode = cudagraph_mode
++        # The caller may override the query length (e.g. spec decode or split
++        # replay); sync it to the instance used by descriptor building and
++        # runtime-key alignment validation.
++        self.uniform_decode_query_len = uniform_decode_query_len
+ 
+         # Early exit if cudagraphs are disabled
+         if cudagraph_mode == CUDAGraphMode.NONE:
+@@ -254,11 +302,8 @@ class CudagraphDispatcher:
+         num_active_loras: int = 0,
+         valid_modes: AbstractSet[CUDAGraphMode] | None = None,
+         invalid_modes: AbstractSet[CUDAGraphMode] | None = None,
+-        start_num_tokens: int = 0,
+-        allow_inplace_lazy_key: bool = False,
+-        graph_variant: str = "",
+-        attention_backend: str = "",
+-        capture_metadata_mode: str = "",
++        runtime_metadata: CUDAGraphRuntimeMetadata | None = None,
++        allow_runtime_key_registration: bool = False,
+     ) -> tuple[CUDAGraphMode, BatchDescriptor]:
+         """
+         Given conditions(e.g.,batch descriptor and if using piecewise only),
+@@ -278,25 +323,13 @@ class CudagraphDispatcher:
+                 valid_modes to compute allowed modes. (e.g., {FULL} for
+                 features like cascade attention not supported by full
+                 cudagraphs). None means no modes are excluded.
+-            start_num_tokens: Extended key metadata (split-batch / dual-stream):
+-                the starting token offset for an offset view (e.g. the second
+-                split of an inplace replay). When 0 (default), the key is not
+-                an offset key and normal dispatch is used.
+-            allow_inplace_lazy_key: Extended key metadata: whether lazy capture
+-                of a missing offset / variant key is allowed. When False and
+-                extended metadata is present, the key strategy fails closed to
+-                CUDAGraphMode.NONE.
+-            graph_variant: Extended key metadata: the split mode variant tag
+-                (e.g. "inplace_serial", "inplace_parallel").
+-            attention_backend: Extended key metadata: the attention backend tag
+-                (e.g. "fia", "pa").
+-            capture_metadata_mode: Extended key metadata: the metadata mode used
+-                during graph capture.
+-
+-        Policy note: construction and dispatch of extended keys is owned by the
+-        pluggable key strategy (see ``CudagraphKeyStrategy``); core only runs
+-        the standard padded-key path and fails closed when no strategy (or
+-        no registered key) applies.
++            runtime_metadata: Opaque metadata for a runtime graph key. None
++                keeps the static dispatch path unchanged. Core validates the
++                generic schema (``is_valid``) but does not interpret
++                platform-specific ``variant`` / ``backend_tag`` values.
++            allow_runtime_key_registration: Whether a validated runtime key
++                may be registered. False fails closed to eager execution and
++                never mutates the key registry.
+         """
+         allowed_modes = valid_modes or CUDAGraphMode.valid_runtime_modes()
+ 
+@@ -318,36 +351,19 @@ class CudagraphDispatcher:
+         ):
+             return CUDAGraphMode.NONE, BatchDescriptor(
+                 num_tokens=num_tokens,
+-                start_num_tokens=start_num_tokens,
+-                graph_variant=graph_variant,
+-                attention_backend=attention_backend,
+-                capture_metadata_mode=capture_metadata_mode,
++                runtime_metadata=runtime_metadata,
+             )
+ 
+-        # Extended (split-batch / dual-stream) key policy is owned by the
+-        # pluggable key strategy. The strategy either returns a
+-        # (mode, batch descriptor) pair or None to fall through to the
+-        # standard padded-key dispatch path below (fail-closed).
+-        if (
+-            start_num_tokens > 0
+-            or graph_variant
+-            or attention_backend
+-            or capture_metadata_mode
+-        ):
+-            strategy_result = self.key_strategy.dispatch(
+-                dispatcher=self,
++        if runtime_metadata is not None:
++            return self._dispatch_runtime_key(
+                 num_tokens=num_tokens,
+                 uniform_decode=uniform_decode,
+                 has_lora=has_lora,
+                 num_active_loras=num_active_loras,
+-                start_num_tokens=start_num_tokens,
+-                allow_inplace_lazy_key=allow_inplace_lazy_key,
+-                graph_variant=graph_variant,
+-                attention_backend=attention_backend,
+-                capture_metadata_mode=capture_metadata_mode,
++                allowed_modes=allowed_modes,
++                runtime_metadata=runtime_metadata,
++                allow_runtime_key_registration=allow_runtime_key_registration,
+             )
+-            if strategy_result is not None:
+-                return strategy_result
+ 
+         # Standard dispatch path
+         effective_num_active_loras = num_active_loras
+diff --git a/vllm/v1/cudagraph_key_strategy.py b/vllm/v1/cudagraph_key_strategy.py
+deleted file mode 100644
+index e25683e34fb..00000000000
+--- a/vllm/v1/cudagraph_key_strategy.py
++++ /dev/null
+@@ -1,266 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-"""
+-Cudagraph key strategies (extended capture/replay key policy).
+-
+-The standard cudagraph dispatcher only understands padded keys derived from
+-(num_tokens, num_reqs, uniform, has_lora, num_active_loras). Split-batch
+-(dual-stream) replay additionally needs offset / variant-aware keys, for
+-example DUAL_INPLACE second-split offset views into the original buffer.
+-
+-The construction and dispatch *policy* for these extended keys is owned by a
+-pluggable :class:`CudagraphKeyStrategy` instead of being inlined into the
+-dispatcher control flow. Core keeps only:
+-
+-  - the stable replay entry point (``CudagraphDispatcher.dispatch``),
+-  - the versioned key metadata (``BatchDescriptor``, including the extended
+-    metadata fields consumed by this strategy),
+-  - fail-closed eager fallback (no registered key -> ``CUDAGraphMode.NONE``).
+-
+-The default implementation (:class:`InplaceSplitKeyStrategy`) preserves the
+-previous inline behavior exactly. Platforms that wish to own this policy
+-implement ``Platform.get_cudagraph_key_strategy()`` and return their own
+-strategy; the default implementation can then be removed from core.
+-"""
+-
+-from __future__ import annotations
+-
+-from typing import Any, Protocol
+-
+-from vllm.config import CUDAGraphMode
+-from vllm.forward_context import BatchDescriptor
+-
+-
+-class CudagraphKeyStrategy(Protocol):
+-    """Protocol for extended cudagraph key dispatch strategies.
+-
+-    A strategy inspects the extended key metadata and either returns a
+-    ``(runtime mode, batch descriptor)`` pair or ``None`` to fall through to
+-    the standard padded-key dispatch path.
+-    """
+-
+-    def dispatch(
+-        self,
+-        *,
+-        dispatcher: Any,
+-        num_tokens: int,
+-        uniform_decode: bool,
+-        has_lora: bool,
+-        num_active_loras: int,
+-        start_num_tokens: int,
+-        allow_inplace_lazy_key: bool,
+-        graph_variant: str,
+-        attention_backend: str,
+-        capture_metadata_mode: str,
+-    ) -> tuple[CUDAGraphMode, BatchDescriptor] | None:
+-        """Dispatch an extended (offset / variant-aware) key.
+-
+-        Args:
+-            dispatcher: The calling ``CudagraphDispatcher`` instance; the
+-                strategy reads ``cudagraph_mode`` / ``cudagraph_keys`` and
+-                registers extra keys via ``add_cudagraph_key``.
+-            start_num_tokens: Starting token offset for an offset view.
+-                ``0`` means the key is not an offset key.
+-            allow_inplace_lazy_key: Whether lazy capture of a missing offset /
+-                variant key is allowed. When ``False`` the strategy fails
+-                closed (returns ``CUDAGraphMode.NONE`` with a no-graph
+-                descriptor carrying the extended metadata).
+-            graph_variant / attention_backend / capture_metadata_mode:
+-                Variant and backend tags distinguishing descriptor-aware keys
+-                from standard keys with the same ``num_tokens``.
+-        """
+-        ...
+-
+-
+-class InplaceSplitKeyStrategy:
+-    """Default strategy replicating the historical inline DUAL_INPLACE key
+-    policy.
+-
+-    Transitional implementation currently living in core so that existing
+-    split-batch callers keep working unchanged; platforms should move this
+-    policy out of tree via ``Platform.get_cudagraph_key_strategy()`` and core
+-    can then drop this class.
+-    """
+-
+-    def _create_inplace_offset_batch_descriptor(
+-        self,
+-        dispatcher: Any,
+-        num_tokens: int,
+-        uniform_decode: bool,
+-        has_lora: bool,
+-        start_num_tokens: int,
+-        graph_variant: str = "",
+-        attention_backend: str = "",
+-        capture_metadata_mode: str = "",
+-    ) -> BatchDescriptor:
+-        """Create a BatchDescriptor for inplace offset graph keys.
+-
+-        Inplace offset keys are used by DUAL_INPLACE split-batch mode where
+-        the second split replays from an offset view into the original buffer.
+-        Unlike normal padded descriptors, offset descriptors use the exact
+-        num_tokens (no padding lookup) and require uniform decode with
+-        request-aligned token counts.
+-        """
+-        if num_tokens <= 0:
+-            raise ValueError(
+-                "num_tokens must be positive for inplace offset keys")
+-        if start_num_tokens <= 0:
+-            raise ValueError(
+-                "start_num_tokens must be positive for inplace offset keys")
+-        if not uniform_decode:
+-            raise ValueError(
+-                "inplace offset keys only support uniform decode")
+-        if num_tokens % dispatcher.uniform_decode_query_len != 0:
+-            raise ValueError(
+-                "num_tokens must be divisible by uniform_decode_query_len "
+-                "for inplace offset keys")
+-
+-        return BatchDescriptor(
+-            num_tokens=num_tokens,
+-            num_reqs=num_tokens // dispatcher.uniform_decode_query_len,
+-            uniform=True,
+-            has_lora=has_lora,
+-            start_num_tokens=start_num_tokens,
+-            graph_variant=graph_variant,
+-            attention_backend=attention_backend,
+-            capture_metadata_mode=capture_metadata_mode,
+-        )
+-
+-    def _create_descriptor_aware_batch_descriptor(
+-        self,
+-        dispatcher: Any,
+-        num_tokens: int,
+-        uniform_decode: bool,
+-        has_lora: bool,
+-        *,
+-        num_active_loras: int = 0,
+-        graph_variant: str = "",
+-        attention_backend: str = "",
+-        capture_metadata_mode: str = "",
+-    ) -> BatchDescriptor:
+-        """Create a BatchDescriptor for descriptor-aware graph keys.
+-
+-        Descriptor-aware keys carry variant/backend metadata that
+-        differentiates them from normal graph keys with the same num_tokens.
+-        Unlike inplace offset keys, they do not require start_num_tokens.
+-        """
+-        if num_tokens <= 0:
+-            raise ValueError(
+-                "num_tokens must be positive for descriptor-aware keys")
+-        num_reqs: int | None = None
+-        if uniform_decode:
+-            if num_tokens % dispatcher.uniform_decode_query_len != 0:
+-                raise ValueError(
+-                    "num_tokens must be divisible by "
+-                    "uniform_decode_query_len for uniform descriptor-aware "
+-                    "keys")
+-            num_reqs = num_tokens // dispatcher.uniform_decode_query_len
+-
+-        return BatchDescriptor(
+-            num_tokens=num_tokens,
+-            num_reqs=num_reqs,
+-            uniform=uniform_decode,
+-            has_lora=has_lora,
+-            num_active_loras=num_active_loras,
+-            graph_variant=graph_variant,
+-            attention_backend=attention_backend,
+-            capture_metadata_mode=capture_metadata_mode,
+-        )
+-
+-    def dispatch(
+-        self,
+-        *,
+-        dispatcher: Any,
+-        num_tokens: int,
+-        uniform_decode: bool,
+-        has_lora: bool,
+-        num_active_loras: int,
+-        start_num_tokens: int,
+-        allow_inplace_lazy_key: bool,
+-        graph_variant: str,
+-        attention_backend: str,
+-        capture_metadata_mode: str,
+-    ) -> tuple[CUDAGraphMode, BatchDescriptor] | None:
+-        """Try to dispatch an extended key.
+-
+-        Returns None if the key carries no extended metadata (standard key),
+-        otherwise returns the dispatch result.
+-        """
+-        # Inplace offset keys take precedence over descriptor-aware keys.
+-        if start_num_tokens > 0:
+-            no_graph_desc = BatchDescriptor(
+-                num_tokens=num_tokens,
+-                start_num_tokens=start_num_tokens,
+-                graph_variant=graph_variant,
+-                attention_backend=attention_backend,
+-                capture_metadata_mode=capture_metadata_mode,
+-            )
+-            if not allow_inplace_lazy_key:
+-                return CUDAGraphMode.NONE, no_graph_desc
+-
+-            runtime_mode = dispatcher.cudagraph_mode.decode_mode()
+-            if runtime_mode not in (CUDAGraphMode.FULL, CUDAGraphMode.PIECEWISE):
+-                return CUDAGraphMode.NONE, no_graph_desc
+-
+-            batch_desc = self._create_inplace_offset_batch_descriptor(
+-                dispatcher,
+-                num_tokens=num_tokens,
+-                uniform_decode=uniform_decode,
+-                has_lora=has_lora,
+-                start_num_tokens=start_num_tokens,
+-                graph_variant=graph_variant,
+-                attention_backend=attention_backend,
+-                capture_metadata_mode=capture_metadata_mode,
+-            )
+-            if batch_desc not in dispatcher.cudagraph_keys[runtime_mode]:
+-                dispatcher.add_cudagraph_key(runtime_mode, batch_desc)
+-            return runtime_mode, batch_desc
+-
+-        # Handle descriptor-aware keys (non-offset keys with variant/backend)
+-        has_descriptor_variant = bool(
+-            graph_variant or attention_backend or capture_metadata_mode)
+-        if has_descriptor_variant:
+-            descriptor = self._create_descriptor_aware_batch_descriptor(
+-                dispatcher,
+-                num_tokens=num_tokens,
+-                uniform_decode=uniform_decode,
+-                has_lora=has_lora,
+-                num_active_loras=num_active_loras,
+-                graph_variant=graph_variant,
+-                attention_backend=attention_backend,
+-                capture_metadata_mode=capture_metadata_mode,
+-            )
+-            if not allow_inplace_lazy_key:
+-                return CUDAGraphMode.NONE, descriptor
+-
+-            runtime_mode = dispatcher.cudagraph_mode.decode_mode()
+-            if runtime_mode not in (CUDAGraphMode.FULL,
+-                                    CUDAGraphMode.PIECEWISE):
+-                return CUDAGraphMode.NONE, descriptor
+-            if descriptor not in dispatcher.cudagraph_keys[runtime_mode]:
+-                dispatcher.add_cudagraph_key(runtime_mode, descriptor)
+-            return runtime_mode, descriptor
+-
+-        return None
+-
+-
+-def resolve_cudagraph_key_strategy(vllm_config: Any) -> CudagraphKeyStrategy | None:
+-    """Resolve the extended-key strategy for the current platform.
+-
+-    Consults ``Platform.get_cudagraph_key_strategy`` first so platforms can
+-    own the policy out of tree. Falls back to the transitional core default
+-    (which replicates the historical inline behavior). Returns None only if
+-    the platform explicitly opts out and the default is disabled; extended
+-    keys then fail closed through the standard dispatch path.
+-    """
+-    from vllm.platforms import current_platform
+-
+-    hook = getattr(current_platform, "get_cudagraph_key_strategy", None)
+-    if hook is not None:
+-        strategy = hook(vllm_config)
+-        if strategy is not None:
+-            return strategy
+-
+-    # Transitional default: replicate the historical inline policy so that
+-    # existing split-batch callers observe zero behavior change.
+-    return InplaceSplitKeyStrategy()
+\ No newline at end of file
+-- 
+2.53.0.windows.3
+
