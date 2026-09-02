@@ -416,7 +416,9 @@ def _full_graph_fia_cascade(
     bufs = getattr(self, "_cascade_graph_buffers", None)
     if bufs is None:
         bufs = self._cascade_graph_buffers = {}
-    bufs.setdefault(param_key, []).append((o1, l1, o2, l2, merged.reshape(o1.shape)))
+    bufs.setdefault(param_key, []).append(
+        (o1, l1, o2, l2, merged.reshape(o1.shape), bt_shared, bt_rest)
+    )
     _trace(
         "capture body SUCCESS: num_tokens=%s layers-so-far=%s",
         num_tokens,
