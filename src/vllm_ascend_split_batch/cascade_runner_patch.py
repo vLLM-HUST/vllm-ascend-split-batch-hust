@@ -130,8 +130,8 @@ def _patch_capture_scheduling() -> None:
     def _capture_cudagraphs(self, batch_descriptors, cudagraph_runtime_mode):
         orig(self, batch_descriptors, cudagraph_runtime_mode)
         if (
-            not envs_mod.VLLM_ASCEND_ENABLE_CASCADE_DECODE
-            or not envs_mod.VLLM_ASCEND_ENABLE_CASCADE_GRAPH
+            not getattr(envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", False)
+            or not getattr(envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_GRAPH", False)
             or cudagraph_runtime_mode != CUDAGraphMode.FULL
             or getattr(self, "use_sparse", False)
             or getattr(self, "use_compress", False)
@@ -147,7 +147,7 @@ def _patch_capture_scheduling() -> None:
             return
         max_model_len = getattr(self, "max_model_len", 0)
         dummy_prefix = min(
-            envs_mod.VLLM_ASCEND_CASCADE_MIN_PREFIX,
+            getattr(envs_mod, "VLLM_ASCEND_CASCADE_MIN_PREFIX", 8192),
             (max_model_len - 1) // blk * blk,
         )
         if dummy_prefix < blk:
@@ -160,7 +160,8 @@ def _patch_capture_scheduling() -> None:
             # the stage-2 suffix is empty and the capture falls back to the
             # standard graph body.
             profile_seq_lens = min(
-                2 * envs_mod.VLLM_ASCEND_CASCADE_MIN_PREFIX, self.max_model_len
+                2 * getattr(envs_mod, "VLLM_ASCEND_CASCADE_MIN_PREFIX", 8192),
+                self.max_model_len,
             )
             gp._capture_ctx.active = True
             gp._capture_ctx.shared_len = dummy_prefix

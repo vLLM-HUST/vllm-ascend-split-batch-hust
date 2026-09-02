@@ -314,6 +314,9 @@ def _inject_env_vars():
             "VLLM_ASCEND_CASCADE_PRECISION": lambda: os.getenv(
                 "VLLM_ASCEND_CASCADE_PRECISION", "bf16"
             ),
+            "VLLM_ASCEND_ENABLE_CASCADE_GRAPH": lambda: bool(
+                int(os.getenv("VLLM_ASCEND_ENABLE_CASCADE_GRAPH", "0"))
+            ),
         }
     )
 

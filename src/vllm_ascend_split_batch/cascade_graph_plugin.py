@@ -540,7 +540,7 @@ def _wrap_aclgraph_wrapper(ACLGraphWrapper) -> None:
     def __call__(self, *args, **kwargs):
         from vllm_ascend_split_batch import cascade_graph_plugin as gp
 
-        if not envs_mod.VLLM_ASCEND_ENABLE_CASCADE_DECODE:
+        if not getattr(envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", False):
             return orig_call(self, *args, **kwargs)
 
         capture_window = bool(getattr(gp._capture_ctx, "active", False))
@@ -655,7 +655,7 @@ def install(attn_mod, builder_cls, impl_cls):
             if (
                 _step_is_cascade()
                 and not getattr(attn_mod._EXTRA_CTX, "capturing", False)
-                and envs_mod.VLLM_ASCEND_ENABLE_CASCADE_DECODE
+                and getattr(envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", False)
                 and attn_metadata.attn_state
                 == attn_mod.AscendAttentionState.DecodeOnly
                 and getattr(attn_metadata, "cascade_shared_len", 0) > 0
