@@ -280,6 +280,13 @@ def _full_graph_fia_cascade(
             )
         )
         update_graph_params_workspaces(param_key, (ws_stage1, ws_stage2))
+        # weak_ref_workspaces() converts the GraphParams entry to weak refs
+        # right after capture; keep strong per-impl references so the
+        # bucket-static workspaces outlive the capture body.
+        bufs0 = getattr(self, "_cascade_graph_buffers", None)
+        if bufs0 is None:
+            bufs0 = self._cascade_graph_buffers = {}
+        bufs0.setdefault(param_key + ("-ws",), (ws_stage1, ws_stage2))
     ws_stage1, ws_stage2 = graph_params.workspaces.get(param_key)
 
     stream = torch_npu.npu.current_stream()
