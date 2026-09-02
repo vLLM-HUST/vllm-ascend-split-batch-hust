@@ -236,43 +236,51 @@ def _full_graph_fia_cascade(
     bt_shared = block_table[:1, :shared_blocks].contiguous()
     bt_rest = block_table[:, shared_blocks:].contiguous()
 
-    # Workspace sized by the block-table capacity (an upper bound for any
-    # shared_len / indep split this bucket can ever see).  Two separate
-    # workspaces: task groups may execute concurrently and sharing one
-    # buffer races (HUST 14B repro: 9/64 arms diverged).
+    # Bucket-static workspaces, allocated ONCE per (cascade, num_tokens)
+    # bucket and shared by every cascade layer (the official FIA update pass
+    # shares one workspace the same way).  Sizing uses the block-table
+    # capacity, an upper bound for any shared/indep split this bucket can
+    # ever see, so replays never outgrow the captured workspace.  Stage 1
+    # and stage 2 get SEPARATE buffers: task groups may execute
+    # concurrently and sharing one buffer races (HUST 14B repro: 9/64 arms
+    # diverged).
     bt_cols = block_table.shape[1]
     kv_bound = bt_cols * block_size
-    ws_stage1 = torch_npu._npu_fused_infer_attention_score_v2_get_max_workspace(
-        query=query,
-        key=key_t,
-        value=value_t,
-        block_table=block_table[:1],
-        block_size=block_size,
-        actual_seq_qlen=[num_tokens],
-        actual_seq_kvlen=[kv_bound],
-        num_query_heads=num_heads,
-        num_key_value_heads=num_kv_heads,
-        input_layout="TND",
-        softmax_scale=self.scale,
-        return_softmax_lse=True,
-    )
-    ws_stage2 = torch_npu._npu_fused_infer_attention_score_v2_get_max_workspace(
-        query=query,
-        key=key_t,
-        value=value_t,
-        block_table=block_table,
-        block_size=block_size,
-        actual_seq_qlen=q_lens_cs,
-        actual_seq_kvlen=[kv_bound] * num_tokens,
-        num_query_heads=num_heads,
-        num_key_value_heads=num_kv_heads,
-        input_layout="TND",
-        softmax_scale=self.scale,
-        return_softmax_lse=True,
-    )
-    workspaces = (ws_stage1, ws_stage2)
     if graph_params.workspaces.get(param_key) is None:
-        update_graph_params_workspaces(param_key, workspaces)
+        ws_stage1 = (
+            torch_npu._npu_fused_infer_attention_score_v2_get_max_workspace(
+                query=query,
+                key=key_t,
+                value=value_t,
+                block_table=block_table[:1],
+                block_size=block_size,
+                actual_seq_qlen=[num_tokens],
+                actual_seq_kvlen=[kv_bound],
+                num_query_heads=num_heads,
+                num_key_value_heads=num_kv_heads,
+                input_layout="TND",
+                softmax_scale=self.scale,
+                return_softmax_lse=True,
+            )
+        )
+        ws_stage2 = (
+            torch_npu._npu_fused_infer_attention_score_v2_get_max_workspace(
+                query=query,
+                key=key_t,
+                value=value_t,
+                block_table=block_table,
+                block_size=block_size,
+                actual_seq_qlen=q_lens_cs,
+                actual_seq_kvlen=[kv_bound] * num_tokens,
+                num_query_heads=num_heads,
+                num_key_value_heads=num_kv_heads,
+                input_layout="TND",
+                softmax_scale=self.scale,
+                return_softmax_lse=True,
+            )
+        )
+        update_graph_params_workspaces(param_key, (ws_stage1, ws_stage2))
+    ws_stage1, ws_stage2 = graph_params.workspaces.get(param_key)
 
     stream = torch_npu.npu.current_stream()
     event_pre = torch.npu.ExternalEvent()
@@ -408,9 +416,7 @@ def _full_graph_fia_cascade(
     bufs = getattr(self, "_cascade_graph_buffers", None)
     if bufs is None:
         bufs = self._cascade_graph_buffers = {}
-    bufs.setdefault(param_key, []).append(
-        (o1, l1, o2, l2, merged.reshape(o1.shape), ws_stage1, ws_stage2)
-    )
+    bufs.setdefault(param_key, []).append((o1, l1, o2, l2, merged.reshape(o1.shape)))
     _trace(
         "capture body SUCCESS: num_tokens=%s layers-so-far=%s",
         num_tokens,
