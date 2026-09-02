@@ -400,6 +400,17 @@ def _full_graph_fia_cascade(
             layer_name,
         )
     )
+    # Keep the graph-pool intermediates alive for the lifetime of this impl:
+    # weak refs in attn_params do NOT own the buffers, and a freed buffer is
+    # reused by later allocations while the replayed nodes still write to its
+    # old address (observed as 507011 MTE out-of-range on first replay).
+    # All layers of the bucket accumulate here, mirroring the HUST fork.
+    bufs = getattr(self, "_cascade_graph_buffers", None)
+    if bufs is None:
+        bufs = self._cascade_graph_buffers = {}
+    bufs.setdefault(param_key, []).append(
+        (o1, l1, o2, l2, merged.reshape(o1.shape), ws_stage1, ws_stage2)
+    )
     _trace(
         "capture body SUCCESS: num_tokens=%s layers-so-far=%s",
         num_tokens,
