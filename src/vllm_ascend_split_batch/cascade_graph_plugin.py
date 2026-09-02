@@ -637,9 +637,16 @@ def install(attn_mod, builder_cls, impl_cls):
                 attn_mod._EXTRA_CTX, "capturing", False
             ):
                 try:
-                    return _full_graph_fia_cascade(
+                    # The capture body returns (output, num_tokens) like the
+                    # HUST full_graph_fia_cascade; the official caller
+                    # convention (forward_impl -> forward) expects the
+                    # output TENSOR, so unpack here (the body already wrote
+                    # the merge result into output[:num_tokens]).
+                    attn_output, num_tokens = _full_graph_fia_cascade(
                         self, query, key, value, attn_metadata, output, kv_cache
                     )
+                    output[:num_tokens] = attn_output[:num_tokens]
+                    return output
                 except Exception:
                     # Capture-time failure falls back to the standard graph
                     # capture body so the twin graph still matches a
@@ -661,10 +668,13 @@ def install(attn_mod, builder_cls, impl_cls):
                 # Runtime cascade step that reached the impl outside graph
                 # replay (e.g. graph dispatch failed): run the eager
                 # two-stage body instead of the standard full-KV FIA.
+                # _forward_cascade_decode returns True when it filled
+                # `output`, False to fail open to the standard path.
                 try:
-                    return self._forward_cascade_decode(
+                    if self._forward_cascade_decode(
                         query, key, value, attn_metadata, output, kv_cache
-                    )
+                    ):
+                        return output
                 except Exception:
                     logger.exception(
                         "cascade eager fallback failed; standard FIA path used"
