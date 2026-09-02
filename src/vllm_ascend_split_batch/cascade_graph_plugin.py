@@ -155,7 +155,6 @@ def _full_graph_fia_cascade(
     task groups under the ("cascade", num_tokens) graph param key; every
     dynamic parameter is re-derived at replay from the step metadata.
     """
-    from vllm_ascend.attention import attention_v1 as attn_mod
     from vllm_ascend.compilation.acl_graph import (
         get_graph_params,
         update_graph_params_workspaces,
@@ -186,10 +185,7 @@ def _full_graph_fia_cascade(
             self, query, key, value, attn_metadata, output, kv_cache
         )
 
-    in_parallel_streams = bool(
-        getattr(attn_mod._EXTRA_CTX, "in_parallel_streams", False)
-    )
-    graph_params = get_graph_params(in_parallel_streams)
+    graph_params = get_graph_params()
     param_key = ("cascade", num_tokens)
     if not _ensure_graph_param_key(graph_params, param_key):
         logger.warning_once(
@@ -698,10 +694,7 @@ def install(attn_mod, builder_cls, impl_cls):
             from vllm_ascend_split_batch.cascade_runner_patch import _step_is_cascade
 
             if _step_is_cascade():
-                in_parallel_streams = bool(
-                    getattr(forward_context, "in_parallel_streams", False)
-                )
-                graph_params = get_graph_params(in_parallel_streams)
+                graph_params = get_graph_params()
                 cascade_key = ("cascade", num_tokens)
                 if graph_params is not None and graph_params.attn_params.get(
                     cascade_key
