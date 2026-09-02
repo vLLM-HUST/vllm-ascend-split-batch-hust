@@ -180,6 +180,58 @@ def _patch_capture_scheduling() -> None:
     NPUModelRunner._cascade_graph_capture_patched = True
 
 
+def _patch_update_order() -> None:
+    """Run the replay parameter update BEFORE the model call on cascade steps.
+
+    Official ``_model_forward`` runs the model (which replays the captured
+    aclgraph) first and the parameter update afterwards; that update serves
+    the NEXT step's replay.  A cascade replay must not run with the
+    CAPTURE-time dummy parameters (kv ~3072, dummy blocks) against the real
+    step (kv ~1152): the captured task-group tiling reads out of the real
+    KV cache range and the device aborts with 507011 on the first event
+    sync.  The HUST fork calls ``_update_full_graph_params_if_needed``
+    BEFORE ``run_model()`` unconditionally
+    (cascade-e2e model_runner_v1.py:3044-3047).  The plugin re-orders the
+    same way for cascade steps only; non-cascade steps keep the official
+    order bit-for-bit.
+    """
+    from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
+
+    if getattr(NPUModelRunner, "_cascade_graph_update_order_patched", False):
+        return
+
+    orig = NPUModelRunner._model_forward
+
+    def _model_forward(
+        self,
+        num_tokens_padded,
+        input_ids=None,
+        positions=None,
+        intermediate_tensors=None,
+        inputs_embeds=None,
+        **model_kwargs,
+    ):
+        from vllm.forward_context import get_forward_context
+
+        if _step_is_cascade():
+            forward_context = get_forward_context()
+            self._update_full_graph_params_if_needed(
+                forward_context, num_tokens_padded, positions
+            )
+        return orig(
+            self,
+            num_tokens_padded,
+            input_ids,
+            positions,
+            intermediate_tensors,
+            inputs_embeds,
+            **model_kwargs,
+        )
+
+    NPUModelRunner._model_forward = _model_forward
+    NPUModelRunner._cascade_graph_update_order_patched = True
+
+
 def install() -> bool:
     """Patch the NPUModelRunner for graph-mode cascade (idempotent)."""
     global _installed
@@ -191,6 +243,7 @@ def install() -> bool:
         try:
             _patch_determine_batch_execution()
             _patch_capture_scheduling()
+            _patch_update_order()
         except Exception:
             logger.exception(
                 "cascade graph runner patch failed; graph cascade stays "
