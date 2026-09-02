@@ -61,6 +61,32 @@ from vllm_ascend_split_batch.cascade_plugin import (
 
 logger = logging.getLogger(__name__)
 
+# vllm's logger adds *_once helpers; a plain logging.Logger does not, so the
+# plugin keeps its own once-set and uses plain logging calls.
+_ONCE_SEEN: set = set()
+
+
+def _warn_once(msg, *args):
+    key = "warn:" + msg
+    if key not in _ONCE_SEEN:
+        _ONCE_SEEN.add(key)
+        logger.warning(msg, *args)
+
+
+def _info_once(msg, *args):
+    key = "info:" + msg
+    if key not in _ONCE_SEEN:
+        _ONCE_SEEN.add(key)
+        logger.info(msg, *args)
+
+
+def _trace(msg, *args):
+    """Diagnostic trace (enabled with VLLM_ASCEND_CASCADE_TRACE=1)."""
+    import os as _os
+
+    if _os.getenv("VLLM_ASCEND_CASCADE_TRACE") == "1":
+        print("[cas-trace] " + (msg % args if args else msg), flush=True)
+
 # ---------------------------------------------------------------- bookkeeping
 
 # Set by install().  Guards against double installation.
@@ -173,7 +199,7 @@ def _full_graph_fia_cascade(
         shared_blocks < 1
         or _cascade_has_short_real_request(seq_lens_list, num_tokens, shared_len)
     ):
-        logger.warning_once(
+        _warn_once(
             "cascade graph capture fell back to the standard path "
             "(shared_len=%s num_tokens=%s)",
             shared_len,
@@ -185,10 +211,11 @@ def _full_graph_fia_cascade(
             self, query, key, value, attn_metadata, output, kv_cache
         )
 
+    _trace("capture body: num_tokens=%s shared_len=%s", num_tokens, shared_len)
     graph_params = get_graph_params()
     param_key = ("cascade", num_tokens)
     if not _ensure_graph_param_key(graph_params, param_key):
-        logger.warning_once(
+        _warn_once(
             "cascade capture: GraphParams unavailable; standard path used"
         )
         return self._cascade_orig_forward_capture(
@@ -252,7 +279,7 @@ def _full_graph_fia_cascade(
     event_pre.wait(stream)
     event_pre.reset(stream)
     graph_params.events[param_key].append(event_pre)
-    logger.info_once(
+    _info_once(
         "cascade aclgraph captured: num_tokens=%s shared_len=%s kv_bound=%s",
         num_tokens,
         shared_len,
@@ -373,6 +400,11 @@ def _full_graph_fia_cascade(
             layer_name,
         )
     )
+    _trace(
+        "capture body SUCCESS: num_tokens=%s layers-so-far=%s",
+        num_tokens,
+        len(graph_params.attn_params[param_key]),
+    )
     return output, num_tokens
 
 
@@ -407,7 +439,7 @@ def _update_cascade_graph_params(
         # Step metadata lost the cascade decision.  The captured graph's
         # in-graph ExternalEvent waits must be released or the replay
         # dead-locks: record all events, then skip re-parameterization.
-        logger.warning_once(
+        _warn_once(
             "cascade replay without cascade_shared_len in metadata "
             "(layer=%s keys=%s)",
             layer_name,
@@ -427,7 +459,7 @@ def _update_cascade_graph_params(
         len(handles) < groups_per_layer * len(captured)
         or len(events) < events_per_layer * len(captured)
     ):
-        logger.warning_once(
+        _warn_once(
             "cascade graph param lists misaligned (%d params, %d handles, %d "
             "events); skipping update",
             len(captured),
@@ -446,7 +478,7 @@ def _update_cascade_graph_params(
     if _cascade_has_short_real_request(
         metadata.seq_lens_list, num_tokens_i, shared_len
     ):
-        logger.warning_once(
+        _warn_once(
             "cascade replay with short real request (shared=%s seq=%s)",
             shared_len,
             str(metadata.seq_lens_list[:4]),
@@ -541,6 +573,10 @@ def _wrap_aclgraph_wrapper(ACLGraphWrapper) -> None:
 
         capture_window = bool(getattr(gp._capture_ctx, "active", False))
         cascade_replay = _step_is_cascade() and not capture_window
+        _trace(
+            "wrapper: cascade_flag=%s capture_window=%s replay_swap=%s",
+            _step_is_cascade(), capture_window, cascade_replay,
+        )
         if capture_window or cascade_replay:
             # Cascade twin capture: route the new graph into the cascade
             # table (a standard descriptor key would otherwise overwrite the
@@ -709,6 +745,7 @@ def install(attn_mod, builder_cls, impl_cls):
                 if graph_params is not None and graph_params.attn_params.get(
                     cascade_key
                 ):
+                    _trace("replay update: cascade key hit num_tokens=%s", num_tokens)
                     _update_cascade_graph_params(
                         update_stream, forward_context, graph_params, num_tokens
                     )
