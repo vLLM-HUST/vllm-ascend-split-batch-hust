@@ -6,7 +6,7 @@
   "host": {
     "provider": "vllm",
     "name": "vllm-ascend",
-    "version_range": ">=0"
+    "version_range": ">=0.23.0,<0.24"
   },
   "runtime": {
     "type": "python",
@@ -15,19 +15,57 @@
   },
   "lifecycle_owner": "vllm",
   "protocols": [
-    {"name": "vllm.graph.runtime-key", "version_range": ">=1,<2"},
-    {"name": "vllm.forward.split-context", "version_range": ">=1,<2"},
-    {"name": "vllm.ascend.graph-pool", "version_range": ">=1,<2"},
-    {"name": "vllm.worker.split-executor", "version_range": ">=1,<2"}
+    {
+      "name": "vllm.graph.runtime-key",
+      "version_range": ">=1,<2"
+    },
+    {
+      "name": "vllm.forward.split-context",
+      "version_range": ">=1,<2"
+    },
+    {
+      "name": "vllm.ascend.graph-pool",
+      "version_range": ">=1,<2"
+    },
+    {
+      "name": "vllm.worker.split-executor",
+      "version_range": ">=1,<2"
+    }
   ],
   "components": [
     {
       "component_id": "dual-pad-planner",
       "implementation_ref": "vllm_ascend_split_batch.planner:plan_dual_pad",
-      "contracts": ["vllm.graph.runtime-key.v1", "vllm.forward.split-context.v1", "vllm.worker.split-executor.v1"],
-      "execution_planes": ["worker", "device"],
+      "contracts": [
+        "vllm.graph.runtime-key.v1",
+        "vllm.forward.split-context.v1",
+        "vllm.worker.split-executor.v1"
+      ],
+      "execution_planes": [
+        "worker",
+        "device"
+      ],
       "isolation": "trusted_in_process",
-      "permissions": ["device_access"]
+      "permissions": [
+        "device_access"
+      ]
+    },
+    {
+      "component_id": "cascade-two-stage-decode",
+      "implementation_ref": "vllm_ascend_split_batch.cascade_plugin:load",
+      "contracts": [
+        "vllm.general_plugins",
+        "vllm.ascend.graph-pool.v1",
+        "vllm.graph.runtime-key.v1"
+      ],
+      "execution_planes": [
+        "worker",
+        "device"
+      ],
+      "isolation": "trusted_in_process",
+      "permissions": [
+        "device_access"
+      ]
     }
   ],
   "implementation": [
@@ -36,12 +74,27 @@
       "module": "vllm_ascend_split_batch.planner",
       "object": "plan_dual_pad",
       "status": "import_only"
+    },
+    {
+      "type": "python_module",
+      "module": "vllm_ascend_split_batch.cascade_plugin",
+      "object": "load",
+      "status": "import_only"
+    },
+    {
+      "type": "python_module",
+      "module": "vllm_ascend_split_batch.cascade_graph_plugin",
+      "object": "install",
+      "status": "import_only"
     }
   ],
   "requires_services": [],
   "activation": {
     "entry_points": [],
-    "environment": {},
+    "environment": {
+      "VLLM_ASCEND_ENABLE_CASCADE_DECODE": "0 (default) | 1",
+      "VLLM_ASCEND_ENABLE_CASCADE_GRAPH": "0 (default) | 1"
+    },
     "additional_config": {}
   }
 }

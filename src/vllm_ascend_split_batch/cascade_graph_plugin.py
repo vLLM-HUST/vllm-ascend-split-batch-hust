@@ -501,15 +501,6 @@ def _update_cascade_graph_params(
     indep_kv_lens = _cascade_stage2_kv_lens(
         metadata.seq_lens_list, num_tokens_i, shared_len
     )
-    _trace(
-        "update: shared=%s sb=%s num_tokens=%s seq0=%s indep0=%s bt_cols=%s",
-        shared_len,
-        shared_len // (first_param[9] or 1),
-        num_tokens_i,
-        metadata.seq_lens_list[0],
-        (metadata.seq_lens_list[0] - shared_len) if metadata.seq_lens_list else None,
-        (metadata.block_tables.shape[1] if metadata.block_tables is not None else None),
-    )
     if _cascade_has_short_real_request(
         metadata.seq_lens_list, num_tokens_i, shared_len
     ):
