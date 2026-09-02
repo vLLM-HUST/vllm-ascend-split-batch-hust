@@ -467,12 +467,18 @@ def _install_ngram_proposer_stub():
     sys.modules[mod_name] = stub
 
 
+def _graph_plugin_enabled() -> bool:
+    """Graph cascade stays opt-in on top of the eager cascade (default off)."""
+    return bool(int(os.getenv("VLLM_ASCEND_ENABLE_CASCADE_GRAPH", "0")))
+
+
 def load():
     """vllm.general_plugins entry point.
 
     Idempotent.  The runtime cascade gate stays closed unless the caller sets
     ``VLLM_ASCEND_ENABLE_CASCADE_DECODE=1``, so the patched methods are no-ops
-    in the default (off) configuration.
+    in the default (off) configuration.  Graph-mode cascade additionally
+    requires ``VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1``.
     """
     global attn_mod, _EXTRA_CTX, _HAS_LSE_MERGE_OP, _HAS_FA_FP32_STAGE1_OP
 
@@ -517,3 +523,11 @@ def load():
             impl_cls.forward_fused_infer_attention
         )
         impl_cls._cascade_plugin_patched = True
+
+    if _graph_plugin_enabled():
+        from vllm_ascend_split_batch import cascade_graph_plugin
+
+        cascade_graph_plugin.install(attn_mod, builder_cls, impl_cls)
+        from vllm_ascend_split_batch import cascade_runner_patch
+
+        cascade_runner_patch.install()
