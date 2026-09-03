@@ -39,25 +39,30 @@ def test_disabled_env_defaults_to_cascade_on(monkeypatch):
     assert gate.decision_for(4096, 32) is True
 
 
-def test_bucket_lookup_picks_largest_leq():
+def test_bucket_lookup_ceils_to_smallest_geq():
     gate._decisions.update({
         (32, 4096): False,   # measured loss corner
         (32, 8192): True,
         (64, 4096): True,
     })
     gate._prefix_buckets[:] = [4096, 8192]
-    assert gate.decision_for(4300, 32) is False   # falls in the 4096 bucket
-    assert gate.decision_for(8200, 32) is True    # 8192 bucket
-    assert gate.decision_for(9500, 32) is True    # still the 8192 bucket
+    # block-aligned runtime shared lengths sit just below the nominal bucket
+    # (e.g. 7936 = 62 blocks for a ~8.2k shared prefix): ceil keeps them in
+    # the larger bucket whose measured verdict reflects their true regime.
+    assert gate.decision_for(4096, 32) is False   # exactly the 4096 bucket
+    assert gate.decision_for(4300, 32) is True    # ceils past 4096 -> 8192
+    assert gate.decision_for(7936, 32) is True    # ceils to the 8192 bucket
+    assert gate.decision_for(9500, 32) is True    # 8192 bucket
     assert gate.decision_for(4300, 64) is True    # benched on
     assert gate.decision_for(16384, 128) is True  # unbenched -> default on
 
 
-def test_below_smallest_bucket_defaults_on():
+def test_below_smallest_bucket_follows_that_bucket():
     _fill({(32, 4096): False}, [4096])
-    # below the smallest benched prefix the core cascade gate is not engaged
-    # anyway; the decision defaults to cascade-on (conservative).
-    assert gate.decision_for(1024, 32) is True
+    # cascade steps only trigger at shared >= MIN_PREFIX (= the smallest
+    # bucket), so sub-bucket values never occur at a real decision point;
+    # the ceil mapping simply attributes them to the smallest bucket.
+    assert gate.decision_for(1024, 32) is False
 
 
 def test_zero_shared_len_is_neutral():
@@ -65,17 +70,23 @@ def test_zero_shared_len_is_neutral():
     assert gate.decision_for(0, 32) is True
 
 
+def test_above_largest_bucket_defaults_on():
+    _fill({(32, 8192): False}, [4096, 8192])
+    # above the largest benched prefix cascade keeps winning -> default on
+    assert gate.decision_for(20000, 32) is True
+
+
 def test_override_wins_over_table(monkeypatch):
-    _fill({(32, 4096): False}, [4096])
+    _fill({(32, 4096): False, (64, 4096): True}, [4096])
     monkeypatch.setenv(gate.ENV_OVERRIDE, "on")
     assert gate.override() == "on"
     assert gate.decision_for(4300, 32) is True
     monkeypatch.setenv(gate.ENV_OVERRIDE, "off")
-    assert gate.decision_for(8200, 64) is False
+    assert gate.decision_for(4300, 64) is False
     # invalid override values are ignored
     monkeypatch.setenv(gate.ENV_OVERRIDE, "bogus")
     assert gate.override() is None
-    assert gate.decision_for(4300, 32) is False
+    assert gate.decision_for(4096, 32) is False
 
 
 def test_prefix_grid():

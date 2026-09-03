@@ -96,8 +96,14 @@ def bench_duration() -> float:
 def decision_for(shared_len: int, num_tokens: int) -> bool:
     """Gate verdict for a step with this shared prefix and batch bucket.
 
-    Override env wins; then the benched decision for the largest prefix
-    bucket <= shared_len; unbenched combinations default to cascade-on.
+    Override env wins; then the benched decision for the SMALLEST prefix
+    bucket >= shared_len (ceil).  Rationale: the runtime shared length is
+    block-aligned prefix-cache coverage and runs slightly below the nominal
+    prefix (a ~8.2k-token shared prefix reports 7936 = 62 blocks); flooring
+    would route those steps into the smaller bucket's verdict and flag them
+    OFF even where the e2e matrix says cascade wins.  Ceil errs toward the
+    larger prefix, where cascade's advantage only grows.  Unbenched
+    combinations default to cascade-on.
     """
     ov = override()
     if ov is not None:
@@ -106,11 +112,11 @@ def decision_for(shared_len: int, num_tokens: int) -> bool:
         return True
     bucket = None
     for pb in _prefix_buckets:
-        if pb <= shared_len:
+        if pb >= shared_len:
             bucket = pb
-        else:
             break
     if bucket is None:
+        # above the largest benched prefix: cascade keeps winning there
         return True
     return _decisions.get((num_tokens, bucket), True)
 
