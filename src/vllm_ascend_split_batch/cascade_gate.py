@@ -196,10 +196,16 @@ def _bench_cell(
         return out
 
     # ---- full path (MUST run before any stage-1 call: W0 hazard #1) ----
+    # Per-request DISJOINT blocks — block reuse in TND probes is an aicore
+    # fault risk at ANY kv magnitude (W0 hazards #2/#3), and a faulting probe
+    # kills the engine (uncatchable), so the bench must be fault-free by
+    # construction.
+    bt_full = torch.stack([
+        torch.arange(nblk_total, dtype=torch.int32, device=device)
+        + r * nblk_total for r in range(num_tokens)])
     ws_full = torch_npu._npu_fused_infer_attention_score_v2_get_max_workspace(
         query=q, key=k_pool, value=v_pool,
-        block_table=torch.zeros(num_tokens, nblk_total, dtype=torch.int32,
-                                device=device),
+        block_table=bt_full,
         input_layout="TND", block_size=block_size,
         actual_seq_qlen=qlen_cum,
         actual_seq_kvlen=cumsum([total] * num_tokens),
@@ -211,8 +217,7 @@ def _bench_cell(
     def full_call():
         torch_npu.npu_fused_infer_attention_score_v2.out(
             query=q, key=k_pool, value=v_pool,
-            block_table=torch.arange(nblk_total, dtype=torch.int32,
-                                     device=device).repeat(num_tokens, 1),
+            block_table=bt_full,
             input_layout="TND", block_size=block_size,
             actual_seq_qlen=qlen_cum,
             actual_seq_kvlen=cumsum([total] * num_tokens),
@@ -318,7 +323,12 @@ def bench_all(runner, batch_descriptors, block_size: int) -> float:
                 t_cas, t_full = _bench_cell(
                     num_tokens, shared, num_heads, num_kv_heads, head_size,
                     scale, block_size, device)
-            except MemoryError as exc:
+            except Exception as exc:  # noqa: BLE001
+                # Recoverable op errors (tiling rejection, OOM) skip the cell
+                # -> default on.  A device fault is NOT recoverable and will
+                # take the engine down either way; the probe forms above are
+                # the W0-validated fault-free combination (disjoint blocks,
+                # full-path probes before the first stage-1 call).
                 logger.info(
                     "cascade gate: skip (N=%s, P=%s): %s -> default on",
                     num_tokens, shared, exc)
