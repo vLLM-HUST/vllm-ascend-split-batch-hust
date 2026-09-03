@@ -87,6 +87,31 @@ def _patch_determine_batch_execution() -> None:
         num_encoder_reqs=0,
     ):
         global _step_cascade, _step_update_done
+        # Mirror the official vllm core gate: cascade attention is disabled
+        # under ANY microbatching (enable_dbo OR ubatch_size > 1).  The asc
+        # runner only checks enable_dbo in its own execute_model guard, so
+        # without this the two-stage path would still be engaged while the
+        # batch is split by UBatchWrapper (known loss at BS>=threshold).
+        use_ubatching = bool(
+            getattr(self.vllm_config.parallel_config, "use_ubatching", False)
+        )
+        if use_cascade_attn and use_ubatching:
+            _step_cascade = False
+            _step_update_done = False
+            return orig(
+                self,
+                num_tokens,
+                num_reqs,
+                num_scheduled_tokens_np,
+                max_num_scheduled_tokens,
+                False,
+                allow_microbatching=allow_microbatching,
+                force_eager=force_eager,
+                force_uniform_decode=force_uniform_decode,
+                force_has_lora=force_has_lora,
+                force_num_active_loras=force_num_active_loras,
+                num_encoder_reqs=num_encoder_reqs,
+            )
         _step_cascade = bool(use_cascade_attn)
         _step_update_done = False
         # The official dispatch disables FULL for cascade steps; the Ascend
@@ -140,6 +165,9 @@ def _patch_capture_scheduling() -> None:
             or cudagraph_runtime_mode != CUDAGraphMode.FULL
             or getattr(self, "use_sparse", False)
             or getattr(self, "use_compress", False)
+            or bool(
+                getattr(self.vllm_config.parallel_config, "use_ubatching", False)
+            )
         ):
             return
         from vllm_ascend_split_batch import cascade_graph_plugin as gp
