@@ -763,9 +763,10 @@ def install(attn_mod, builder_cls, impl_cls):
         ):
             from vllm_ascend.compilation.acl_graph import get_graph_params
 
+            from vllm_ascend_split_batch import cascade_runner_patch as rp
             from vllm_ascend_split_batch.cascade_runner_patch import _step_is_cascade
 
-            if _step_is_cascade():
+            if _step_is_cascade() and not rp._step_update_done:
                 graph_params = get_graph_params()
                 cascade_key = ("cascade", num_tokens)
                 if graph_params is not None and graph_params.attn_params.get(

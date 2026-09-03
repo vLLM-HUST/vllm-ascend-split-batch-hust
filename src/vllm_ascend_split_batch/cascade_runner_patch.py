@@ -53,6 +53,10 @@ _lock = threading.Lock()
 # update_graph_params (replay re-parameterization).  Cleared on every call,
 # including the warmup/capture dummy runs.
 _step_cascade = False
+# Set by the pre-model update in _patch_update_order; consumed (and cleared)
+# by the update wrapper so the official post-model update call short-circuits
+# instead of re-running the cascade re-parameterization on the same metadata.
+_step_update_done = False
 
 
 def _step_is_cascade() -> bool:
@@ -82,8 +86,9 @@ def _patch_determine_batch_execution() -> None:
         force_num_active_loras=None,
         num_encoder_reqs=0,
     ):
-        global _step_cascade
+        global _step_cascade, _step_update_done
         _step_cascade = bool(use_cascade_attn)
+        _step_update_done = False
         # The official dispatch disables FULL for cascade steps; the Ascend
         # backend re-parameterizes the cascade task groups per replay, so
         # FULL remains valid.  Re-dispatch with the flag off keeps every
@@ -213,11 +218,18 @@ def _patch_update_order() -> None:
     ):
         from vllm.forward_context import get_forward_context
 
+        global _step_update_done
         if _step_is_cascade():
             forward_context = get_forward_context()
             self._update_full_graph_params_if_needed(
                 forward_context, num_tokens_padded, positions
             )
+            # The official _model_forward calls the update again AFTER
+            # run_model(); that second pass would re-run the cascade
+            # re-parameterization on the SAME step metadata (pure host/NPU
+            # overhead).  Mark the step as updated so the post-call
+            # short-circuits (the flag is per-step, re-armed above).
+            _step_update_done = True
         return orig(
             self,
             num_tokens_padded,
