@@ -676,6 +676,32 @@ def _wrap_aclgraph_wrapper(ACLGraphWrapper) -> None:
             # standard graph).  Cascade replay: select the cascade table so
             # descriptor equality resolves to the twin graph.
             _wrap_aclgraph_entries(self)
+            if cascade_replay:
+                from vllm.forward_context import get_forward_context
+
+                descriptor = get_forward_context().batch_descriptor
+                if descriptor not in self._cascade_aclgraph_entries:
+                    # Twin graph missing for this step's descriptor (step
+                    # shape never captured as a cascade twin — e.g. mixed or
+                    # off-bucket steps that still carry the cascade flag).
+                    # Fail open to the STANDARD graph: the update pass routes
+                    # this step through the standard re-parameterization when
+                    # the ("cascade", num_tokens) key is empty, so the
+                    # standard graph replays with correct step parameters.
+                    # This restores the documented fail-open contract; the
+                    # previous behavior swapped unconditionally and hit the
+                    # capture validator mid-serving ("capturing at an
+                    # inappropriate time" aborts).
+                    gp._trace(
+                        "wrapper: twin miss desc=%s -> standard graph",
+                        descriptor,
+                    )
+                    gp._warn_once(
+                        "cascade twin missing for descriptor %s; step "
+                        "replays the standard full-KV graph",
+                        descriptor,
+                    )
+                    return orig_call(self, *args, **kwargs)
             orig_entries = self.concrete_aclgraph_entries
             self.concrete_aclgraph_entries = self._cascade_aclgraph_entries
             try:
