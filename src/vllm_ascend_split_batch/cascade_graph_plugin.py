@@ -436,6 +436,48 @@ def _full_graph_fia_cascade(
 
 # ----------------------------------------------------------- replay update
 
+# Stage-1 stable re-bind skip (VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE, default
+# on).  During steady decode the stage-1 task group's dynamic inputs -- shared
+# prefix length, uniform batch size, and the shared-prefix block ids (row 0 of
+# the block table, append-only by scheduler invariant) -- do not change from
+# one cascade step to the next.  The re-bind however is a REAL FIA execution
+# on the update stream (kv = full shared prefix per layer per step), so
+# re-binding identical inputs every step duplicates the most expensive
+# attention half of the update pass.  When the signature below matches the
+# previous cascade step's, the stage-1 re-bind is skipped; the in-graph event
+# is still recorded (the replay waits on it).  Stage-2 is always re-bound:
+# suffix lengths and the private block table grow every step.
+_stage1_stable = {"captured": None, "sig": None}
+
+
+def invalidate_stage1_cache() -> None:
+    """Drop the stage-1 stability cache (call after (re-)capture).
+
+    Freshly captured task groups are bound to capture-time DUMMY parameters,
+    so any previously cached signature is stale by construction.
+    """
+    _stage1_stable["captured"] = None
+    _stage1_stable["sig"] = None
+
+
+def _stage1_signature(bt_shared, shared_len, num_tokens_i):
+    """Content signature of the stage-1 re-bind inputs (None -> cannot sign).
+
+    Covers every dynamic input of the stage-1 ``FIA v2`` re-bind: the shared
+    block-id row (bytes), the shared prefix length, the uniform batch size and
+    the precision tier.  Any host-side failure (e.g. exotic dtype) returns
+    None, which keeps the old always-rebind behavior.
+    """
+    try:
+        return (
+            int(shared_len),
+            int(num_tokens_i),
+            envs_mod.VLLM_ASCEND_CASCADE_PRECISION,
+            bt_shared.detach().cpu().numpy().tobytes(),
+        )
+    except Exception:
+        return None
+
 
 def _update_cascade_graph_params(
     update_stream, forward_context, graph_params, num_tokens
@@ -518,6 +560,25 @@ def _update_cascade_graph_params(
     bt_shared = bt[:1, :sb].contiguous()
     bt_rest = bt[:, sb:].contiguous()
     q_lens_cs = metadata.actual_seq_lengths_q[:num_tokens_i]
+
+    if getattr(envs_mod, "VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE", True):
+        sig = _stage1_signature(bt_shared, shared_len, num_tokens_i)
+    else:
+        sig = None
+    prev_captured = _stage1_stable["captured"]
+    prev_sig = _stage1_stable["sig"]
+    stage1_stable = (
+        sig is not None and prev_captured is captured and prev_sig == sig
+    )
+    if sig is not None:
+        _stage1_stable["captured"] = captured
+        _stage1_stable["sig"] = sig
+    if stage1_stable:
+        _trace(
+            "stage1 re-bind skipped: stable sig shared=%s tokens=%s",
+            shared_len,
+            num_tokens_i,
+        )
     workspaces = graph_params.workspaces.get(cascade_key)
     ws_stage1, ws_stage2 = (
         workspaces if isinstance(workspaces, tuple) else (workspaces, workspaces)
@@ -531,24 +592,30 @@ def _update_cascade_graph_params(
             o1_i, l1_i = param[5], param[6]
             o2_i, l2_i = param[7], param[8]
 
-            torch.npu.graph_task_update_begin(update_stream, handles[2 * i])
-            torch_npu.npu_fused_infer_attention_score_v2.out(
-                query=query_i,
-                key=key_i,
-                value=value_i,
-                block_table=bt_shared,
-                block_size=block_size,
-                actual_seq_qlen=[num_tokens_i],
-                actual_seq_kvlen=[shared_len],
-                num_query_heads=num_heads,
-                num_key_value_heads=num_kv_heads,
-                input_layout="TND",
-                softmax_scale=scale,
-                return_softmax_lse=True,
-                workspace=ws_stage1,
-                out=[o1_i, l1_i],
-            )
-            torch.npu.graph_task_update_end(update_stream)
+            if not stage1_stable:
+                torch.npu.graph_task_update_begin(
+                    update_stream, handles[2 * i]
+                )
+                torch_npu.npu_fused_infer_attention_score_v2.out(
+                    query=query_i,
+                    key=key_i,
+                    value=value_i,
+                    block_table=bt_shared,
+                    block_size=block_size,
+                    actual_seq_qlen=[num_tokens_i],
+                    actual_seq_kvlen=[shared_len],
+                    num_query_heads=num_heads,
+                    num_key_value_heads=num_kv_heads,
+                    input_layout="TND",
+                    softmax_scale=scale,
+                    return_softmax_lse=True,
+                    workspace=ws_stage1,
+                    out=[o1_i, l1_i],
+                )
+                torch.npu.graph_task_update_end(update_stream)
+            # The captured graph waits on this event before the stage-1
+            # task group, so it must be recorded on every replay even when
+            # the re-bind itself is skipped as step-invariant.
             events[2 * i].record(update_stream)
 
             torch.npu.graph_task_update_begin(update_stream, handles[2 * i + 1])

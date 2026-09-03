@@ -18,6 +18,8 @@ this host.  The tests exercise gate and bookkeeping logic through small
 stand-in objects; the NPU kernels themselves are never invoked here.
 """
 
+import types
+
 import pytest
 
 cascade_plugin = pytest.importorskip(
@@ -242,3 +244,175 @@ def test_env_module_fork_safety(monkeypatch) -> None:
         envs_mod.env_variables.clear()
         envs_mod.env_variables.update(snapshot)
         os.environ.pop("VLLM_ASCEND_CASCADE_MIN_PREFIX", None)
+
+
+# ------------------------------------------------------- stage-1 stable skip
+
+
+def _stage1_update_env(monkeypatch):
+    _reset_env(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_GRAPH", "1")
+    from vllm_ascend_split_batch import cascade_graph_plugin as gp
+
+    gp.invalidate_stage1_cache()
+    return gp
+
+
+class _FakeEvent:
+    def __init__(self, log):
+        self._log = log
+
+    def record(self, stream):
+        self._log.append("record")
+
+
+def _fake_graph_params(block_tables, seq_lens, shared_len):
+    """One-layer stand-in for the graph-pool param tables."""
+    log = []
+    entry = (
+        "cascade",          # 0 kind
+        "q", "k", "v",      # 1-3 tensors (opaque)
+        "out",              # 4
+        "o1", "l1",         # 5-6 stage-1 outs
+        "o2", "l2",         # 7-8 stage-2 outs
+        128,                # 9 block_size
+        1,                  # 10 num_kv_heads
+        8,                  # 11 num_heads
+        0.1,                # 12 scale
+        64,                 # 13 num_tokens_cap
+        "L0",               # 14 layer_name
+    )
+
+    class GP:
+        attn_params = {("cascade", 64): [entry]}
+        handles = {("cascade", 64): [object(), object()]}
+        events = {
+            ("cascade", 64): [_FakeEvent(log), _FakeEvent(log)]
+        }
+        workspaces = {("cascade", 64): ("ws1", "ws2")}
+
+    meta = types.SimpleNamespace(
+        cascade_shared_len=shared_len,
+        actual_seq_lengths_q=list(range(1, len(seq_lens) + 1)),
+        seq_lens_list=seq_lens,
+        block_tables=block_tables,
+    )
+    fwd_ctx = types.SimpleNamespace(attn_metadata={"L0": meta})
+    return GP(), fwd_ctx, log
+
+
+@pytest.fixture()
+def _patch_npu_graph_apis(monkeypatch):
+    """Neutralize the NPU-side graph task update APIs for CPU tests."""
+    import contextlib
+
+    import torch
+
+    calls = {"stage1": 0, "stage2": 0}
+
+    def fake_out(**kwargs):
+        calls["stage1" if kwargs.get("workspace") == "ws1" else "stage2"] += 1
+
+    fake_fia = types.SimpleNamespace(out=fake_out)
+    monkeypatch.setattr(
+        "torch_npu.npu_fused_infer_attention_score_v2", fake_fia, raising=False
+    )
+    monkeypatch.setattr(
+        "vllm_ascend_split_batch.cascade_graph_plugin.torch_npu",
+        types.SimpleNamespace(npu_fused_infer_attention_score_v2=fake_fia),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        torch.npu, "stream", lambda s: contextlib.nullcontext(), raising=False
+    )
+    monkeypatch.setattr(
+        torch.npu, "graph_task_update_begin", lambda *a, **k: None, raising=False
+    )
+    monkeypatch.setattr(
+        torch.npu, "graph_task_update_end", lambda *a, **k: None, raising=False
+    )
+    return calls
+
+
+def test_skip_stable_env_is_injected_and_defaults_on(monkeypatch) -> None:
+    _gate(monkeypatch)
+    from vllm_ascend import envs as envs_mod
+
+    assert "VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE" in envs_mod.env_variables
+    assert envs_mod.VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE is True
+    monkeypatch.setenv("VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE", "0")
+    assert envs_mod.VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE is False
+
+
+def test_stage1_signature_tracks_all_dynamic_inputs(monkeypatch) -> None:
+    gp = _stage1_update_env(monkeypatch)
+    import torch
+
+    bt = torch.zeros((4, 8), dtype=torch.int32)
+    sig = gp._stage1_signature(bt[:1, :2].contiguous(), 256, 4)
+    assert sig is not None
+    # Same content -> equal signature.
+    assert gp._stage1_signature(bt[:1, :2].contiguous(), 256, 4) == sig
+    # Any dynamic input change must change the signature.
+    bt2 = bt.clone()
+    bt2[0, 0] = 7
+    assert gp._stage1_signature(bt2[:1, :2].contiguous(), 256, 4) != sig
+    assert gp._stage1_signature(bt[:1, :3].contiguous(), 256, 4) != sig
+    assert gp._stage1_signature(bt[:1, :2].contiguous(), 384, 4) != sig
+    assert gp._stage1_signature(bt[:1, :2].contiguous(), 256, 8) != sig
+
+
+def test_update_skips_stage1_rebind_when_stable(
+    monkeypatch, _patch_npu_graph_apis
+) -> None:
+    import torch
+
+    gp = _stage1_update_env(monkeypatch)
+    calls = _patch_npu_graph_apis
+    bt = torch.zeros((4, 8), dtype=torch.int32)
+    graph_params, fwd_ctx, log = _fake_graph_params(
+        bt, [300, 260, 260, 260], 256
+    )
+
+    # Step 1: cold cache -> full re-bind (1 stage-1 + 1 stage-2 per layer),
+    # both in-graph events recorded.
+    gp._update_cascade_graph_params(None, fwd_ctx, graph_params, 64)
+    assert calls == {"stage1": 1, "stage2": 1}
+    assert log.count("record") == 2
+
+    # Step 2: identical shared region -> stage-1 re-bind skipped, stage-2
+    # still re-bound, events still recorded (replay waits on them).
+    gp._update_cascade_graph_params(None, fwd_ctx, graph_params, 64)
+    assert calls == {"stage1": 1, "stage2": 2}
+    assert log.count("record") == 4
+
+    # Step 3: shared-prefix block ids changed -> full re-bind again.
+    bt[0, 0] = 42
+    gp._update_cascade_graph_params(None, fwd_ctx, graph_params, 64)
+    assert calls == {"stage1": 2, "stage2": 3}
+
+    # invalidate_stage1_cache (post-capture) forces a re-bind.
+    bt[0, 0] = 0
+    gp.invalidate_stage1_cache()
+    gp._update_cascade_graph_params(None, fwd_ctx, graph_params, 64)
+    assert calls == {"stage1": 3, "stage2": 4}
+
+
+def test_update_never_skips_when_knob_off(
+    monkeypatch, _patch_npu_graph_apis
+) -> None:
+    import torch
+
+    gp = _stage1_update_env(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE", "0")
+    calls = _patch_npu_graph_apis
+    bt = torch.zeros((4, 8), dtype=torch.int32)
+    graph_params, fwd_ctx, log = _fake_graph_params(
+        bt, [300, 260, 260, 260], 256
+    )
+
+    gp._update_cascade_graph_params(None, fwd_ctx, graph_params, 64)
+    gp._update_cascade_graph_params(None, fwd_ctx, graph_params, 64)
+    assert calls == {"stage1": 2, "stage2": 2}
+    assert log.count("record") == 4

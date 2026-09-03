@@ -331,6 +331,9 @@ def _inject_env_vars():
             "VLLM_ASCEND_ENABLE_CASCADE_GRAPH": lambda: bool(
                 int(os.getenv("VLLM_ASCEND_ENABLE_CASCADE_GRAPH", "0"))
             ),
+            "VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE": lambda: bool(
+                int(os.getenv("VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE", "1"))
+            ),
         }
     )
 

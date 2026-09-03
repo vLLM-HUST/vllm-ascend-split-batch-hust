@@ -208,6 +208,10 @@ def _patch_capture_scheduling() -> None:
             finally:
                 gp._capture_ctx.active = False
                 gp._capture_ctx.shared_len = 0
+        # Freshly captured twin graphs are bound to DUMMY capture-time
+        # parameters; any stage-1 stability signature cached from a previous
+        # serving step is stale by construction.
+        gp.invalidate_stage1_cache()
 
     NPUModelRunner._capture_cudagraphs = _capture_cudagraphs
     NPUModelRunner._cascade_graph_capture_patched = True
