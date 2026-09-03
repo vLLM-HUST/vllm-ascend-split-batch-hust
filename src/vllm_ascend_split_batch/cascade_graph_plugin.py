@@ -659,6 +659,7 @@ def _wrap_aclgraph_wrapper(ACLGraphWrapper) -> None:
     orig_call = ACLGraphWrapper.__call__
 
     def __call__(self, *args, **kwargs):
+        from vllm_ascend_split_batch import cascade_gate as gp_gate
         from vllm_ascend_split_batch import cascade_graph_plugin as gp
 
         if not getattr(envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", False):
@@ -679,7 +680,8 @@ def _wrap_aclgraph_wrapper(ACLGraphWrapper) -> None:
             if cascade_replay:
                 from vllm.forward_context import get_forward_context
 
-                descriptor = get_forward_context().batch_descriptor
+                forward_context = get_forward_context()
+                descriptor = forward_context.batch_descriptor
                 if descriptor not in self._cascade_aclgraph_entries:
                     # Twin graph missing for this step's descriptor (step
                     # shape never captured as a cascade twin — e.g. mixed or
@@ -700,6 +702,20 @@ def _wrap_aclgraph_wrapper(ACLGraphWrapper) -> None:
                         "cascade twin missing for descriptor %s; step "
                         "replays the standard full-KV graph",
                         descriptor,
+                    )
+                    return orig_call(self, *args, **kwargs)
+                # W2 gate: bucket measured slower than the full path at this
+                # (batch, shared-prefix) cell -> replay the standard graph.
+                # Consistent with the update pass, which re-parameterizes the
+                # standard task groups for the same verdict.
+                if not gp_gate.decision_for(
+                    _context_shared_len(forward_context),
+                    getattr(descriptor, "num_tokens", 0),
+                ):
+                    gp._trace(
+                        "wrapper: gate off (shared=%s N=%s) -> standard graph",
+                        _context_shared_len(forward_context),
+                        getattr(descriptor, "num_tokens", 0),
                     )
                     return orig_call(self, *args, **kwargs)
             orig_entries = self.concrete_aclgraph_entries
@@ -742,6 +758,23 @@ def _wrap_aclgraph_entries(wrapper):
     wrapper._cascade_aclgraph_entries = {}
     wrapper._cascade_variants_ready = True
     return wrapper
+
+
+def _context_shared_len(forward_context) -> int:
+    """Shared prefix length of the current cascade step (0 if unavailable).
+
+    Mirrors the metadata lookup in _update_cascade_graph_params: layers share
+    one metadata instance, so the first positive cascade_shared_len wins.
+    """
+    try:
+        for metadata in (getattr(forward_context, "attn_metadata", None)
+                         or {}).values():
+            shared = getattr(metadata, "cascade_shared_len", 0)
+            if shared:
+                return int(shared)
+    except Exception:
+        pass
+    return 0
 
 
 def install(attn_mod, builder_cls, impl_cls):
@@ -856,6 +889,7 @@ def install(attn_mod, builder_cls, impl_cls):
         ):
             from vllm_ascend.compilation.acl_graph import get_graph_params
 
+            from vllm_ascend_split_batch import cascade_gate as gate
             from vllm_ascend_split_batch import cascade_runner_patch as rp
             from vllm_ascend_split_batch.cascade_runner_patch import _step_is_cascade
 
@@ -865,6 +899,27 @@ def install(attn_mod, builder_cls, impl_cls):
                 if graph_params is not None and graph_params.attn_params.get(
                     cascade_key
                 ):
+                    if not gate.decision_for(
+                        _context_shared_len(forward_context), num_tokens
+                    ):
+                        # W2 gate: bucket measured slower than the full path
+                        # -> re-parameterize the STANDARD task groups so the
+                        # standard graph (chosen by the wrapper for the same
+                        # verdict) replays with correct step parameters.
+                        _trace(
+                            "replay update: gate off num_tokens=%s shared=%s",
+                            num_tokens,
+                            _context_shared_len(forward_context),
+                        )
+                        return orig_update(
+                            update_stream,
+                            forward_context,
+                            num_tokens,
+                            vllm_config,
+                            speculative_config,
+                            num_dcp_pcp_tokens,
+                            draft_attn_metadatas,
+                        )
                     _trace("replay update: cascade key hit num_tokens=%s", num_tokens)
                     _update_cascade_graph_params(
                         update_stream, forward_context, graph_params, num_tokens

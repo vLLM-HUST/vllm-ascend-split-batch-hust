@@ -185,6 +185,19 @@ def _patch_capture_scheduling() -> None:
         )
         if dummy_prefix < blk:
             return
+        # --- W2 gate: micro-bench BEFORE the twin captures ----------------
+        # Ordering is load-bearing: the full-FIA probes must run before the
+        # process' first fa_fp32_stage1 call (W0 coexistence hazard: stage-1
+        # poisons subsequent >=8k eager FIA in the same process).
+        from vllm_ascend_split_batch import cascade_gate as gate
+
+        if gate.enabled() and gate.override() is None:
+            try:
+                gate.bench_all(self, batch_descriptors, blk)
+            except Exception:
+                logger.exception(
+                    "cascade gate bench failed; gate stays neutral "
+                    "(cascade-on everywhere)")
         for batch_desc in batch_descriptors:
             if not batch_desc.uniform:
                 continue
