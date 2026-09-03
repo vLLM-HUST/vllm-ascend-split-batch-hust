@@ -127,6 +127,17 @@ def _use_cascade_attention(
         return False
     if len(query_lens) < envs_mod.VLLM_ASCEND_CASCADE_MIN_REQS:
         return False
+    # W2 adaptive gate: when this (batch bucket, shared-prefix bucket) cell
+    # measured slower than the single full-KV call, keep the whole step on
+    # the standard path.  Dispatch-level gating keeps the wall identical to
+    # the non-cascade mode; the wrapper/update-level gate checks remain as
+    # the second line for steps whose metadata changes mid-flight.
+    from vllm_ascend_split_batch import cascade_gate as _gate
+
+    if _gate.enabled() and not _gate.decision_for(
+        int(common_prefix_len or 0), len(query_lens)
+    ):
+        return False
     global _cascade_warning_once
     if not _cascade_warning_once:
         logger.warning(
