@@ -193,16 +193,22 @@ def main() -> int:
                                 f"free {free / 2**30:.1f}GiB"}, fh)
         return 0
 
-    k_pool = (torch.randn(max_blocks, block_size, spec["num_kv_heads"],
-                          spec["head_size"], device="npu")
-              * 0.5).to(torch.bfloat16)
-    v_pool = (torch.randn(max_blocks, block_size, spec["num_kv_heads"],
-                          spec["head_size"], device="npu")
-              * 0.5).to(torch.bfloat16)
-    q = (torch.randn(max(buckets), spec["num_heads"], spec["head_size"],
-                     device="npu") * 0.5).to(torch.bfloat16)
-
     results = {}
+    try:
+        k_pool = (torch.randn(max_blocks, block_size, spec["num_kv_heads"],
+                              spec["head_size"], device="npu")
+                  * 0.5).to(torch.bfloat16)
+        v_pool = (torch.randn(max_blocks, block_size, spec["num_kv_heads"],
+                              spec["head_size"], device="npu")
+                  * 0.5).to(torch.bfloat16)
+        q = (torch.randn(max(buckets), spec["num_heads"], spec["head_size"],
+                         device="npu") * 0.5).to(torch.bfloat16)
+    except Exception as exc:
+        # The engine holds most of the HBM; probe-pool OOM -> gate neutral.
+        with open(out_path, "w") as fh:
+            json.dump({"error": f"probe pool allocation failed: {exc!r}"}, fh)
+        return 0
+
     try:
         # pass 1: full path everywhere (clean — no stage-1 yet)
         for num_tokens in buckets:
