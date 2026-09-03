@@ -93,6 +93,20 @@ def _use_cascade_attention(
         return False
     if not envs_mod.VLLM_ASCEND_ENABLE_CASCADE_DECODE:
         return False
+    # Mirror the official vllm core gate: cascade attention is disabled under
+    # ANY microbatching (enable_dbo OR ubatch_size > 1).  vllm-ascend's own
+    # execute_model guard only checks enable_dbo, so without this the eager
+    # two-stage path would still be engaged while UBatchWrapper splits the
+    # batch (the BS>=threshold loss observed in graph-mode testing).
+    try:
+        use_ubatching = bool(
+            getattr(getattr(self, "vllm_config", None), "parallel_config", None)
+            .use_ubatching
+        )
+    except AttributeError:
+        use_ubatching = False
+    if use_ubatching:
+        return False
     precision = envs_mod.VLLM_ASCEND_CASCADE_PRECISION
     if precision not in ("bf16", "fp32"):
         logger.error(
