@@ -66,31 +66,41 @@ def _time_fn(fn, iters=10, warmup=3, repeats=2) -> float:
     return best
 
 
-def _run_cell_full(spec, num_tokens, shared, k_pool, v_pool, q):
-    """Single full-KV FIA v2 probe (production .out + cached workspace)."""
+def _run_cell_full(spec, num_tokens, shared, k_pool4, v_pool4, q2d):
+    """Single full-KV FIA v2 probe, BNSD per-request form.
+
+    BNSD (not the production TND) because the eager TND paged form has
+    untracked aicore-fault corners on this CANN build (multiple engine kills
+    during bring-up, see W0 report sec.3); the BNSD paged form is the
+    W0-validated fault-free combination and times the same kernel family at
+    uniform kv.
+    """
     block_size = spec["block_size"]
     suffix = spec["suffix"]
     total = shared + suffix
     nblk_total = (total + block_size - 1) // block_size
-    qlen_cum = _cumsum(range(1, num_tokens + 1))
-    kvlen_cum = _cumsum([total] * num_tokens)
+    q = q2d[:num_tokens].unsqueeze(2)                      # [N,H,1,D]
+    k = k_pool4[:nblk_total * num_tokens].transpose(1, 2).contiguous()
+    v = v_pool4[:nblk_total * num_tokens].transpose(1, 2).contiguous()
     bt = torch.stack([
         torch.arange(nblk_total, dtype=torch.int32, device="npu")
         + r * nblk_total for r in range(num_tokens)])
     ws = torch_npu._npu_fused_infer_attention_score_v2_get_max_workspace(
-        query=q, key=k_pool, value=v_pool, block_table=bt,
-        input_layout="TND", block_size=block_size,
-        actual_seq_qlen=qlen_cum, actual_seq_kvlen=kvlen_cum,
+        query=q, key=k, value=v, block_table=bt,
+        input_layout="BNSD", block_size=block_size,
+        actual_seq_qlen=[1] * num_tokens,
+        actual_seq_kvlen=[total] * num_tokens,
         num_key_value_heads=spec["num_kv_heads"],
         softmax_scale=spec["scale"], num_query_heads=spec["num_heads"])
-    out = torch.empty(num_tokens, spec["num_heads"], spec["head_size"],
+    out = torch.empty(num_tokens, spec["num_heads"], 1, spec["head_size"],
                       dtype=torch.bfloat16, device="npu")
 
     def call():
         torch_npu.npu_fused_infer_attention_score_v2.out(
-            query=q, key=k_pool, value=v_pool, block_table=bt,
-            input_layout="TND", block_size=block_size,
-            actual_seq_qlen=qlen_cum, actual_seq_kvlen=kvlen_cum,
+            query=q, key=k, value=v, block_table=bt,
+            input_layout="BNSD", block_size=block_size,
+            actual_seq_qlen=[1] * num_tokens,
+            actual_seq_kvlen=[total] * num_tokens,
             num_key_value_heads=spec["num_kv_heads"],
             num_query_heads=spec["num_heads"], softmax_scale=spec["scale"],
             workspace=ws, out=(out, torch.empty(1, dtype=torch.bfloat16,
@@ -100,45 +110,51 @@ def _run_cell_full(spec, num_tokens, shared, k_pool, v_pool, q):
     return _time_fn(call)
 
 
-def _run_cell_cascade(spec, num_tokens, shared, k_pool, v_pool, q):
-    """Two-stage + merge probe (mirrors the twin's re-bind forms)."""
+def _run_cell_cascade(spec, num_tokens, shared, k_pool4, v_pool4, q2d):
+    """Two-stage + merge probe.
+
+    stage-1: flattened T=N over the SHARED prefix rows [0, sb1) (the pool is
+    laid out so shared rows come first, matching bt_shared = bt[:1,:sb]).
+    stage-2: BNSD per-request form (W0-validated fault-free).
+    """
     block_size = spec["block_size"]
     suffix = spec["suffix"]
     sb1 = shared // block_size
     suffix_blocks = (suffix + block_size - 1) // block_size
-    qlen_cum = _cumsum(range(1, num_tokens + 1))
     suf_lens = [suffix] * num_tokens
     bt_s1 = torch.arange(sb1, dtype=torch.int32, device="npu").unsqueeze(0)
     bt_suf = torch.stack([
         torch.arange(suffix_blocks, dtype=torch.int32, device="npu")
         + r * suffix_blocks for r in range(num_tokens)])
     suf_off = sb1 * num_tokens
-    k_suf = k_pool[suf_off:suf_off + suffix_blocks * num_tokens]
-    v_suf = v_pool[suf_off:suf_off + suffix_blocks * num_tokens]
-    o2 = torch.empty(num_tokens, spec["num_heads"], spec["head_size"],
+    q = q2d[:num_tokens]
+    q3d = q.unsqueeze(2)
+    k_suf = k_pool4[suf_off:suf_off + suffix_blocks * num_tokens] \
+        .transpose(1, 2).contiguous()
+    v_suf = v_pool4[suf_off:suf_off + suffix_blocks * num_tokens] \
+        .transpose(1, 2).contiguous()
+    o2 = torch.empty(num_tokens, spec["num_heads"], 1, spec["head_size"],
                      dtype=torch.bfloat16, device="npu")
     ws_s2 = torch_npu._npu_fused_infer_attention_score_v2_get_max_workspace(
-        query=q, key=k_suf, value=v_suf, block_table=bt_suf,
-        input_layout="TND", block_size=block_size,
-        actual_seq_qlen=qlen_cum, actual_seq_kvlen=_cumsum(suf_lens),
+        query=q3d, key=k_suf, value=v_suf, block_table=bt_suf,
+        input_layout="BNSD", block_size=block_size,
+        actual_seq_qlen=[1] * num_tokens, actual_seq_kvlen=suf_lens,
         num_key_value_heads=spec["num_kv_heads"],
         softmax_scale=spec["scale"], num_query_heads=spec["num_heads"])
 
     def call():
         s1_out, s1_lse = torch.ops.npu.fa_fp32_stage1(
             q,
-            k_pool[:sb1].view(sb1, block_size, spec["num_kv_heads"],
-                              spec["head_size"]),
-            v_pool[:sb1].view(sb1, block_size, spec["num_kv_heads"],
-                              spec["head_size"]),
+            k_pool4[:sb1],
+            v_pool4[:sb1],
             bt_s1,
             torch.tensor([num_tokens], dtype=torch.int64, device="npu"),
             torch.tensor([shared], dtype=torch.int64, device="npu"),
             num_tokens)
         torch_npu.npu_fused_infer_attention_score_v2.out(
-            query=q, key=k_suf, value=v_suf, block_table=bt_suf,
-            input_layout="TND", block_size=block_size,
-            actual_seq_qlen=qlen_cum, actual_seq_kvlen=_cumsum(suf_lens),
+            query=q3d, key=k_suf, value=v_suf, block_table=bt_suf,
+            input_layout="BNSD", block_size=block_size,
+            actual_seq_qlen=[1] * num_tokens, actual_seq_kvlen=suf_lens,
             num_key_value_heads=spec["num_kv_heads"],
             num_query_heads=spec["num_heads"], softmax_scale=spec["scale"],
             workspace=ws_s2, out=(o2, torch.empty(1, dtype=torch.bfloat16,
@@ -183,8 +199,6 @@ def main() -> int:
     v_pool = (torch.randn(max_blocks, block_size, spec["num_kv_heads"],
                           spec["head_size"], device="npu")
               * 0.5).to(torch.bfloat16)
-    k_pool = k_pool.reshape(max_blocks, block_size, -1).contiguous()
-    v_pool = v_pool.reshape(max_blocks, block_size, -1).contiguous()
     q = (torch.randn(max(buckets), spec["num_heads"], spec["head_size"],
                      device="npu") * 0.5).to(torch.bfloat16)
 
