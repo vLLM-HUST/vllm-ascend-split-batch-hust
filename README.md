@@ -32,14 +32,23 @@ Environment gates (all default off):
 | `VLLM_ASCEND_CASCADE_MIN_REQS` (32) | min batch size to trigger |
 | `VLLM_ASCEND_CASCADE_PRECISION` | `bf16` (Tier-0, default) or `fp32` (Tier-1, eager-only) |
 | `VLLM_ASCEND_CASCADE_STRICT=1` | force the standard full-KV path (bit-exact reference) |
+| `VLLM_ASCEND_CASCADE_TRACE=1` | per-step plugin trace to stdout |
+| `VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE` (1) | skip the stage-1 graph re-bind when its inputs are step-invariant (0 restores always-rebind) |
 
 With every gate unset the patched methods are no-ops and the serving path is
 bit-identical to stock vllm-ascend.
+
+Microbatching: the plugin mirrors the official vllm core gate and keeps the
+two-stage path off under ANY microbatching (`use_ubatching`, i.e. DBO or
+`ubatch_size > 1`).  On the current vllm-ascend the platform layer resets both
+`enable_dbo` and `ubatch_size`, so this gate is dormant there by construction.
 
 Verified evidence (Qwen2.5-Coder-14B-Instruct, 910B2, CANN 9.0.1):
 
 - eager off/on/on_fp32 token-identical; graph off/on/on_fp32 token-identical;
 - C3-shaped run (B=64, shared ~4.1k tokens, gen128): 0/64 divergent arms;
+- graph cascade at that shape: `VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE` on/off
+  token-identical (64/64), wall 8.51s vs 9.38s (off baseline 6.49s);
 - no fail-open events during the verified runs;
 - `pytest -q` + `ruff check .` green.
 
