@@ -195,44 +195,36 @@ def main() -> int:
 
     results = {}
     try:
-        k_pool = (torch.randn(max_blocks, block_size, spec["num_kv_heads"],
-                              spec["head_size"], device="npu")
-                  * 0.5).to(torch.bfloat16)
-        v_pool = (torch.randn(max_blocks, block_size, spec["num_kv_heads"],
-                              spec["head_size"], device="npu")
-                  * 0.5).to(torch.bfloat16)
         q = (torch.randn(max(buckets), spec["num_heads"], spec["head_size"],
                          device="npu") * 0.5).to(torch.bfloat16)
     except Exception as exc:
-        # The engine holds most of the HBM; probe-pool OOM -> gate neutral.
         with open(out_path, "w") as fh:
-            json.dump({"error": f"probe pool allocation failed: {exc!r}"}, fh)
+            json.dump({"error": f"q allocation failed: {exc!r}"}, fh)
         return 0
 
-    try:
-        # pass 1: full path everywhere (clean — no stage-1 yet)
-        for num_tokens in buckets:
-            for shared in grid:
-                key = f"{num_tokens}:{shared}"
+    # Per-cell pools: next to a serving engine only a few GiB are free, so
+    # allocate per cell and skip cells that do not fit (they default to
+    # cascade-on).  Within a cell the full probe runs before the cascade
+    # probe (whose stage-1 is the process' first custom-op call); the probes
+    # are BNSD throughout — the validated fault-free form.
+    for num_tokens in buckets:
+        for shared in grid:
+            key = f"{num_tokens}:{shared}"
+            try:
                 nblk_total = (shared + suffix + block_size - 1) // block_size
-                k_view = k_pool[:nblk_total * num_tokens]
-                v_view = v_pool[:nblk_total * num_tokens]
-                q_view = q[:num_tokens]
-                results[key] = {
-                    "full": _run_cell_full(spec, num_tokens, shared,
-                                           k_view, v_view, q_view)}
-        # pass 2: cascade path (stage-1 from here on — small eager FIA only)
-        for num_tokens in buckets:
-            for shared in grid:
-                key = f"{num_tokens}:{shared}"
-                nblk_total = (shared + suffix + block_size - 1) // block_size
-                k_view = k_pool[:nblk_total * num_tokens]
-                v_view = v_pool[:nblk_total * num_tokens]
-                q_view = q[:num_tokens]
-                results[key]["cascade"] = _run_cell_cascade(
-                    spec, num_tokens, shared, k_view, v_view, q_view)
-    except Exception as exc:  # recoverable probe error: report and stop
-        results["error"] = repr(exc)
+                k4 = (torch.randn(nblk_total * num_tokens, block_size,
+                                  spec["num_kv_heads"], spec["head_size"],
+                                  device="npu") * 0.5).to(torch.bfloat16)
+                v4 = (torch.randn(nblk_total * num_tokens, block_size,
+                                  spec["num_kv_heads"], spec["head_size"],
+                                  device="npu") * 0.5).to(torch.bfloat16)
+                t_full = _run_cell_full(spec, num_tokens, shared, k4, v4, q)
+                t_cas = _run_cell_cascade(spec, num_tokens, shared, k4, v4, q)
+                results[key] = {"full": t_full, "cascade": t_cas}
+                del k4, v4
+            except Exception as exc:  # noqa: BLE001
+                results[key] = {"error": repr(exc)}
+            torch.npu.empty_cache()
 
     with open(out_path, "w") as fh:
         json.dump(results, fh)
