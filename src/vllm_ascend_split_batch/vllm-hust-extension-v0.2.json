@@ -92,8 +92,8 @@
   "activation": {
     "entry_points": [],
     "environment": {
-      "VLLM_ASCEND_ENABLE_CASCADE_DECODE": "0 (default) | 1",
-      "VLLM_ASCEND_ENABLE_CASCADE_GRAPH": "0 (default) | 1"
+      "VLLM_ASCEND_ENABLE_CASCADE_DECODE": "1",
+      "VLLM_ASCEND_ENABLE_CASCADE_GRAPH": "1"
     },
     "additional_config": {}
   }
