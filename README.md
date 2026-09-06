@@ -71,3 +71,25 @@ python -m pip install -e ".[test]"
 vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
 pytest -q && ruff check .
 ```
+
+## Kernel wheel dependency (Tier-1 fp32 path)
+
+The fp32 cascade tier requires the `ascend_kernel` CCE op wheel
+(`fa_fp32_stage1` / `lse_merge`); when the wheel is absent the plugin fails
+open to the bf16 tier (`_HAS_FA_FP32_STAGE1_OP` probe). Validated pairing:
+
+| plugin | kernel wheel | torch_npu | CANN |
+|---|---|---|---|
+| `0.1.0.dev0` | `ascend-kernel==2026.3.9` | `2.10.0.post2` | `9.0.1` |
+
+The wheel is built in the kernel repo (`cascade-merge-op`, git), not
+published to PyPI:
+
+```bash
+pip install ".[kernels]" --find-links /vllm-workspace/cascade-merge-op/ascend-kernel/output
+python -c "import ascend_kernel, torch; assert hasattr(torch.ops.npu, 'fa_fp32_stage1')"
+```
+
+Compat tuple & red lines for the kernel side live in the kernel repo README
+§4-§5. After bumping the kernel wheel: reinstall, then rerun the plugin
+smoke (see [docs/release.md](docs/release.md) §2).
