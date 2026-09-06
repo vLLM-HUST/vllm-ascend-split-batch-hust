@@ -54,8 +54,8 @@ NPU 层验证顺序:先小规模冒烟(单卡 `npu:0`),再场景化;正确性(to
 - commit 原子:一个逻辑变更一个 commit,不混格式化与功能修改。
 - message 用 conventional 风格(仓库现状):`feat(cascade): ...`、
   `fix(cascade gate): ...`、`docs: ...`、`test: ...`。
-- 本机 github.com 直连不通:clone/pip 走 `https://gh-proxy.com/` 前缀;
-  **push 前把 remote 切回真实地址**(或改用 SSH),push 完不需要切回。
+- clone/push 统一走 **SSH over 443**(一次配置永久生效):流程见工作区
+  `/vllm-workspace/docs/git-remote-and-network.md`;gh-proxy 前缀仅留给 pip git 依赖。
 
 ## 6. 文档更新义务
 
