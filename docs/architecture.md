@@ -7,6 +7,17 @@ cascade 两段式 decode(调度 + 图模式)能力,并承载 split-batch 规划�
 提案描述符。算子实现在仓库外的 `ascend_kernel` wheel 里,本壳只做适配、
 门控与调度决策。
 
+## 1.1 仓库命名约定(团队沟通用语)
+
+| 简称 | 仓库 | 远端 |
+|---|---|---|
+| **插件库**(本仓库) | `vllm-ascend-split-batch-hust`,唯一对外交付面 | `vLLM-HUST/vllm-ascend-split-batch-hust` |
+| **算子库** | `cascade-merge-op`(ascend-kernel 工程 + S1 锚点数据,wheel 工厂) | `Raing5Days/vllm-hust-cascade-kernel` |
+
+**插件库 ⊃ 算子库**(逻辑包含):本库经 `kernels` extra 钉版消费算子库
+wheel,单向依赖;算子库对 vllm-hust-ext 与插件机制零感知。日常工作流见
+算子库 `docs/workflow.md` Loop B。
+
 ## 2. 三层关系
 
 ```text
