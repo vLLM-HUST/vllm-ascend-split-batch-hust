@@ -17,6 +17,13 @@ activation is considered.
 
 See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
 
+## Documentation
+
+Normative knowledge (architecture & contracts, coding rules for humans and
+agents, release process, pitfall history, progress log) lives in
+[docs/](docs/README.md) — start there. Repo-level agent rules:
+[AGENTS.md](AGENTS.md).
+
 ## Cascade attention plugin (default-off)
 
 Entry point: `vllm.general_plugins` ->
