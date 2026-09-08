@@ -63,6 +63,23 @@ def _step_is_cascade() -> bool:
     return _step_cascade
 
 
+def _cascade_wheel_ready() -> bool:
+    """True when the ascend_kernel wheel is importable and registered.
+
+    The W2 gate bench probes and the twin captures both exercise the
+    kernel-wheel custom ops; when the wheel is missing or failed to register
+    the whole cascade feature is disabled (fail-open), so capture scheduling
+    must not bench or capture unusable cascade twins.  Logs the plugin's
+    once-per-process fail-open warning on the disabled path.
+    """
+    from vllm_ascend_split_batch import cascade_plugin
+
+    if cascade_plugin.kernel_wheel_available():
+        return True
+    cascade_plugin._warn_wheel_missing()
+    return False
+
+
 def _patch_determine_batch_execution() -> None:
     """Keep the FULL graph for cascade steps and record the step state."""
     from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
@@ -169,6 +186,8 @@ def _patch_capture_scheduling() -> None:
                 getattr(self.vllm_config.parallel_config, "use_ubatching", False)
             )
         ):
+            return
+        if not _cascade_wheel_ready():
             return
         from vllm_ascend_split_batch import cascade_graph_plugin as gp
 

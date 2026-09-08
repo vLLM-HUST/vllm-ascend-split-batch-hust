@@ -48,8 +48,72 @@ logger = logging.getLogger(__name__)
 # Filled by load().
 attn_mod = None
 _EXTRA_CTX = None
+# ascend_kernel wheel probe (set by load()).  A missing or defective wheel
+# disables the cascade feature AS A WHOLE (fail-open to the standard full-KV
+# path); it must never raise out of load() or break the host import chain.
+_KERNEL_WHEEL_OK = False
+_KERNEL_WHEEL_REASON = "load() not called yet"
 _HAS_LSE_MERGE_OP = False
 _HAS_FA_FP32_STAGE1_OP = False
+_wheel_warning_logged = False
+
+
+def _import_kernel_module():
+    """Import the kernel wheel (unit tests patch this to simulate absence)."""
+    return importlib.import_module("ascend_kernel")
+
+
+def _probe_kernel_wheel() -> tuple[bool, str]:
+    """Probe the kernel wheel: import success AND torch.ops registration.
+
+    Returns ``(ok, reason)`` and never raises.  The wheel registers
+    ``torch.ops.npu.fa_fp32_stage1`` / ``torch.ops.npu.lse_merge`` at import
+    time; every cascade call site is guarded on this probe (see
+    ``_use_cascade_attention`` and the graph runner patch).
+    """
+    try:
+        _import_kernel_module()
+    except Exception as exc:
+        return False, f"import failed ({exc!r})"
+    missing = [
+        op
+        for op in ("fa_fp32_stage1", "lse_merge")
+        if not hasattr(torch.ops.npu, op)
+    ]
+    if missing:
+        return False, "torch.ops.npu unregistered: " + ", ".join(missing)
+    return True, ""
+
+
+def kernel_wheel_available() -> bool:
+    """True when the kernel wheel is importable and both ops registered.
+
+    Public accessor for the graph-side runner patch; import the module, do
+    not touch the private flag from outside.
+    """
+    return _KERNEL_WHEEL_OK
+
+
+def _warn_wheel_missing() -> None:
+    """The single fail-open warning (logged once per process)."""
+    global _wheel_warning_logged
+    if _wheel_warning_logged:
+        return
+    logger.warning(
+        "ascend_kernel wheel unavailable (%s): the two-stage cascade decode "
+        "feature is disabled for this process (fail-open to the standard "
+        "full-KV path). Install the validated wheel, e.g. pip install "
+        "'vllm-ascend-split-batch[kernels]' --find-links "
+        "<kernel-repo>/ascend-kernel/output",
+        _KERNEL_WHEEL_REASON,
+    )
+    _wheel_warning_logged = True
+
+
+def _reset_fail_open_for_tests() -> None:
+    """Clear the once-only warning state (unit tests only)."""
+    global _wheel_warning_logged
+    _wheel_warning_logged = False
 _cascade_warning_once = False
 
 
@@ -93,6 +157,14 @@ def _use_cascade_attention(
         return False
     if not envs_mod.VLLM_ASCEND_ENABLE_CASCADE_DECODE:
         return False
+    # Whole-feature fail-open: without the kernel wheel (fa_fp32_stage1 /
+    # lse_merge registered on torch.ops.npu) the two-stage path runs nowhere
+    # -- neither the Tier-1 fp32 stage nor the Tier-0 bf16 tier.  The
+    # default-off gate above is untouched: with the env unset this method
+    # returned False before reaching this check.
+    if not _KERNEL_WHEEL_OK:
+        _warn_wheel_missing()
+        return False
     # Mirror the official vllm core gate: cascade attention is disabled under
     # ANY microbatching (enable_dbo OR ubatch_size > 1).  vllm-ascend's own
     # execute_model guard only checks enable_dbo, so without this the eager
@@ -115,12 +187,6 @@ def _use_cascade_attention(
             precision,
         )
         return False
-    if precision == "fp32" and not _HAS_FA_FP32_STAGE1_OP:
-        logger.warning(
-            "VLLM_ASCEND_CASCADE_PRECISION=fp32 requires the custom "
-            "fa_fp32_stage1 op (ascend_kernel wheel); falling back to the "
-            "Tier-0 bf16 two-stage path."
-        )
     if use_alibi or use_sliding_window or use_local_attention or dcp_world_size > 1:
         return False
     if common_prefix_len < envs_mod.VLLM_ASCEND_CASCADE_MIN_PREFIX:
@@ -512,15 +578,15 @@ def load():
     requires ``VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1``.
     """
     global attn_mod, _EXTRA_CTX, _HAS_LSE_MERGE_OP, _HAS_FA_FP32_STAGE1_OP
+    global _KERNEL_WHEEL_OK, _KERNEL_WHEEL_REASON
 
-    try:
-        import ascend_kernel  # noqa: F401  registers torch.ops.npu.*
-
-        _HAS_LSE_MERGE_OP = hasattr(torch.ops.npu, "lse_merge")
-        _HAS_FA_FP32_STAGE1_OP = hasattr(torch.ops.npu, "fa_fp32_stage1")
-    except Exception:
-        _HAS_LSE_MERGE_OP = False
-        _HAS_FA_FP32_STAGE1_OP = False
+    ok, reason = _probe_kernel_wheel()
+    _KERNEL_WHEEL_OK = ok
+    _KERNEL_WHEEL_REASON = reason
+    _HAS_LSE_MERGE_OP = ok
+    _HAS_FA_FP32_STAGE1_OP = ok
+    if not ok:
+        _warn_wheel_missing()
 
     _inject_env_vars()
     _install_policy_factory_stub()

@@ -35,7 +35,20 @@ block reuse faults at any kv magnitude under cumulative lens).
 import json
 import sys
 
-import ascend_kernel  # noqa: F401
+try:
+    import ascend_kernel  # noqa: F401  registers torch.ops.npu.* for the probes
+except Exception as _wheel_exc:
+    # Fail-open contract for the gate bench: a missing/defective kernel wheel
+    # must degrade the gate to neutral (parent sees the non-zero rc), never
+    # mask the situation behind a bare traceback.  Exiting before the heavy
+    # torch imports keeps the abort fast.
+    print(
+        f"[cas-gate-self] ascend_kernel wheel unavailable ({_wheel_exc!r}); "
+        "cascade probes aborted, gate stays neutral",
+        flush=True,
+    )
+    sys.exit(3)
+
 import torch
 import torch_npu  # noqa: F401
 
