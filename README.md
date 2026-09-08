@@ -72,11 +72,14 @@ vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
 pytest -q && ruff check .
 ```
 
-## Kernel wheel dependency (Tier-1 fp32 path)
+## Kernel wheel dependency (soft, fail-open)
 
-The fp32 cascade tier requires the `ascend_kernel` CCE op wheel
-(`fa_fp32_stage1` / `lse_merge`); when the wheel is absent the plugin fails
-open to the bf16 tier (`_HAS_FA_FP32_STAGE1_OP` probe). Validated pairing:
+Both cascade tiers consume the `ascend_kernel` CCE op wheel
+(`fa_fp32_stage1` / `lse_merge`) as a SOFT dependency: it is declared only in
+the `kernels` extra — base dependencies stay empty. When the wheel is absent
+or its ops fail to register, the whole cascade feature is disabled
+(fail-open to the standard full-KV path) with a single warning; the
+default-off semantics are unchanged. Validated pairing:
 
 | plugin | kernel wheel | torch_npu | CANN |
 |---|---|---|---|

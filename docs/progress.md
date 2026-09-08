@@ -42,13 +42,20 @@
   版本一致性与值域守护测试。
 - 建立 [release.md](release.md) 发布流程与宿主升级核对清单。
 - 建立本 docs/ 知识库与仓库级 AGENTS.md。
+- kernel wheel 软依赖 + fail-open(W4 收尾,2026-09):`b1e7e61` 声明
+  `kernels` extra(钉 `ascend-kernel==2026.3.9`);wheel 探针守卫——
+  缺失/注册失败时 cascade 整体禁用 + 单条 warning(探针/eager gate/twin
+  capture/gate bench 子进程四处守卫),单测
+  `tests/test_cascade_fail_open.py`(含删 wheel 子进程等价场景);
+  manifest 保持 `import_only`,翻 active 三项证据归档于工作区
+  `flashinfer-migration/cascade-evidence/`(仓库外,不入库)。
 
 ## 2. 现状(2026-09)
 
 - 分支 `feat/cascade-attention-plug`;bundle `import_only`,能力 default-off。
 - e2e 证据锚点见根 README(16k 段 −21%~−38% 等,kernel README §6 有单算子锚点);
   测量报告在 `cascade-c3-results/`(工作区)。
-- CPU 门槛:`pytest -q` 27 passed + `ruff check` 干净。
+- CPU 门槛:`pytest -q` 38 passed + `ruff check` 干净。
 
 ## 3. 计划与开放问题
 
@@ -56,8 +63,8 @@
 
 1. **翻 `active` 的证据门槛**:default-off 零回归冒烟、正确性对齐、性能对比
    三项归档后,按 release.md 第 3 节走启用验证,再改 `implementation.status`。
-2. **kernel wheel extras 联动**:插件 `[project.optional-dependencies]` 增加
-   kernel 包软依赖(Tier1 需要),缺 wheel 时 fail-open 降级。
+2. ~~**kernel wheel extras 联动**~~(已完成,见阶段 4 W4 条目):`kernels`
+   extra 已声明,fail-open 守卫与单测已落地。
 3. **宿主 seam 上游化**:split-batch 四协议仍是提案;推动 vllm-hust 宿主提供
    typed contract(参照 bidkv/victim-selector 的宿主适配路径),摆脱
    monkeypatch 弱契约。

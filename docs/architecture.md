@@ -85,8 +85,13 @@ manifest 与 entry point 打包完整性由构建检查保证,流程见 [release
 ## 6. 与 kernel 库的边界
 
 - 调用面只有 `torch.ops.npu.fa_fp32_stage1` / `torch.ops.npu.lse_merge`
-  (`import ascend_kernel` 即注册)。
-- Tier1(fp32 stage-1)依赖该 wheel;缺失时插件必须 fail-open 降级而非报错。
+  (`import ascend_kernel` 即注册);wheel 是软依赖,仅在 `[kernels]` extra
+  声明,基础依赖不含。
+- wheel 缺失/注册失败 → cascade 功能**整体自动禁用**(fail-open 到标准
+  full-KV 路径,单条 warning,`load()` 不抛错)。守卫点:`load()` 探针
+  (`_probe_kernel_wheel`)、eager gate(`_use_cascade_attention`)、graph
+  twin capture(`cascade_runner_patch._cascade_wheel_ready`)、gate bench
+  子进程(`cascade_gate_self` 导入守卫,exit 3 → gate neutral)。
 - kernel 侧的兼容四元组(平台 tag / PyABI / torch_npu / CANN)、链接纪律、
   已知危害,见 kernel 仓库 README §4-§5(工作区
   `cascade-merge-op/ascend-kernel/`),本仓库不重复维护。
