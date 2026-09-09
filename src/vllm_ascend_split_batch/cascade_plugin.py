@@ -256,8 +256,13 @@ def _use_cascade_attention(
 
 def _make_build_wrapper(orig_build):
     def build(self, common_prefix_len, common_attn_metadata, fast_build=False):
+        # Keyword forwarding: host private methods are unversioned seams, so
+        # never pin a host argument to its position (docs/pitfalls.md 2.1).
         metadata = orig_build(
-            self, common_prefix_len, common_attn_metadata, fast_build
+            self,
+            common_prefix_len=common_prefix_len,
+            common_attn_metadata=common_attn_metadata,
+            fast_build=fast_build,
         )
         # The official AscendMetadata dataclass has no cascade_shared_len field;
         # the attribute is added dynamically and is a no-op when cascade is off.
@@ -404,7 +409,7 @@ def _forward_cascade_decode_inner(
 
 def _make_forward_wrapper(orig_forward_fused_infer_attention):
     def forward_fused_infer_attention(
-        self, query, key, value, attn_metadata, output, kv_cache=None
+        self, query, key, value, attn_metadata, output, kv_cache=None, **kwargs
     ):
         capturing = getattr(_EXTRA_CTX, "capturing", False)
         if (
@@ -420,7 +425,14 @@ def _make_forward_wrapper(orig_forward_fused_infer_attention):
         ):
             return output
         return orig_forward_fused_infer_attention(
-            self, query, key, value, attn_metadata, output, kv_cache
+            self,
+            query=query,
+            key=key,
+            value=value,
+            attn_metadata=attn_metadata,
+            output=output,
+            kv_cache=kv_cache,
+            **kwargs,
         )
 
     return forward_fused_infer_attention

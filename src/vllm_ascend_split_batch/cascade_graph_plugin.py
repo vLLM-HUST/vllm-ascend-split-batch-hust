@@ -157,7 +157,9 @@ def _wrap_build_for_capture(builder_cls):
                 common_prefix_len=shared,
                 common_attn_metadata=common_attn_metadata,
             )
-        return orig(self, common_attn_metadata)
+        # Keyword forwarding: the host signature is a private seam and must
+        # not be pinned by argument position (docs/pitfalls.md 2.1).
+        return orig(self, common_attn_metadata=common_attn_metadata)
 
     builder_cls.build_for_cudagraph_capture = build_for_cudagraph_capture
 
@@ -777,6 +779,75 @@ def _context_shared_len(forward_context) -> int:
     return 0
 
 
+def _make_update_graph_params_wrapper(orig):
+    """Wrap the host replay re-parameterization (signature-agnostic, fail-open).
+
+    The host call is forwarded to ``orig`` verbatim on every non-cascade path
+    (``*args``/``**kwargs``), so a host bump that renames, reorders, adds or
+    drops parameters can never turn a stock step into a TypeError.  The
+    cascade re-parameterization runs only when the step is a cascade step,
+    the pre-model update has not already run, the ``("cascade", num_tokens)``
+    graph key exists, and the host arguments can be resolved; any internal
+    failure logs ONE warning and delegates to ``orig`` unchanged.
+    """
+
+    def update_graph_params(*args, **kwargs):
+        from vllm_ascend.compilation.acl_graph import get_graph_params
+
+        from vllm_ascend_split_batch import cascade_gate as gate
+        from vllm_ascend_split_batch import cascade_runner_patch as rp
+        from vllm_ascend_split_batch.cascade_runner_patch import (
+            _pick_arg,
+            _step_is_cascade,
+        )
+
+        try:
+            if _step_is_cascade() and not rp._step_update_done:
+                update_stream = _pick_arg(args, kwargs, 0, "update_stream")
+                forward_context = _pick_arg(args, kwargs, 1, "forward_context")
+                num_tokens = _pick_arg(args, kwargs, 2, "num_tokens")
+                if not hasattr(forward_context, "attn_metadata") or not isinstance(
+                    num_tokens, int
+                ):
+                    raise RuntimeError(
+                        "cannot resolve update_stream/forward_context/"
+                        "num_tokens from the host update_graph_params call"
+                    )
+                graph_params = get_graph_params()
+                cascade_key = ("cascade", num_tokens)
+                if graph_params is not None and graph_params.attn_params.get(
+                    cascade_key
+                ):
+                    if not gate.decision_for(
+                        _context_shared_len(forward_context), num_tokens
+                    ):
+                        # W2 gate: bucket measured slower than the full path
+                        # -> re-parameterize the STANDARD task groups so the
+                        # standard graph (chosen by the wrapper for the same
+                        # verdict) replays with correct step parameters.
+                        _trace(
+                            "replay update: gate off num_tokens=%s shared=%s",
+                            num_tokens,
+                            _context_shared_len(forward_context),
+                        )
+                        return orig(*args, **kwargs)
+                    _trace("replay update: cascade key hit num_tokens=%s", num_tokens)
+                    _update_cascade_graph_params(
+                        update_stream, forward_context, graph_params, num_tokens
+                    )
+                    return
+        except Exception as exc:
+            _warn_once(
+                "cascade replay update failed on this host build (%s: %s); "
+                "delegating to the original update pass",
+                type(exc).__name__,
+                exc,
+            )
+        return orig(*args, **kwargs)
+
+    return update_graph_params
+
+
 def install(attn_mod, builder_cls, impl_cls):
     """Patch the host stack for graph-mode cascade (idempotent).
 
@@ -816,7 +887,7 @@ def install(attn_mod, builder_cls, impl_cls):
         orig_forward = impl_cls.forward_fused_infer_attention
 
         def forward_fused_infer_attention(
-            self, query, key, value, attn_metadata, output, kv_cache=None
+            self, query, key, value, attn_metadata, output, kv_cache=None, **kwargs
         ):
             from vllm_ascend_split_batch import cascade_graph_plugin as gp
             from vllm_ascend_split_batch.cascade_runner_patch import _step_is_cascade
@@ -868,7 +939,14 @@ def install(attn_mod, builder_cls, impl_cls):
                         "cascade eager fallback failed; standard FIA path used"
                     )
             return orig_forward(
-                self, query, key, value, attn_metadata, output, kv_cache
+                self,
+                query=query,
+                key=key,
+                value=value,
+                attn_metadata=attn_metadata,
+                output=output,
+                kv_cache=kv_cache,
+                **kwargs,
             )
 
         # The eager plugin wrapped this method first; chain on top of it.
@@ -877,68 +955,12 @@ def install(attn_mod, builder_cls, impl_cls):
 
         # --- impl: replay re-parameterization -------------------------------
         orig_update = impl_cls.update_graph_params
-
-        def update_graph_params(
-            update_stream,
-            forward_context,
-            num_tokens,
-            vllm_config,
-            speculative_config=None,
-            num_dcp_pcp_tokens=None,
-            draft_attn_metadatas=None,
-        ):
-            from vllm_ascend.compilation.acl_graph import get_graph_params
-
-            from vllm_ascend_split_batch import cascade_gate as gate
-            from vllm_ascend_split_batch import cascade_runner_patch as rp
-            from vllm_ascend_split_batch.cascade_runner_patch import _step_is_cascade
-
-            if _step_is_cascade() and not rp._step_update_done:
-                graph_params = get_graph_params()
-                cascade_key = ("cascade", num_tokens)
-                if graph_params is not None and graph_params.attn_params.get(
-                    cascade_key
-                ):
-                    if not gate.decision_for(
-                        _context_shared_len(forward_context), num_tokens
-                    ):
-                        # W2 gate: bucket measured slower than the full path
-                        # -> re-parameterize the STANDARD task groups so the
-                        # standard graph (chosen by the wrapper for the same
-                        # verdict) replays with correct step parameters.
-                        _trace(
-                            "replay update: gate off num_tokens=%s shared=%s",
-                            num_tokens,
-                            _context_shared_len(forward_context),
-                        )
-                        return orig_update(
-                            update_stream,
-                            forward_context,
-                            num_tokens,
-                            vllm_config,
-                            speculative_config,
-                            num_dcp_pcp_tokens,
-                            draft_attn_metadatas,
-                        )
-                    _trace("replay update: cascade key hit num_tokens=%s", num_tokens)
-                    _update_cascade_graph_params(
-                        update_stream, forward_context, graph_params, num_tokens
-                    )
-                    return
-            return orig_update(
-                update_stream,
-                forward_context,
-                num_tokens,
-                vllm_config,
-                speculative_config,
-                num_dcp_pcp_tokens,
-                draft_attn_metadatas,
-            )
-
-        # update_graph_params is a @staticmethod on the impl class; assign
-        # the plain function wrapped in staticmethod (matches the original's
+        # update_graph_params is a @staticmethod on the impl class; assign the
+        # plain function wrapped in staticmethod (matches the original's
         # usage through update_full_graph_params -> get_impl_cls()).
-        impl_cls.update_graph_params = staticmethod(update_graph_params)
+        impl_cls.update_graph_params = staticmethod(
+            _make_update_graph_params_wrapper(orig_update)
+        )
 
         _installed = True
         return True

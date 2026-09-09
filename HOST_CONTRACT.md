@@ -34,27 +34,47 @@ Default-off semantics: with `VLLM_ASCEND_ENABLE_CASCADE_DECODE` unset the
 patched callables delegate to the originals unchanged. `BatchDescriptor` and
 all other host dataclasses are never modified.
 
-### Anchor map on the current baseline (verified 2026-09-09)
+### Anchor map on the current baseline (parameter-level, corrected 2026-09-09)
 
 Host = vllm-hust v1 (`0.28.1.post1.dev143+gf18cf803c`) + vllm-ascend-hust
 main (`0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`), CANN 9.1.0.
 
-| Anchor | Old location (0.23.0rc1) | Current location | Status |
-| --- | --- | --- | --- |
-| `AscendTopKTopPSampler` / `AscendSampler` | `vllm_ascend/sample/sampler.py` | unchanged | OK |
-| runner five methods | `vllm_ascend/v1/worker/gpu_model_runner.py` | `NPUModelRunner` (`vllm_ascend/worker/model_runner_v1.py`) inherits `GPUModelRunner` from `vllm/v1/worker/gpu_model_runner.py`, where `_model_forward` / `_determine_batch_execution_and_padding` / `_warmup_and_capture` / `_capture_cudagraphs` are defined | OK (wrappers forward via `*args`) |
-| `update_full_graph_params` / `GraphParams` / `get_graph_params` / `ACLGraphWrapper` | `vllm_ascend/compilation/acl_graph.py` | same module (:279 / :306 / :334 / :60) | OK |
-| `BatchDescriptor` | `vllm/forward_context.py` | unchanged | OK |
-| `spec_decode` / `spec_decode.ngram_proposer` / `eplb.core.policy.policy_factory` | present | present (runtime needs `scipy` + `decorator` installed) | OK |
+> **Correction (2026-09-09, post-review).** The first version of this table
+> checked symbol *existence* only and asserted "wrappers forward via `*args`".
+> That assertion was **false**, and it hid four blocking signature drifts
+> (D1–D4 below) — exactly the failure mode `docs/pitfalls.md` §2.1 warns about.
+> Existence is not compatibility: a monkeypatched method must match the host's
+> *parameter list and call convention*. Use the AST audit
+> (`flashinfer-migration/cascade-evidence/logs/sig_audit2.py` semantics) before
+> any `host.version_range` change.
 
-**Carrier status (2026-09-09)**: the W4 `active` flip was reverted to
-`import_only` — the three acceptance evidences were gathered on 0.23.0rc1
-and do NOT transfer across a host change. Path back to `active`: re-run the
-release.md 三项证据 on this baseline (default-off 零回归冒烟 / 正确性对齐 /
-性能对比), then flip and keep the pin. `host.version_range` is pinned to the
-exact verified build (`==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`);
-packaging rejects local-version labels in ordered comparators, hence the
-point-`==` form.
+| Anchor | Host signature (current) | Plugin wrapper | Status |
+| --- | --- | --- | --- |
+| `_capture_cudagraphs` | `(self, batch_descriptors, cudagraph_runtime_mode, profiler=None)` | was `(self, batch_descriptors, cudagraph_runtime_mode)` | **D1 drift → fixed** |
+| `_update_full_graph_params_if_needed` | `(self, forward_context, num_tokens_padded)` | was called with 3 positional (`+positions`) | **D2 drift → fixed** |
+| `impl_cls.update_graph_params` | `(update_stream, forward_context, num_tokens, vllm_config, speculative_config=None, draft_attn_metadatas=None)` | had extra `num_dcp_pcp_tokens` and forwarded 7 positional | **D3 drift → fixed** |
+| `_model_forward` | `(self, input_ids=None, positions=None, intermediate_tensors=None, inputs_embeds=None, **model_kwargs)`; host calls **keyword-only** | had required leading `num_tokens_padded` | **D4 drift → fixed** |
+| `_determine_batch_execution_and_padding` | 12 params (see host `gpu_model_runner.py:4040`) | identical | OK |
+| `_warmup_and_capture` | `(self, desc, cudagraph_runtime_mode, profile_seq_lens=None, allow_microbatching=False, num_warmups=None, profiler=None)` | not wrapped (called via `orig`) | OK |
+| `AscendTopKTopPSampler` / `AscendSampler` | `vllm_ascend/sample/sampler.py` | subclass replacement | OK |
+| `update_full_graph_params` / `GraphParams` / `get_graph_params` / `ACLGraphWrapper` | `vllm_ascend/compilation/acl_graph.py` (:279/:306/:334/:60) | read-only use | OK |
+| `BatchDescriptor` | `vllm/forward_context.py` | unchanged | OK |
+| `spec_decode` / `spec_decode.ngram_proposer` / `eplb.core.policy.policy_factory` | present (needs `scipy` + `decorator`) | shims | OK |
+
+**Design rule this establishes**: a wrapper that raises out of a patched host
+method kills the engine, which violates the documented fail-open contract. All
+cascade wrappers must (a) match the host call convention and (b) delegate to the
+original on any internal failure with a single warning.
+
+**Carrier status (2026-09-09)**: carriers remain `import_only`. The three
+acceptance evidences were gathered on 0.23.0rc1 and do NOT transfer across a
+host change; the new-baseline re-run
+(`flashinfer-migration/cascade-evidence/EVIDENCE-V1-BASELINE.md`) **failed
+evidence #2 and partially failed #3** because of D1–D4. Path back to `active`:
+fix D1–D4 (done in a follow-up commit), then re-run release.md 三项证据 on this
+baseline and keep the pin. `host.version_range` stays at the exact verified
+build (`==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`); packaging rejects
+local-version labels in ordered comparators, hence the point-`==` form.
 
 ## fi_sampling component (implemented, default-off)
 
