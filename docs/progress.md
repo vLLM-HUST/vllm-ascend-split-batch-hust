@@ -50,12 +50,47 @@
   manifest 保持 `import_only`,翻 active 三项证据归档于工作区
   `flashinfer-migration/cascade-evidence/`(仓库外,不入库)。
 
-## 2. 现状(2026-09)
+## 2. 现状(2026-09-09)
 
-- 分支 `feat/cascade-attention-plug`;bundle `import_only`,能力 default-off。
+- 分支 `feat/cascade-attention-plug`;W4 后 cascade 两个 carrier 已翻 **active**
+  (`8751839`,证据复审通过),planner 保持 `import_only`;能力仍 default-off。
+- **基线切换(2026-09-09)**:工作区默认环境换为 conda `hust`——vllm-hust v1
+  (`0.28.1.post1.dev143`)+ vllm-ascend-hust main(`0.25.1rc2.dev125+hust`)++
+  CANN 9.1.0。旧 manifest `>=0.23.0rc1,<0.24` 区间失效,`extension check` 报
+  INCOMPATIBLE(fail-closed 守卫生效,预期行为);重钉与锚点重核见工作区
+  `.openbitfun/plans/MAIN.plan.md` 队列 #3/#4。
 - e2e 证据锚点见根 README(16k 段 −21%~−38% 等,kernel README §6 有单算子锚点);
-  测量报告在 `cascade-c3-results/`(工作区)。
-- CPU 门槛:`pytest -q` 38 passed + `ruff check` 干净。
+  测量报告在 `cascade-c3-results/`(工作区)。**换环境后性能数字降级为参考。**
+- CPU 门槛:`pytest -q` 77 passed / 7 failed(失败均为 cascade 锚点在新宿主的
+  漂移,属适配项)+ `ruff check` 干净。
+
+### 阶段 5:fi_sampling 采样接入(W2b,2026-09-09)
+
+- 落点:`fi_sampling_plugin.py`(`vllm.general_plugins` entry `fi-sampling`,
+  类级替换 `AscendTopKTopPSampler`)+ `fi_sampling_route.py`(纯逻辑分流/回退)
+  + vendor 目录 `fi_sampling/`;开关 `VLLM_HUST_FI_SAMPLING`(默认 0)。
+- 分流:无截断 → FI api1;k=1 → argmax;B≥256 且 k≥32 且 top-p → FI joint;
+  其余 → fork 链。五类强制回退(per-request generators / processed_logprobs /
+  batch-invariant / reduce-sample / async-exponential)全部落地且**零设备同步**。
+- e2e 证据(见 `docs/evidence/w2b-fi-sampling/REPORT.md`):无截断 on/off 两轮
+  median TPOT 差 **−0.14%**(噪声带内;采样仅占 TPOT ≈1%,路由 1300/1300 已确认
+  生效);joint cell 在 4k 上下文单卡形态 B_max≈122 < 256 门槛而**不可达**
+  (需 ~512 上下文),即 joint 分支是安全保留的死分支。**e2e 正收益未显形,
+  manifest 不翻 active。**
+- 修正:初版"先读每步 top-k 主机值再判回退"导致回退腿 +4.9% median TPOT,
+  已改为回退先行(由 e2e 证据倒逼,见 REPORT §4)。
+- **评审修复(2026-09-09,needs_changes 的 F1/F2)**:
+  - F1(宿主 import 失败崩进程 → 真 fail-open):`install()` 的宿主模块 import 与
+    `_fallback_flags()` 的 batch-invariant 探测收进 try,失败 → 单条 warning +
+    回 fork 链;新增 5 例 fail-open 测试(含子进程级证明)。
+  - F1 追加(复审 5 项残留全部落实):全部 env 整型解析改容错 `_env_int`(非法值 →
+    单条 warning + 默认值,覆盖 enable/阈值/k1/seed),`install()` 旋钮解析前移
+    消除半安装窗口;新增 4 例 env 容错测试。fi_sampling 包 44 例全绿。
+    `torch.softmax` 不纳入 fail-open(评审 nit:fork 链同样依赖 torch,救援无意义)。
+  - F2(joint 腿证据产自修复前构建 → 降级):§3.3 对比作废(不支持"纯噪声"旧归因),
+    路由可达性事实保留;REPORT §1.2 JSON 份数、§5 复现命令改为实际执行序列;
+    api1 数字已用 summarize_e2e.py 对最终构建 JSON 重放复核。详见 REPORT §8。
+  - F3–F10(medium/minor)留待后续批次。修复后整体原子提交。
 
 ## 3. 计划与开放问题
 
@@ -70,5 +105,10 @@
    monkeypatch 弱契约。
 4. **发布渠道**:证据齐后走 `uv publish` 到 pypi 或内部索引;发布前补
    release.md 第 2 节的隔离安装冒烟自动化。
+5. **fi_sampling e2e 收益显形**(W2b 遗留):无截断路径在 B=64 下采样仅占
+   TPOT ≈1%,需在采样占比更大的形态复测(大 B 短上下文 / 更小模型 /
+   用单算子比例解析外推);joint cell 需 ~512 上下文才能达 B≥256,若要在常规
+   形态显形须下调 `VLLM_HUST_FI_SAMPLING_JOINT_MIN_BATCH`,但下调前须补
+   B∈[64,256) 区间证据(W2 bench 显示该区间 ours 输 1.33×–3.83×)。
 
 每条动手前:更新本文件状态,证据落到 PR 描述或 `docs/evidence/`(新建)。

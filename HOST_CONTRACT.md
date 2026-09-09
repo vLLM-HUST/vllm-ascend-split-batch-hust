@@ -33,3 +33,25 @@ The cascade plugin (`cascade_plugin.py`, `cascade_graph_plugin.py`,
 Default-off semantics: with `VLLM_ASCEND_ENABLE_CASCADE_DECODE` unset the
 patched callables delegate to the originals unchanged. `BatchDescriptor` and
 all other host dataclasses are never modified.
+
+## fi_sampling component (implemented, default-off)
+
+The fi_sampling plugin (`fi_sampling_plugin.py`, `fi_sampling_route.py`) rides
+ONLY:
+
+- `vllm.general_plugins` entry point `fi-sampling` (`load()`).
+- vllm-ascend module attribute `vllm_ascend.sample.sampler.AscendTopKTopPSampler`
+  replaced by a subclass (`FiSamplingTopKTopPSampler`) whose `forward_native`
+  overrides the base; `AscendSampler.__init__` resolves that module attribute at
+  construction time, so no other host object is touched. Same variant-entry
+  pattern as the fork's own `vllm_ascend/_310p/sample/sampler.py`.
+- Read-only probes of `vllm.envs.VLLM_BATCH_INVARIANT` and
+  `vllm_ascend.ascend_config.get_ascend_config()` (`enable_reduce_sample`,
+  `enable_async_exponential`) for the fallback matrix.
+
+Default-off semantics: with `VLLM_HUST_FI_SAMPLING` unset `load()` returns
+before importing `vllm_ascend` or the vendored kernel package, so nothing is
+patched and `triton` is never imported. The host source trees are untouched and
+no `vllm.platform_plugins` entry is registered. Host-upgrade checklist item
+(see `docs/release.md` §4): `AscendTopKTopPSampler` name/`forward_native`
+signature and the `AscendSampler` construction site.

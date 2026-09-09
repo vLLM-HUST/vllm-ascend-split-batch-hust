@@ -22,6 +22,7 @@ test = ["pytest>=8", "ruff>=0.12", "vllm-hust-ext==0.2.0.dev0"]
 
 [project.entry-points."vllm.general_plugins"]
 "cascade-attention" = "vllm_ascend_split_batch.cascade_plugin:load"
+"fi-sampling" = "vllm_ascend_split_batch.fi_sampling_plugin:load"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vllm_ascend_split_batch"]
@@ -32,6 +33,11 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py310"
 line-length = 88
+# Vendored verbatim from flashinfer-migration/sampling/fi_sampling (see
+# PROVENANCE.md): byte-identical copies are required for provenance diffing, so
+# they keep the source package's formatting (its own repo lints with ruff's
+# default line length, not 88).
+extend-exclude = ["src/vllm_ascend_split_batch/fi_sampling"]
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "SIM", "UP"]

@@ -62,6 +62,43 @@ Verified evidence (Qwen2.5-Coder-14B-Instruct, 910B2, CANN 9.0.1):
 - no fail-open events during the verified runs;
 - `pytest -q` + `ruff check .` green.
 
+## fi_sampling plugin (default-off, evidence-only)
+
+Entry point: `vllm.general_plugins` ->
+`fi-sampling = vllm_ascend_split_batch.fi_sampling_plugin:load`.
+
+Routes the sampling step to the vendored `fi_sampling` triton-ascend kernels
+(flashinfer-semantics port, W2 package) by replacing the fork's
+`AscendTopKTopPSampler` with a subclass at plugin-load time. With
+`VLLM_HUST_FI_SAMPLING` unset nothing is imported or patched.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VLLM_HUST_FI_SAMPLING` | `0` | master switch |
+| `VLLM_HUST_FI_SAMPLING_SEED` | torch initial seed | fixed base seed (per-call advancing) |
+| `VLLM_HUST_FI_SAMPLING_JOINT_MIN_BATCH` | `256` | joint-cell batch floor (W2 bench knee) |
+| `VLLM_HUST_FI_SAMPLING_JOINT_MIN_K` | `32` | joint-cell top-k floor |
+| `VLLM_HUST_FI_SAMPLING_K1_ARGMAX` | `1` | `0` keeps k=1 on the fork chain (tie-exact) |
+| `VLLM_HUST_FI_SAMPLING_TRACE` | `0` | per-step route trace + histogram |
+
+Routing: no top-k/top-p -> FI api1 kernel; k=1 on every row -> argmax;
+`B >= 256` with `k >= 32` and top-p -> FI joint kernel; everything else (and
+all five mandatory fallbacks: per-request generators, processed
+logits/logprobs modes, batch-invariant, reduce-sample, async-exponential)
+stays on the fork chain with no device sync.
+
+Evidence (`docs/evidence/w2b-fi-sampling/REPORT.md`, Qwen2.5-Coder-14B, 910B2):
+
+- default-off is zero-diff (no host/kernel import, no patch) and NPU smoke is
+  6/6 PASS;
+- untruncated e2e (4k ctx, B=64, 2 repeats): median TPOT off 112.67 ms vs on
+  112.52 ms (**-0.14%**, within noise) with the FI api1 route confirmed on
+  1300/1300 steps -- sampling is only ~1% of TPOT at that batch size;
+- joint route is unreachable in the 4k-context single-card shape (B_max ~= 122
+  < the 256 floor); it only fires with a ~512-token context, so the joint
+  branch is a safe, currently dormant branch in normal deployments;
+- `pytest -q` 73 passed + `ruff check .` green.
+
 ## Extension framework
 
 Extension ID: `org.vllm-hust.split-batch-full-graph`

@@ -84,6 +84,10 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
 - [ ] vllm-ascend: `update_full_graph_params` / `get_graph_params` / `GraphParams`
 - [ ] `ACLGraphWrapper` variant-entry 表结构(标准 `BatchDescriptor` 键)
 - [ ] `vllm.general_plugins` 加载时机未变
+- [ ] fi_sampling 面:`vllm_ascend.sample.sampler.AscendTopKTopPSampler` 名称与
+      `forward_native(logits, generators, k, p)` 签名、`AscendSampler.__init__`
+      的构造点、`vllm.envs.VLLM_BATCH_INVARIANT` 与
+      `get_ascend_config().enable_reduce_sample` / `enable_async_exponential`
 
 ## 5. 检查表
 
