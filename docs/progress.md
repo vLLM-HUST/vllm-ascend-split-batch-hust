@@ -69,8 +69,20 @@
   fastpath、S4 10/10),证据见 cascade-merge-op `73bf96a`。
 - e2e 证据锚点见根 README(16k 段 −21%~−38% 等,kernel README §6 有单算子锚点);
   测量报告在 `cascade-c3-results/`(工作区)。**换环境后性能数字降级为参考。**
-- CPU 门槛:`pytest -q` 77 passed / 7 failed(失败均为 cascade 锚点在新宿主的
-  漂移,属适配项)+ `ruff check` 干净。
+- **新基线三项证据重验(2026-09-09)**:证据① default-off 冒烟 **PASS**;证据②
+  正确性 **部分**——图模式车道首次未 shim 跑通(原为引擎无法启动),确定性 0/64、
+  自然答案 63/64 通过,但强制续写形态发散 21–22/64 高于历史 ≤8/64 口径(字面形态
+  1/64 通过;发散臂集合修复前后一致,非修复引入);证据③ 性能 **部分**——拓扑复现
+  (4k 亏 +12.3%/+6.7%、8k −3.5%/−13.5%、16k −20.2%/−31.6%,区间均分离),但
+  `(64,4096)` 亏损未被自适应 gate 覆盖(gate 微基准判 `on`)。**故 cascade 保持
+  `import_only`,不翻 active**;详情 `flashinfer-migration/cascade-evidence/
+  EVIDENCE-V1-BASELINE.md`。
+- **D1–D4 宿主签名漂移已修复**(`ddc0120`):`_capture_cudagraphs` 缺 `profiler`、
+  `_update_full_graph_params_if_needed` 多传 `positions`、`update_graph_params` 多传
+  `num_dcp_pcp_tokens`、`_model_forward` 参数约定。所有包装器改 `*args/**kwargs`
+  原样转发 + try/except 单次 warning 委托(fail-open 契约兑现);新增
+  `tests/test_host_signature_drift.py`(13 例,含变异测试证明有效)。
+- CPU 门槛:`pytest -q` **102 passed** + `ruff check` 干净。
 
 ### 阶段 5:fi_sampling 采样接入(W2b,2026-09-09)
 
