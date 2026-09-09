@@ -56,6 +56,9 @@ _KERNEL_WHEEL_REASON = "load() not called yet"
 _HAS_LSE_MERGE_OP = False
 _HAS_FA_FP32_STAGE1_OP = False
 _wheel_warning_logged = False
+# Startup marker (INFO, once per process): proves load() actually ran, which
+# vLLM otherwise hides by swallowing general-plugin load errors.
+_startup_marker_logged = False
 
 
 def _import_kernel_module():
@@ -112,8 +115,44 @@ def _warn_wheel_missing() -> None:
 
 def _reset_fail_open_for_tests() -> None:
     """Clear the once-only warning state (unit tests only)."""
-    global _wheel_warning_logged
+    global _wheel_warning_logged, _startup_marker_logged
     _wheel_warning_logged = False
+    _startup_marker_logged = False
+
+
+def _startup_logger():
+    """Logger on vLLM's configured handler tree (F7: visible in serve logs).
+
+    ``logging.getLogger(__name__)`` propagates to an unconfigured root logger,
+    so its records never reach the ``vllm serve`` log.  This logger is a child
+    of vLLM's configured ``vllm`` logger, so the startup marker is visible in
+    the serve output.
+    """
+    from vllm.logger import init_logger
+
+    return init_logger("vllm.vllm_ascend_split_batch.cascade_plugin")
+
+
+def _log_startup_marker() -> None:
+    """One INFO line proving ``load()`` ran to completion in this process.
+
+    vLLM swallows exceptions raised by ``vllm.general_plugins`` loaders, so a
+    silent serve log cannot distinguish "plugin loaded and defaulted off" from
+    "plugin never loaded".  The line is emitted once per process and reports
+    the effective gates, so a default-off serve log shows ``gate=0``.
+    """
+    global _startup_marker_logged
+    if _startup_marker_logged:
+        return
+    _startup_logger().info(
+        "cascade plugin loaded (gate=%d, graph_gate=%d, kernel_wheel=%s)",
+        1 if envs_mod.VLLM_ASCEND_ENABLE_CASCADE_DECODE else 0,
+        1 if _graph_plugin_enabled() else 0,
+        "ok" if _KERNEL_WHEEL_OK else "unavailable",
+    )
+    _startup_marker_logged = True
+
+
 _cascade_warning_once = False
 
 
@@ -656,3 +695,5 @@ def load():
         from vllm_ascend_split_batch import cascade_runner_patch
 
         cascade_runner_patch.install()
+
+    _log_startup_marker()

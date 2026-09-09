@@ -171,6 +171,50 @@ def test_shims_installed_only_when_host_import_fails(
         assert getattr(restored, "__file__", None) is not None, name
 
 
+def test_startup_marker_logged_once_per_process(monkeypatch) -> None:
+    """F7: the default-off serve log must prove load() ran."""
+    import logging
+
+    records: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect()
+    startup_logger = cascade_plugin._startup_logger()
+    startup_logger.addHandler(handler)
+    startup_logger.setLevel(logging.INFO)
+    try:
+        _reset_env(monkeypatch)
+        cascade_plugin._reset_fail_open_for_tests()
+        cascade_plugin.load()
+        cascade_plugin.load()
+        markers = [
+            rec
+            for rec in records
+            if "cascade plugin loaded (" in rec.getMessage()
+        ]
+        assert len(markers) == 1
+        assert "gate=0" in markers[0].getMessage()
+        assert "graph_gate=0" in markers[0].getMessage()
+
+        # And it reports the enabled state when the gates are on.
+        records.clear()
+        cascade_plugin._reset_fail_open_for_tests()
+        monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
+        monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_GRAPH", "1")
+        cascade_plugin.load()
+        markers = [
+            rec
+            for rec in records
+            if "cascade plugin loaded (" in rec.getMessage()
+        ]
+        assert "gate=1, graph_gate=1" in markers[-1].getMessage()
+    finally:
+        startup_logger.removeHandler(handler)
+
+
 def test_env_vars_are_injected_and_resolve_lazily(monkeypatch) -> None:
     _gate(monkeypatch)
     from vllm_ascend import envs as envs_mod

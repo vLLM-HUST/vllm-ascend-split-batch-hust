@@ -43,7 +43,10 @@ Environment gates (all default off):
 | `VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE` (1) | skip the stage-1 graph re-bind when its inputs are step-invariant (0 restores always-rebind) |
 
 With every gate unset the patched methods are no-ops and the serving path is
-bit-identical to stock vllm-ascend.
+bit-identical to stock vllm-ascend. On load the plugin emits one INFO line,
+`cascade plugin loaded (gate=0, graph_gate=0, kernel_wheel=ok)`, so a
+default-off serve log proves `load()` actually ran (vLLM otherwise swallows
+general-plugin load errors).
 
 Microbatching: the plugin mirrors the official vllm core gate and keeps the
 two-stage path off under ANY microbatching (`use_ubatching`, i.e. DBO or
