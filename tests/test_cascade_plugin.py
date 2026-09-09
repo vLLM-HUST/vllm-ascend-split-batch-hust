@@ -18,6 +18,7 @@ this host.  The tests exercise gate and bookkeeping logic through small
 stand-in objects; the NPU kernels themselves are never invoked here.
 """
 
+import sys
 import types
 
 import pytest
@@ -34,6 +35,15 @@ ENV_KEYS = (
     "VLLM_ASCEND_CASCADE_MIN_REQS",
     "VLLM_ASCEND_CASCADE_STRICT",
     "VLLM_ASCEND_CASCADE_PRECISION",
+)
+
+# Host modules the fail-open shims may replace.  With the real modules
+# importable, load() must leave every one of them untouched (default-off
+# zero-diff); the shims are only for hosts where the import genuinely fails.
+_SHIMNABLE_HOST_MODULES = (
+    "vllm_ascend.eplb.core.policy.policy_factory",
+    "vllm_ascend.spec_decode",
+    "vllm_ascend.spec_decode.ngram_proposer",
 )
 
 
@@ -69,6 +79,96 @@ def test_load_is_idempotent_and_sets_patch_markers(monkeypatch) -> None:
     cascade_plugin.load()
     assert builder_cls.build is build_before
     assert impl_cls.forward_fused_infer_attention is forward_before
+
+
+def _host_module_snapshot():
+    import importlib
+
+    # The device_op <-> ops circular import must be resolved before the
+    # spec_decode chain is importable (mirrors the worker import order).
+    importlib.import_module("vllm_ascend.ops")
+    return {name: importlib.import_module(name) for name in _SHIMNABLE_HOST_MODULES}
+
+
+def test_default_off_leaves_real_host_modules_untouched(monkeypatch) -> None:
+    """Regression: default-off must not replace real vllm-ascend modules.
+
+    ``load()`` used to install three synthetic shims unconditionally, so with
+    every cascade gate unset the ngram speculative-decoding path hit the
+    placeholder ``NotImplementedError``.  Shims are now installed only when the
+    real import fails, i.e. this test asserts the real modules survive load().
+    """
+    _reset_env(monkeypatch)
+    before = _host_module_snapshot()
+    cascade_plugin.load()
+    after = _host_module_snapshot()
+    for name in _SHIMNABLE_HOST_MODULES:
+        assert after[name] is before[name], f"{name} was replaced by a shim"
+        assert getattr(after[name], "__file__", None) is not None, name
+    # The real classes must remain usable (not placeholder stand-ins).
+    from vllm.v1.spec_decode.ngram_proposer import NgramProposer
+
+    ngram_mod = after["vllm_ascend.spec_decode.ngram_proposer"]
+    assert issubclass(ngram_mod.AscendNgramProposer, NgramProposer)
+    assert (
+        after["vllm_ascend.spec_decode"].get_spec_decode_method.__module__
+        == "vllm_ascend.spec_decode"
+    )
+    assert (
+        after["vllm_ascend.eplb.core.policy.policy_factory"].PolicyFactory.__module__
+        == "vllm_ascend.eplb.core.policy.policy_factory"
+    )
+
+
+def _break_host_import(monkeypatch, name):
+    """Make the shim probe fail for ``name`` while every other import works."""
+    import importlib
+
+    real_import_module = importlib.import_module
+
+    def fake_import_module(target, *args, **kwargs):
+        if target == name:
+            raise ModuleNotFoundError(f"No module named {target!r}")
+        return real_import_module(target, *args, **kwargs)
+
+    monkeypatch.setattr(cascade_plugin, "_import_host_module", fake_import_module)
+    monkeypatch.delitem(sys.modules, name, raising=False)
+
+
+@pytest.mark.parametrize(
+    ("mod_name", "installer_name"),
+    [
+        (
+            "vllm_ascend.eplb.core.policy.policy_factory",
+            "_install_policy_factory_stub",
+        ),
+        ("vllm_ascend.spec_decode", "_install_spec_decode_stub"),
+        ("vllm_ascend.spec_decode.ngram_proposer", "_install_ngram_proposer_stub"),
+    ],
+)
+def test_shims_installed_only_when_host_import_fails(
+    monkeypatch, mod_name, installer_name
+) -> None:
+    """Fail-open shim is the fallback for a broken host import, not the norm."""
+    import importlib
+
+    _break_host_import(monkeypatch, mod_name)
+    installer = getattr(cascade_plugin, installer_name)
+    installer()
+    shim = sys.modules.get(mod_name)
+    assert shim is not None, mod_name
+    assert getattr(shim, "__file__", None) is None, mod_name
+    # Second call must be a no-op (the shim itself now resolves).
+    installer()
+    assert sys.modules[mod_name] is shim
+    # Restore every real host module for the remaining test modules.
+    monkeypatch.undo()
+    for name in _SHIMNABLE_HOST_MODULES:
+        if getattr(sys.modules.get(name), "__file__", None) is None:
+            sys.modules.pop(name, None)
+    for name in _SHIMNABLE_HOST_MODULES:
+        restored = importlib.import_module(name)
+        assert getattr(restored, "__file__", None) is not None, name
 
 
 def test_env_vars_are_injected_and_resolve_lazily(monkeypatch) -> None:

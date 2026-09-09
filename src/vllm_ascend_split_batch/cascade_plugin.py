@@ -415,17 +415,39 @@ def _inject_env_vars():
     )
 
 
+def _import_host_module(mod_name):
+    """Import hook for the shim probes (unit tests patch this)."""
+    return importlib.import_module(mod_name)
+
+
+def _host_module_importable(mod_name):
+    """True when the real host module is importable, so nothing must be shimmed.
+
+    A module already present in ``sys.modules`` counts as resolved: it is
+    either the real module or a shim installed after an earlier import failure
+    in this process.  Re-probing must never replace a live shim, and it must
+    never install one over a healthy host module (default-off zero-diff).
+    """
+    if mod_name in sys.modules:
+        return True
+    try:
+        _import_host_module(mod_name)
+    except Exception:
+        return False
+    return True
+
+
 def _install_policy_factory_stub():
-    """Avoid importing numba at vllm-ascend module import time.
+    """Fail-open shim for hosts where ``policy_factory`` cannot be imported.
 
     The upstream ``policy_factory`` imports ``policy_flashlb`` (and therefore
-    ``numba``) at module load.  The HUST fork made this import lazy; we do the
-    same via a synthetic module so the default (non-FlashLB) serving path does
-    not require a numba/numpy-compatible environment.
+    ``numba``) at module load.  The HUST fork made this import lazy; when the
+    real import fails we do the same via a synthetic module so the default
+    (non-FlashLB) serving path still works without a numba/numpy-compatible
+    environment.  With the real module importable it is left untouched.
     """
     mod_name = "vllm_ascend.eplb.core.policy.policy_factory"
-    if mod_name in sys.modules:
-        # Already importable (e.g. a compatible numba was present); leave it.
+    if _host_module_importable(mod_name):
         return
     try:
         from vllm_ascend.eplb.core.policy.policy_default_eplb import DefaultEplb
@@ -469,16 +491,17 @@ def _install_policy_factory_stub():
 
 
 def _install_spec_decode_stub():
-    """Make ``vllm_ascend.spec_decode`` import lazy (HUST parity).
+    """Fail-open shim for hosts where ``vllm_ascend.spec_decode`` cannot load.
 
     The upstream module imports ``AscendNgramProposer`` at module import time,
     which pulls in ``vllm.v1.spec_decode.ngram_proposer`` and therefore numba.
-    The HUST fork moved these imports inside ``get_spec_decode_method``; we
-    install a lightweight stand-in so the default (no spec decode) serving path
-    never imports numba.
+    The HUST fork moved these imports inside ``get_spec_decode_method``; when
+    the real import fails we install a lightweight stand-in so the default (no
+    spec decode) serving path still works without numba.  With the real module
+    importable it is left untouched (default-off zero-diff).
     """
     mod_name = "vllm_ascend.spec_decode"
-    if mod_name in sys.modules:
+    if _host_module_importable(mod_name):
         return
 
     def get_spec_decode_method(method, vllm_config, device, runner):
@@ -539,17 +562,18 @@ def _install_spec_decode_stub():
 
 
 def _install_ngram_proposer_stub():
-    """Avoid importing numba via ``vllm_ascend.spec_decode.ngram_proposer``.
+    """Fail-open shim for hosts where ``ngram_proposer`` cannot be imported.
 
     The upstream ``model_runner_v1`` imports ``AscendNgramProposer`` from this
-    module at module load time; the module itself imports numba.  For the
-    default (no speculative decoding) serving path we install a lightweight
-    placeholder so the worker import chain succeeds.  If ngram speculative
-    decoding is actually requested, the placeholder raises and the real
-    numba-based path remains a separate (non-default) configuration.
+    module at module load time; the module itself imports numba.  When that
+    import fails we install a lightweight placeholder so the worker import
+    chain still succeeds.  If ngram speculative decoding is then requested, the
+    placeholder raises and the real numba-based path remains a separate
+    (non-default) configuration.  With the real module importable it is left
+    untouched (default-off zero-diff).
     """
     mod_name = "vllm_ascend.spec_decode.ngram_proposer"
-    if mod_name in sys.modules:
+    if _host_module_importable(mod_name):
         return
 
     class AscendNgramProposer:
@@ -589,14 +613,18 @@ def load():
         _warn_wheel_missing()
 
     _inject_env_vars()
-    _install_policy_factory_stub()
-    _install_spec_decode_stub()
-    _install_ngram_proposer_stub()
 
     # Resolve the upstream device_op <-> ops circular import by fully importing
     # vllm_ascend.ops before attention_v1 (mirrors the normal vllm-ascend lazy
     # import order), then patch the attention modules.
     importlib.import_module("vllm_ascend.ops")
+    # Fail-open shims, installed ONLY when the real host module cannot be
+    # imported in this process (each helper probes with a real import first).
+    # Probing after the ops import so the result reflects the worker import
+    # chain rather than the device_op circular-import window.
+    _install_policy_factory_stub()
+    _install_spec_decode_stub()
+    _install_ngram_proposer_stub()
     attn_mod = importlib.import_module("vllm_ascend.attention.attention_v1")
 
     # Published on the official module as well so any HUST-derived code or
