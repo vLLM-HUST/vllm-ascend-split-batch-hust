@@ -61,9 +61,10 @@ python -m venv /tmp/sb-release-smoke
 ```
 
 与 vllm/vllm-hust-ext 同环境时,追加 `vllm-hust-ext extension list` 应能发现
-本 bundle;`inspect` 显示 `activation_ready=false`(import_only 预期)。
+本 bundle;`inspect` 的 `activation_ready` 反映当前 `implementation[].status`
+(cascade carrier 已 `active` → `true`;planner 仍 `import_only`)。
 
-## 3. 启用验证(翻 active 后才适用)
+## 3. 启用验证(翻 active 后执行)
 
 按指南阶梯执行:`extension check` → `status` → `run --dry-run` 预览注入的
 environment/additional_config → 正式 `vllm-hust-ext run -- vllm serve ...`。

@@ -29,7 +29,7 @@ wheel,单向依赖;算子库对 vllm-hust-ext 与插件机制零感知。日常�
                │ entry `cascade-attention` → cascade_plugin:load()
 ┌──────────────▼───────────────────────────────────┐
 │  本壳 vllm-ascend-split-batch(纯 Python)         │
-│  · bundle manifest(0.2-experimental, import_only)│
+│  · bundle manifest(0.2-experimental, cascade active)│
 │  · env 门控 + monkeypatch(见 HOST_CONTRACT.md)   │
 │  · 纯逻辑 planner / gate(CPU 可测)              │
 └──────────────┬───────────────────────────────────┘
@@ -49,7 +49,7 @@ vllm 模块;宿主源码不可修改,宿主能力只走公开面(entry point、
 | 概念 | 本仓库的取值与含义 |
 |---|---|
 | Bundle ID | `org.vllm-hust.split-batch-full-graph`,注册于 `vllm_hust.extension_bundles` entry point,value 指向包目录(含 manifest JSON) |
-| `implementation[].status` | `active` 才可 `enable`;`import_only` 仅可 `inspect`(当前状态)。状态语义 = manifest 纪律:证据齐前不翻 `active` |
+| `implementation[].status` | `active` 才可 `enable`。当前 cascade 两个 carrier(`cascade_plugin:load` / `cascade_graph_plugin:install`)为 `active`;`planner:plan_dual_pad` 仍是 `import_only`(无验收证据,review F7) |
 | `activation.environment` | **enable 时注入的值**,不是文档。当前声明 `ENABLE_CASCADE_DECODE=1` + `ENABLE_CASCADE_GRAPH=1`;不 enable 则什么都不注入 |
 | `protocols[].version_range` | 四个协议均 `null`(**不独立版本化**):宿主不存在 `vllm.plugins.contracts`,manager 探测不到版本;声明具体区间只会让 `run` 以"version is unavailable"拒启。约束由 `host.version_range` + 验收证据承担,理由详见 [release.md](release.md) §0 |
 | `host.version_range` | 钉**实际验证域**(`>=0.23.0rc1,<0.24`);宿主是 `0.23.0rc1`,prerelease 不在 `>=0.23.0` 内 |
@@ -62,8 +62,9 @@ manifest 与 entry point 打包完整性由构建检查保证,流程见 [release
 
 1. **门控层**:所有 env 开关默认缺省,`load()` 与被 patch 方法首行检查
    gate,未开启时逐字委托原实现——宿主行为 bit-identical(README 有验证证据)。
-2. **bundle 层**:bundle 处于 `import_only`,manager 不注入任何
-   activation;即使用户手工装了 wheel,不改 env 也零差异。
+2. **bundle 层**:bundle 的 cascade carrier 虽为 `active`,但 `enable` 只是
+   允许 manager 注入 `activation.environment`;不 enable 则什么都不注入,
+   即使用户手工装了 wheel,不改 env 也零差异。
 
 附加互斥:任何 microbatching(`use_ubatching`: DBO 或 `ubatch_size>1`)下
 强制回落标准路径,与官方 core gate 对齐。

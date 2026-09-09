@@ -16,10 +16,32 @@ def _manifest_json() -> dict:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
 
-def test_descriptor_is_discoverable_but_not_activatable() -> None:
+CASCADE_CARRIERS = (
+    "vllm_ascend_split_batch.cascade_plugin",
+    "vllm_ascend_split_batch.cascade_graph_plugin",
+)
+PLANNER_CARRIER = "vllm_ascend_split_batch.planner"
+
+
+def test_descriptor_is_discoverable_and_activatable() -> None:
     manifest = load_manifest(MANIFEST_PATH)
     assert manifest.bundle_id == "org.vllm-hust.split-batch-full-graph"
-    assert activation_blocker(manifest) is not None
+    assert activation_blocker(manifest) is None
+
+
+def test_only_cascade_carriers_are_active() -> None:
+    """F4: flip the two cascade carriers to active; the planner stays inert.
+
+    The planner has no acceptance evidence yet (review F7), so it must keep
+    ``import_only`` -- an accidental flip would silently enable an
+    unimplemented host contract.
+    """
+    carriers = {
+        item["module"]: item["status"] for item in _manifest_json()["implementation"]
+    }
+    for module in CASCADE_CARRIERS:
+        assert carriers[module] == "active", module
+    assert carriers[PLANNER_CARRIER] == "import_only"
 
 
 def test_extension_version_matches_distribution_version() -> None:

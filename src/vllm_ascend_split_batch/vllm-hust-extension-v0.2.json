@@ -79,13 +79,13 @@
       "type": "python_module",
       "module": "vllm_ascend_split_batch.cascade_plugin",
       "object": "load",
-      "status": "import_only"
+      "status": "active"
     },
     {
       "type": "python_module",
       "module": "vllm_ascend_split_batch.cascade_graph_plugin",
       "object": "install",
-      "status": "import_only"
+      "status": "active"
     }
   ],
   "requires_services": [],

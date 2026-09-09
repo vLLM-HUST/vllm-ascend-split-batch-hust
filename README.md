@@ -63,8 +63,11 @@ Verified evidence (Qwen2.5-Coder-14B-Instruct, 910B2, CANN 9.0.1):
 
 Extension ID: `org.vllm-hust.split-batch-full-graph`
 
-The Manifest 0.2 descriptor stays `import_only`: installation alone changes no
-vLLM behavior; the cascade capability is env-gated at runtime.
+The Manifest 0.2 descriptor marks the two cascade carriers `active` (the
+planner stays `import_only`): `vllm-hust-ext extension enable` injects the
+`activation.environment` flags, and installation alone changes no vLLM
+behavior because the cascade capability is env-gated at runtime. Verified
+host range: `vllm-ascend>=0.23.0rc1,<0.24` (see `docs/release.md` §0.1).
 
 ```bash
 python -m pip install -e ".[test]"
