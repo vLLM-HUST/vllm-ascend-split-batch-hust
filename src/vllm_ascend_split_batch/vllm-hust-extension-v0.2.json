@@ -6,7 +6,7 @@
   "host": {
     "provider": "vllm",
     "name": "vllm-ascend",
-    "version_range": ">=0.23.0rc1,<0.24"
+    "version_range": "==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27"
   },
   "runtime": {
     "type": "python",
@@ -79,13 +79,13 @@
       "type": "python_module",
       "module": "vllm_ascend_split_batch.cascade_plugin",
       "object": "load",
-      "status": "active"
+      "status": "import_only"
     },
     {
       "type": "python_module",
       "module": "vllm_ascend_split_batch.cascade_graph_plugin",
       "object": "install",
-      "status": "active"
+      "status": "import_only"
     }
   ],
   "requires_services": [],

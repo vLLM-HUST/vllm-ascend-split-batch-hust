@@ -34,6 +34,28 @@ Default-off semantics: with `VLLM_ASCEND_ENABLE_CASCADE_DECODE` unset the
 patched callables delegate to the originals unchanged. `BatchDescriptor` and
 all other host dataclasses are never modified.
 
+### Anchor map on the current baseline (verified 2026-09-09)
+
+Host = vllm-hust v1 (`0.28.1.post1.dev143+gf18cf803c`) + vllm-ascend-hust
+main (`0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`), CANN 9.1.0.
+
+| Anchor | Old location (0.23.0rc1) | Current location | Status |
+| --- | --- | --- | --- |
+| `AscendTopKTopPSampler` / `AscendSampler` | `vllm_ascend/sample/sampler.py` | unchanged | OK |
+| runner five methods | `vllm_ascend/v1/worker/gpu_model_runner.py` | `NPUModelRunner` (`vllm_ascend/worker/model_runner_v1.py`) inherits `GPUModelRunner` from `vllm/v1/worker/gpu_model_runner.py`, where `_model_forward` / `_determine_batch_execution_and_padding` / `_warmup_and_capture` / `_capture_cudagraphs` are defined | OK (wrappers forward via `*args`) |
+| `update_full_graph_params` / `GraphParams` / `get_graph_params` / `ACLGraphWrapper` | `vllm_ascend/compilation/acl_graph.py` | same module (:279 / :306 / :334 / :60) | OK |
+| `BatchDescriptor` | `vllm/forward_context.py` | unchanged | OK |
+| `spec_decode` / `spec_decode.ngram_proposer` / `eplb.core.policy.policy_factory` | present | present (runtime needs `scipy` + `decorator` installed) | OK |
+
+**Carrier status (2026-09-09)**: the W4 `active` flip was reverted to
+`import_only` — the three acceptance evidences were gathered on 0.23.0rc1
+and do NOT transfer across a host change. Path back to `active`: re-run the
+release.md 三项证据 on this baseline (default-off 零回归冒烟 / 正确性对齐 /
+性能对比), then flip and keep the pin. `host.version_range` is pinned to the
+exact verified build (`==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`);
+packaging rejects local-version labels in ordered comparators, hence the
+point-`==` form.
+
 ## fi_sampling component (implemented, default-off)
 
 The fi_sampling plugin (`fi_sampling_plugin.py`, `fi_sampling_route.py`) rides

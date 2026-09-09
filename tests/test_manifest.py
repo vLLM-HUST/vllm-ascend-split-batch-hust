@@ -23,25 +23,54 @@ CASCADE_CARRIERS = (
 PLANNER_CARRIER = "vllm_ascend_split_batch.planner"
 
 
-def test_descriptor_is_discoverable_and_activatable() -> None:
+def test_descriptor_is_discoverable_and_blocked_pending_rerun() -> None:
+    """Discoverable, but activation is blocked while carriers are import_only.
+
+    The W4 active flip was reverted when the host baseline moved (see
+    test_all_carriers_are_import_only_after_host_change); the blocker coming
+    back is the guard working as designed.
+    """
     manifest = load_manifest(MANIFEST_PATH)
     assert manifest.bundle_id == "org.vllm-hust.split-batch-full-graph"
-    assert activation_blocker(manifest) is None
+    blocker = activation_blocker(manifest)
+    assert blocker is not None
+    assert "import_only" in blocker
 
 
-def test_only_cascade_carriers_are_active() -> None:
-    """F4: flip the two cascade carriers to active; the planner stays inert.
+def test_all_carriers_are_import_only_after_host_change() -> None:
+    """W4 flipped the cascade carriers to active on 0.23.0rc1 evidence.
 
-    The planner has no acceptance evidence yet (review F7), so it must keep
-    ``import_only`` -- an accidental flip would silently enable an
-    unimplemented host contract.
+    The working baseline moved to vllm-ascend-hust main
+    (0.25.1rc2.dev125+hust, worker/model_runner_v1 + compilation/acl_graph
+    anchors).  The three acceptance evidences have NOT been re-run on that
+    host, so per release.md discipline the carriers are demoted back to
+    ``import_only`` until the re-run passes.  The planner stays inert
+    regardless (review F7: no acceptance evidence at all).
     """
     carriers = {
         item["module"]: item["status"] for item in _manifest_json()["implementation"]
     }
-    for module in CASCADE_CARRIERS:
-        assert carriers[module] == "active", module
-    assert carriers[PLANNER_CARRIER] == "import_only"
+    for module in (*CASCADE_CARRIERS, PLANNER_CARRIER):
+        assert carriers[module] == "import_only", module
+
+
+def test_host_version_range_pins_the_verified_baseline() -> None:
+    """host.version_range must pin the exact verified host build.
+
+    packaging rejects local-version labels in ordered comparators, so the
+    single verified point is pinned with an ``==`` (local label included).
+    """
+    import packaging.specifiers
+    import packaging.version
+
+    host = _manifest_json()["host"]
+    range_ = packaging.specifiers.SpecifierSet(host["version_range"])
+    verified = "0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27"
+    assert range_.contains(packaging.version.Version(verified), prereleases=True)
+    # A neighbouring build must NOT satisfy a point pin.
+    assert not range_.contains(
+        packaging.version.Version("0.25.1rc2.dev126"), prereleases=True
+    )
 
 
 def test_extension_version_matches_distribution_version() -> None:

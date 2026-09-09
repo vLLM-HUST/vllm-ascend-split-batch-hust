@@ -56,9 +56,17 @@
   (`8751839`,证据复审通过),planner 保持 `import_only`;能力仍 default-off。
 - **基线切换(2026-09-09)**:工作区默认环境换为 conda `hust`——vllm-hust v1
   (`0.28.1.post1.dev143`)+ vllm-ascend-hust main(`0.25.1rc2.dev125+hust`)++
-  CANN 9.1.0。旧 manifest `>=0.23.0rc1,<0.24` 区间失效,`extension check` 报
-  INCOMPATIBLE(fail-closed 守卫生效,预期行为);重钉与锚点重核见工作区
-  `.openbitfun/plans/MAIN.plan.md` 队列 #3/#4。
+  CANN 9.1.0。全部锚点在新宿主重核存活(runner 五方法经 `GPUModelRunner`
+  基类继承,位于 `vllm/worker` 侧;`acl_graph.py` 四符号同模块;spec_decode/
+  eplb 只缺 `scipy`+`decorator` 依赖,已补)。manifest `host.version_range`
+  重钉为实测点 `==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`
+  (packaging 有序比较符拒 local,故用点 `==`);`extension check` 由
+  INCOMPATIBLE 转 **compatible+degraded**。
+- **cascade 降级回 `import_only`**(2026-09-09):W4 的 active 翻转基于
+  0.23.0rc1 三项证据,不跨宿主继承;按纪律降级,回 active 路径 = 在本基线
+  重跑 release.md 三项证据(default-off 零回归冒烟 / 正确性对齐 / 性能对比)。
+  kernel wheel 已按 CANN 9.1 重编并全绿(S1 逐 bit、30/30、54/54、56/56、
+  fastpath、S4 10/10),证据见 cascade-merge-op `73bf96a`。
 - e2e 证据锚点见根 README(16k 段 −21%~−38% 等,kernel README §6 有单算子锚点);
   测量报告在 `cascade-c3-results/`(工作区)。**换环境后性能数字降级为参考。**
 - CPU 门槛:`pytest -q` 77 passed / 7 failed(失败均为 cascade 锚点在新宿主的
