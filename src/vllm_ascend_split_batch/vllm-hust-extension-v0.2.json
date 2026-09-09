@@ -6,7 +6,7 @@
   "host": {
     "provider": "vllm",
     "name": "vllm-ascend",
-    "version_range": ">=0.23.0,<0.24"
+    "version_range": ">=0.23.0rc1,<0.24"
   },
   "runtime": {
     "type": "python",
@@ -17,19 +17,19 @@
   "protocols": [
     {
       "name": "vllm.graph.runtime-key",
-      "version_range": ">=1,<2"
+      "version_range": null
     },
     {
       "name": "vllm.forward.split-context",
-      "version_range": ">=1,<2"
+      "version_range": null
     },
     {
       "name": "vllm.ascend.graph-pool",
-      "version_range": ">=1,<2"
+      "version_range": null
     },
     {
       "name": "vllm.worker.split-executor",
-      "version_range": ">=1,<2"
+      "version_range": null
     }
   ],
   "components": [

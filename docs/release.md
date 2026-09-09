@@ -11,7 +11,28 @@
 - 翻 `active` 前,`activation.environment` 必须是可注入的真实值
   (`"1"`,由 `tests/test_manifest.py` 保证格式);default-off 语义由
   "不 enable 就不注入 + `load()` 内部门控" 双层保证。
-- `host.version_range` 钉住已验证区间(当前 `>=0.23.0,<0.24`),禁止 `>=0`。
+- `host.version_range` 钉住**实际验证域**(当前 `>=0.23.0rc1,<0.24`),禁止
+  `>=0`。宿主装的是 `vllm-ascend==0.23.0rc1`,packaging 语义下 prerelease
+  不属于 `>=0.23.0,<0.24`,写后者会让 `extension check` 判 INCOMPATIBLE。
+  区间收窄/放宽前先过 §4 清单并留档验证环境(见 §0.1)。
+- `protocols[].version_range` 为 `null`:这四个协议(`vllm.graph.runtime-key` /
+  `vllm.forward.split-context` / `vllm.ascend.graph-pool` /
+  `vllm.worker.split-executor`)是本仓库单方面遵守的弱契约,**宿主不独立
+  版本化**——本宿主不存在 `vllm.plugins.contracts`,manager 的
+  `_detect_protocol_versions()` 返回 `{}`。声明 `>=1,<2` 只会让 `run` 因
+  "protocol version is unavailable" 拒启(与真实兼容性无关);置 `null` 后
+  由宿主区间 + 验收证据共同约束,manager 会记录一条 "not independently
+  versioned" 证据。
+
+### 0.1 已验证域留档(F1)
+
+| 项 | 值 |
+|---|---|
+| `host.version_range` | `>=0.23.0rc1,<0.24` |
+| vllm-ascend | `0.23.0rc1`,`f4a08bddd`(`v0.23.0rc1` tag) |
+| vllm | `0.23.0+empty`,`0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665` |
+| 验证环境 | Python 3.12.13 / torch 2.10.0+cpu / torch_npu 2.10.0.post2 / CANN 9.0.1 / 910B2 |
+| 验证证据 | `extension check` → compatible;default-off serve 冒烟;`flashinfer-migration/cascade-evidence/EVIDENCE.md` |
 
 ## 1. 版本与构建
 

@@ -51,6 +51,8 @@ vllm 模块;宿主源码不可修改,宿主能力只走公开面(entry point、
 | Bundle ID | `org.vllm-hust.split-batch-full-graph`,注册于 `vllm_hust.extension_bundles` entry point,value 指向包目录(含 manifest JSON) |
 | `implementation[].status` | `active` 才可 `enable`;`import_only` 仅可 `inspect`(当前状态)。状态语义 = manifest 纪律:证据齐前不翻 `active` |
 | `activation.environment` | **enable 时注入的值**,不是文档。当前声明 `ENABLE_CASCADE_DECODE=1` + `ENABLE_CASCADE_GRAPH=1`;不 enable 则什么都不注入 |
+| `protocols[].version_range` | 四个协议均 `null`(**不独立版本化**):宿主不存在 `vllm.plugins.contracts`,manager 探测不到版本;声明具体区间只会让 `run` 以"version is unavailable"拒启。约束由 `host.version_range` + 验收证据承担,理由详见 [release.md](release.md) §0 |
+| `host.version_range` | 钉**实际验证域**(`>=0.23.0rc1,<0.24`);宿主是 `0.23.0rc1`,prerelease 不在 `>=0.23.0` 内 |
 | `components[].contracts` / `execution_planes` | `dual-pad-planner` 与 `cascade-two-stage-decode` 声明在 worker/device plane,permissions 含 `device_access` |
 | 发现 vs 导入 | `extension list/inspect/check` 只读元数据不 import 实现;import 实现的只有 vllm 的 `general_plugins` 加载(`load()` 内部再按 env 门控) |
 
