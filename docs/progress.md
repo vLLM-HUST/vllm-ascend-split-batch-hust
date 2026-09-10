@@ -95,7 +95,15 @@
   证据:`knowledge/evidence/cascade/section3-gatefix-addendum.md`
   + `logs/v1-ev3-gatefix/`(含跑前预注册)。**G6 关闭;翻 active 剩余阻塞 = 缺口 A**
   (stand-in 形态正确性口径,等真模型或团队决策)。
-- CPU 门槛:`pytest -q` **111 passed**(2026-09-10,+9 例 gate 分档 margin 测试)
+- **W3.1 fi_gelu(gelu_and_mul triton 融合)已结题**(`51f5818`,2026-09-10):
+  exact-erf 融合 kernel(29 测)+ default-off 接线(`VLLM_HUST_FI_GELU`,patch
+  `GeluAndMul.forward_oot`,13 测)+ eager/图/e2e 三段 bench。结论:**能力落地、
+  默认关闭、不建议生产启用**——triton eager launch ~110µs 主导(eager 负结果);
+  图模式 kernel 可捕获且 replay bit 精确,B=64 单算子 −31%(23.7 vs 34.2µs)但
+  e2e A/B 噪声带内不可判(Δmedian −0.311% < spread 1.95%,预注册投影 0.2–0.6%)。
+  报告 `docs/evidence/w31-fi-gelu/REPORT.md`;附带发现宿主基线缺陷
+  FULL_AND_PIECEWISE 启动崩(见 pitfalls §1.3)。
+- CPU 门槛:`pytest -q` **153 passed**(2026-09-10,+29 gelu kernel +13 接线)
   + `ruff check` 干净。
 
 ### 阶段 5:fi_sampling 采样接入(W2b,2026-09-09)

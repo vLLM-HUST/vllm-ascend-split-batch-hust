@@ -25,6 +25,20 @@ pip install triton-ascend==3.2.1 --no-deps --extra-index-url https://mirrors.hua
 pip install pytest-xdist
 ```
 
+> (2026-09-10 注:hust 新基线为 **triton-ascend 3.2.2**,恢复命令的版本号以工作区
+> AGENTS.md 陷阱 #2 为准,勿按上文 3.2.1 覆盖安装。)
+
+### 1.3 默认 cudagraph 模式 FULL_AND_PIECEWISE 启动即崩(2026-09-10,新基线)
+
+- **症状**:本基线(torch 2.13 + vllm-ascend-hust main)默认
+  `cudagraph_mode=FULL_AND_PIECEWISE` 时引擎初始化失败:
+  `AssertionError: expected OutputCode, got GraphModuleImpl`
+  (`fusion_pass_compile`,torch 2.13 AOT-autograd 缓存打包与 torch_npu 不兼容)。
+  与任何插件无关(env 不设、插件 inert 时同样崩,OFF 腿已复证)。
+- **姿势**:显式 `--compilation-config '{"cudagraph_mode":"FULL"}'`
+  (npugraph_ex + ACL graph,自带 AOT 缓存规避);所有 A/B 腿必须**对称施加**。
+- **另注**:`VLLM_DISABLE_COMPILE_CACHE=1` 仍是必须项(共享 AOT 缓存命中硬崩,见证据③口径)。
+
 - **副作用须知**:`triton` 包元数据不存在(`pip show triton` 查不到、`pip check`
   常驻告警),vllm 的 HAS_TRITON 检测基于 import 不受影响。裸调
   `vllm_ascend.ops.triton` kernel 前需先调 `init_device_properties_triton()`。
