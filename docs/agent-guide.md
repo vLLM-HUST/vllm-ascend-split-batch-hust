@@ -5,9 +5,10 @@
 
 ## 1. 硬约束(违反即返工)
 
-1. **宿主只读**:`/vllm-workspace/vllm` 与 `/vllm-workspace/vllm-ascend`
+1. **宿主只读**:`/vllm-workspace/vllm-hust` 与 `/vllm-workspace/vllm-ascend-hust`
    禁止修改。宿主能力只走官方公开面:`vllm.general_plugins` entry point、
    `--worker-cls` 子类、`--additional-config`、官方 CLI/env。
+   (旧基线 `/vllm-workspace/vllm`、`/vllm-workspace/vllm-ascend` 已于 2026-09-10 删除。)
 2. **不注册 `vllm.platform_plugins`**(已被 vllm-ascend 的 AscendPlatform 占用)。
 3. **default-off**:任何新能力关闭时必须与原生行为零差异。新开关一律
    env-gated、默认缺省,patch 方法未开启时逐字委托原实现。

@@ -8,8 +8,10 @@
 
 - **症状**:CWD=`/vllm-workspace` 时 `import vllm` 异常、`vllm serve` 报怪错。
 - **原因**:`/vllm-workspace/vllm/`(源码 checkout,无 `__init__.py`)遮蔽真实包。
+  该目录已于 2026-09-10 删除,但**规则保留**——工作区顶层仍不应作为 python CWD
+  (任何未来的 checkout 都会重新引入同一遮蔽)。
 - **姿势**:任何 python/vllm 命令**严禁以 `/vllm-workspace` 为 CWD**;到
-  `/tmp`、各仓库根或子目录执行都安全(`vllm-ascend` 带连字符不会遮蔽 `vllm_ascend`)。
+  `/tmp`、各仓库根或子目录执行都安全(`vllm-ascend-hust` 带连字符不会遮蔽 `vllm_ascend`)。
 
 ### 1.2 triton-ascend 安装覆盖坑
 

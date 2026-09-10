@@ -5,9 +5,10 @@ vllm-ascend 宿主的 default-off 插件壳:cascade 两段式 decode(eager+图�
 
 ## 硬约束
 
-1. 宿主 `/vllm-workspace/vllm`、`/vllm-workspace/vllm-ascend` **只读**;
+1. 宿主 `/vllm-workspace/vllm-hust`、`/vllm-workspace/vllm-ascend-hust` **只读**;
    宿主能力只走官方公开面(general_plugins entry / `--additional-config` /
    `--worker-cls` / 官方 CLI+env)。不注册 `vllm.platform_plugins`。
+   (旧基线 `/vllm-workspace/vllm`、`/vllm-workspace/vllm-ascend` 已于 2026-09-10 删除。)
 2. default-off:新能力必须 env-gated 且默认与原生行为零差异。
 3. bundle 保持 `import_only` 直到三项证据齐(default-off 冒烟/正确性/性能);
    `host.version_range` 禁止写 `>=0`。
