@@ -7,6 +7,8 @@
   统计等价 191 PASS / 0 FAIL)
 - 宿主:`/vllm-workspace/vllm` 0.23.0(empty)+ `/vllm-workspace/vllm-ascend`
   0.23.0rc1;**两棵宿主源码树零改动**
+  (**历史口径**:这两棵参考树已于 2026-09-10 删除;本报告全部数字绑定
+  0.23.0rc1/CANN 9.0.1 口径,**不跨宿主继承**——在新基线翻 active 前需复测)
 - 环境:Python 3.12.13 / torch 2.10.0+cpu + torch_npu 2.10.0.post2 / CANN 9.0.1 /
   910B2(单卡,`ASCEND_RT_VISIBLE_DEVICES=7`) / triton-ascend 3.2.1
 - **manifest 保持 `import_only`**(本包只攒 e2e 证据,未翻 active)
