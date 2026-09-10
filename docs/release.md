@@ -32,7 +32,7 @@
 | vllm-ascend | `0.23.0rc1`,`f4a08bddd`(`v0.23.0rc1` tag) |
 | vllm | `0.23.0+empty`,`0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665` |
 | 验证环境 | Python 3.12.13 / torch 2.10.0+cpu / torch_npu 2.10.0.post2 / CANN 9.0.1 / 910B2 |
-| 验证证据 | `extension check` → compatible;default-off serve 冒烟;`flashinfer-migration/cascade-evidence/EVIDENCE.md` |
+| 验证证据 | `extension check` → compatible;default-off serve 冒烟;`knowledge/evidence/cascade/EVIDENCE.md` |
 
 ## 1. 版本与构建
 

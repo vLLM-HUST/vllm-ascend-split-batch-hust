@@ -24,7 +24,7 @@
 | 使用方法、env 开关、验证证据 | [../README.md](../README.md) |
 | 宿主 seam 与 monkeypatch 面清单 | [../HOST_CONTRACT.md](../HOST_CONTRACT.md) |
 | 历史实现溯源 | [../PROVENANCE.md](../PROVENANCE.md) / [../provenance/](../provenance/)(只读) |
-| kernel 算子(fa_fp32_stage1 / lse_merge) | `cascade-merge-op/ascend-kernel/README.md`(工作区,仓库外) |
+| kernel 算子(fa_fp32_stage1 / lse_merge) | `ops/kernels/ascend-kernel/README.md`(工作区,仓库外) |
 | 架构语义、编程规范、发布、踩坑、进度 | 本目录 |
 
 改行为必须同步改对应权威文档;本目录只放指针,不复制内容。

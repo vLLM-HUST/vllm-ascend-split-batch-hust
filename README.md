@@ -132,7 +132,7 @@ The wheel is built in the kernel repo (`cascade-merge-op`, git), not
 published to PyPI:
 
 ```bash
-pip install ".[kernels]" --find-links /vllm-workspace/cascade-merge-op/ascend-kernel/output
+pip install ".[kernels]" --find-links /vllm-workspace/ops/kernels/ascend-kernel/output
 python -c "import ascend_kernel, torch; assert hasattr(torch.ops.npu, 'fa_fp32_stage1')"
 ```
 

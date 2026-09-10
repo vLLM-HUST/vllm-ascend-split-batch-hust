@@ -2,7 +2,7 @@
 
 - 日期:2026-09-09
 - 落点:插件仓库 `vllm-ascend-split-batch-hust`(分支 `feat/cascade-attention-plug`)
-- 被集成物:W2 已 review(approve)的 `flashinfer-migration/sampling/fi_sampling`
+- 被集成物:W2 已 review(approve)的 `knowledge/surveys/sampling/fi_sampling`
   (flashinfer `main@3a4e7052` 采样主路径 → triton-ascend 3.2.1,910B2 实测,
   统计等价 191 PASS / 0 FAIL)
 - 宿主:`/vllm-workspace/vllm` 0.23.0(empty)+ `/vllm-workspace/vllm-ascend`
@@ -227,7 +227,7 @@ joint 路由 B=256、k=1 路由 == argmax(B=256)、per-request generator → for
    已加入 ruff `extend-exclude`;升级源包时需重新同步并记录 hash。
 6. **manifest 未翻 active**:证据链仍缺"e2e 正收益"(第 1 条),按 release.md §0 三项证据门槛,
    当前不满足翻 active 条件。`import_only` 保持。
-7. **上游源包仍在变动**:本包 vendor 期间 `flashinfer-migration/sampling/fi_sampling/kernels.py`
+7. **上游源包仍在变动**:本包 vendor 期间 `knowledge/surveys/sampling/fi_sampling/kernels.py`
    被并发更新(2026-09-09 04:53,review errata:补 kSCALE 溯源说明)。已按最新版本重同步;
    后续若源包再变需重新核对(算法未变,仅注释)。
 

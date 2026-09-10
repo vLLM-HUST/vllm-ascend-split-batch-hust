@@ -48,7 +48,7 @@
   capture/gate bench 子进程四处守卫),单测
   `tests/test_cascade_fail_open.py`(含删 wheel 子进程等价场景);
   manifest 保持 `import_only`,翻 active 三项证据归档于工作区
-  `flashinfer-migration/cascade-evidence/`(仓库外,不入库)。
+  `knowledge/evidence/cascade/`(仓库外,不入库)。
 
 ## 2. 现状(2026-09-09)
 
@@ -68,14 +68,14 @@
   kernel wheel 已按 CANN 9.1 重编并全绿(S1 逐 bit、30/30、54/54、56/56、
   fastpath、S4 10/10),证据见 cascade-merge-op `73bf96a`。
 - e2e 证据锚点见根 README(16k 段 −21%~−38% 等,kernel README §6 有单算子锚点);
-  测量报告在 `cascade-c3-results/`(工作区)。**换环境后性能数字降级为参考。**
+  测量报告在 `knowledge/evidence/c3-legacy/`(工作区)。**换环境后性能数字降级为参考。**
 - **新基线三项证据重验(2026-09-09)**:证据① default-off 冒烟 **PASS**;证据②
   正确性 **部分**——图模式车道首次未 shim 跑通(原为引擎无法启动),确定性 0/64、
   自然答案 63/64 通过,但强制续写形态发散 21–22/64 高于历史 ≤8/64 口径(字面形态
   1/64 通过;发散臂集合修复前后一致,非修复引入);证据③ 性能 **部分**——拓扑复现
   (4k 亏 +12.3%/+6.7%、8k −3.5%/−13.5%、16k −20.2%/−31.6%,区间均分离),但
   `(64,4096)` 亏损未被自适应 gate 覆盖(gate 微基准判 `on`)。**故 cascade 保持
-  `import_only`,不翻 active**;详情 `flashinfer-migration/cascade-evidence/
+  `import_only`,不翻 active**;详情 `knowledge/evidence/cascade/
   EVIDENCE-V1-BASELINE.md`。
 - **D1–D4 宿主签名漂移已修复**(`ddc0120`):`_capture_cudagraphs` 缺 `profiler`、
   `_update_full_graph_params_if_needed` 多传 `positions`、`update_graph_params` 多传
@@ -92,7 +92,7 @@
   8/8;NPU 4 腿重验(预注册判据)——4/4 腿 `(64,4096)→OFF`,p420_b64 亏格收回
   (+6.7%→+2.1%),8k/16k 赢格保留(−14.5%/−32.5%),`(128,4096)` 大 margin 格
   不受影响,0 TypeError;cascade key hit 379→254(Δ≈125,step 级关闭佐证)。
-  证据:`flashinfer-migration/cascade-evidence/section3-gatefix-addendum.md`
+  证据:`knowledge/evidence/cascade/section3-gatefix-addendum.md`
   + `logs/v1-ev3-gatefix/`(含跑前预注册)。**G6 关闭;翻 active 剩余阻塞 = 缺口 A**
   (stand-in 形态正确性口径,等真模型或团队决策)。
 - CPU 门槛:`pytest -q` **111 passed**(2026-09-10,+9 例 gate 分档 margin 测试)
