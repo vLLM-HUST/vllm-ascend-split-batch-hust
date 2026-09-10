@@ -26,6 +26,7 @@ here we test the integration contract:
 - a kernel failure falls back to the base chain instead of raising.
 """
 
+import logging
 import os
 import subprocess
 import sys
@@ -395,6 +396,42 @@ def test_fallback_flags_fail_closed_when_ascend_config_raises(monkeypatch) -> No
 
     monkeypatch.setattr(plugin, "_ascend_config", _boom)
     assert plugin._fallback_flags() == (True, True, True)
+
+
+def test_missing_async_exponential_knob_is_host_drift_not_a_fallback(
+    monkeypatch, caplog
+) -> None:
+    """A knob the host removed must NOT silently kill the FI path.
+
+    New baseline (vllm-ascend 0.25.1rc2): ``AscendConfig`` dropped
+    ``enable_async_exponential`` (upstream ``4f0a38a95``).  Plain attribute
+    access made ``_fallback_flags`` raise -> fail CLOSED -> 100% fork routing
+    while the plugin still logged itself ACTIVE (caught by the 2026-09-10 e2e
+    refresh).  The absent knob now reads as "feature gone" = disabled, and the
+    drift is warned once.
+    """
+    plugin._reset_for_tests()
+    config = types.SimpleNamespace(enable_reduce_sample=False)
+    monkeypatch.setattr(plugin, "_ascend_config", lambda: config)
+    monkeypatch.setattr(plugin, "_batch_invariant", lambda: False)
+    with caplog.at_level(logging.WARNING):
+        assert plugin._fallback_flags() == (False, False, False)
+    assert "enable_async_exponential" in caplog.text
+
+    # second call stays quiet (one warning per knob, not per decode step)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        plugin._fallback_flags()
+    assert caplog.text == ""
+
+
+def test_present_reduce_sample_knob_still_falls_back(monkeypatch) -> None:
+    """Tolerating an absent knob must not disable a knob that is really on."""
+    plugin._reset_for_tests()
+    config = types.SimpleNamespace(enable_reduce_sample=True)
+    monkeypatch.setattr(plugin, "_ascend_config", lambda: config)
+    monkeypatch.setattr(plugin, "_batch_invariant", lambda: False)
+    assert plugin._fallback_flags() == (False, True, False)
 
 
 # --- review follow-up: garbage env VALUES must never raise either -----------

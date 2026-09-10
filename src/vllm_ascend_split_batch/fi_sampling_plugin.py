@@ -70,6 +70,11 @@ _fi_import_failed = False
 _warning_once = False
 # env vars already reported as unparseable (one warning each, not per step).
 _bad_env_warned: set[str] = set()
+# ascend-config fallback knobs already reported as absent on this host (host
+# drift must stay visible in the serving log, not just silently tolerated).
+_missing_knob_warned: set[str] = set()
+#: sentinel for "the host does not define this knob at all".
+_MISSING = object()
 # Monotonic call counter mixed into the per-call seed; fi_sampling's kernel
 # decorrelates rows itself (philox offset includes the row index), so one seed
 # per call is enough -- but the seed MUST advance per call, otherwise every
@@ -149,6 +154,7 @@ def _reset_for_tests() -> None:
     _seed_base = None
     _max_batch_seen = 0
     _bad_env_warned.clear()
+    _missing_knob_warned.clear()
     _route_counts.clear()
     _route_traces.clear()
     _batch_histogram.clear()
@@ -403,6 +409,37 @@ def _ascend_config():
     return get_ascend_config()
 
 
+def _config_flag(config, name: str) -> bool:
+    """Read one optional ascend-config fallback knob, tolerating host drift.
+
+    A knob this host version does not define gates a feature that does not
+    exist here, so it cannot be enabled -> ``False``; the absence is warned
+    once per knob so the drift stays visible in the serving log.  Reading a
+    knob that IS present but raises still propagates, so the caller keeps
+    failing closed on a genuinely unreadable config.
+
+    Rationale (2026-09-10, new baseline): ``AscendConfig`` dropped
+    ``enable_async_exponential`` in vllm-ascend commit ``4f0a38a95``
+    ("[Refactor] asnc exponential optimization unset", #12306).  Probing it by
+    plain attribute access made ``_fallback_flags`` raise on
+    vllm-ascend ``0.25.1rc2``, which failed CLOSED and silently pushed every
+    call to the fork chain -- the e2e route histogram was 100% ``fork`` with
+    the plugin reporting itself ACTIVE.
+    """
+    value = getattr(config, name, _MISSING)
+    if value is _MISSING:
+        if name not in _missing_knob_warned:
+            _missing_knob_warned.add(name)
+            logger.warning(
+                "fi_sampling: this vllm-ascend host does not define the "
+                "ascend-config knob '%s'; treating the feature it gates as "
+                "disabled (feature removed upstream).",
+                name,
+            )
+        return False
+    return bool(value)
+
+
 def _fallback_flags() -> tuple[bool, bool, bool]:
     """(batch_invariant, reduce_sample, async_exponential) for the route call.
 
@@ -416,8 +453,8 @@ def _fallback_flags() -> tuple[bool, bool, bool]:
         config = _ascend_config()
         return (
             batch_invariant,
-            bool(config.enable_reduce_sample),
-            bool(config.enable_async_exponential),
+            _config_flag(config, "enable_reduce_sample"),
+            _config_flag(config, "enable_async_exponential"),
         )
     except Exception as exc:  # noqa: BLE001 -- conservative: stay on fork chain
         _warn_once(
