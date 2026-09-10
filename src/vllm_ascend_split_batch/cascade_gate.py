@@ -27,6 +27,9 @@ Bench design (per uniform batch bucket N x shared-prefix bucket P):
 A bucket enables cascade only when cascade is >= CASCADE_GATE_MARGIN (2%)
 faster; unbenched buckets default to cascade-on (current behavior), so the
 gate can only suppress the measured loss region, never the wins.
+Cells at L2-scale prefix buckets (<= SMALL_PREFIX_MAX) must clear a larger,
+e2e-calibrated margin (SMALL_PREFIX_MARGIN); see the constant's comment for
+the disjoint-table blind spot.
 
 Ordering hazard (W0 report sec.3): after the first ``fa_fp32_stage1`` call in
 a process, eager FIA v2 with kv >= ~8k faults on the aicore.  The bench is
@@ -44,6 +47,8 @@ so a gated step is numerically the non-cascade path.
 Env:
   VLLM_ASCEND_CASCADE_ADAPTIVE_GATE=1     enable benching + consumption
   VLLM_ASCEND_CASCADE_GATE_OVERRIDE=on|off  force every bucket (skips bench)
+  VLLM_ASCEND_CASCADE_GATE_SMALLP_MARGIN=<0..1>  small-prefix bucket margin
+  VLLM_ASCEND_CASCADE_GATE_SMALLP_MAXPREFIX=<N>  small-prefix bucket bound
 """
 
 from __future__ import annotations
@@ -61,7 +66,26 @@ ENV_OVERRIDE = "VLLM_ASCEND_CASCADE_GATE_OVERRIDE"
 
 # Cascade must be at least this much faster to be chosen (noise hysteresis).
 GATE_MARGIN = 0.02
-# Representative per-request suffix for the probes (2 blocks of 128).
+# e2e-calibrated small-prefix guard (v1-ev3 G6): the probes run per-request
+# DISJOINT block tables (W0 hazards #2/#3), i.e. they measure the
+# no-prefix-cache world, while the engine serves with enable_prefix_caching
+# where the production FULL path reuses the shared KV blocks across requests.
+# At L2-scale shared prefixes (4096 tokens ~ 16.8 MiB K+V at the tested 14B
+# geometry) that reuse erases cascade's traffic advantage, leaving only the
+# engine-path overheads -> measured e2e LOSS (+6.7% at (64,4096)) despite a
+# +10.7% bench margin.  At >=8k the sign never flipped (4 cells, v1-ev3-rerun
+# section 8).  A uniform margin cannot separate (64,4096)[bench +10.7% -> e2e
+# loss] from (32,8192)[bench +10.9% -> e2e win], so the enhanced margin is
+# keyed on the prefix bucket itself.  Fires only when MIN_PREFIX is lowered
+# into the 4k region; the default MIN_PREFIX=8192 never benches such a bucket.
+SMALL_PREFIX_MAX = 4096
+SMALL_PREFIX_MARGIN = 0.25
+ENV_SMALLP_MARGIN = "VLLM_ASCEND_CASCADE_GATE_SMALLP_MARGIN"
+ENV_SMALLP_MAXPREFIX = "VLLM_ASCEND_CASCADE_GATE_SMALLP_MAXPREFIX"
+# Representative per-request suffix for the probes (2 blocks of 128): it
+# approximates the p420 shape at generation end (prompt tail ~105 + 128 gen),
+# and an oversized suffix can only depress the bench margin (conservative
+# direction), so do not shrink it without re-calibrating against e2e.
 SUFFIX = 256
 
 _lock = threading.Lock()
@@ -79,6 +103,14 @@ def override() -> str | None:
     if val in ("on", "off"):
         return val
     return None
+
+
+def _env_float(name: str, default: float, lo: float, hi: float) -> float:
+    try:
+        val = float(os.getenv(name, ""))
+    except ValueError:
+        return default
+    return val if lo <= val <= hi else default
 
 
 def reset_for_tests() -> None:
@@ -119,6 +151,22 @@ def decision_for(shared_len: int, num_tokens: int) -> bool:
         # above the largest benched prefix: cascade keeps winning there
         return True
     return _decisions.get((num_tokens, bucket), True)
+
+
+def _margin_for(shared: int) -> float:
+    """Margin a benched cell must clear at this shared-prefix bucket."""
+    try:
+        small_max = int(os.getenv(ENV_SMALLP_MAXPREFIX, str(SMALL_PREFIX_MAX)))
+    except ValueError:
+        small_max = SMALL_PREFIX_MAX
+    if small_max > 0 and shared <= small_max:
+        return _env_float(ENV_SMALLP_MARGIN, SMALL_PREFIX_MARGIN, 0.0, 1.0)
+    return GATE_MARGIN
+
+
+def _verdict(cascade_us: float, full_us: float, shared: int) -> bool:
+    """True when cascade clears the bucket margin (same <= as before)."""
+    return cascade_us <= full_us * (1.0 - _margin_for(shared))
 
 
 # ----------------------------------------------------------------- benching
@@ -224,10 +272,12 @@ def bench_all(runner, batch_descriptors, block_size: int) -> float:
             if not isinstance(cell, dict) or "cascade" not in cell \
                     or "full" not in cell:
                 continue
-            verdict = cell["cascade"] <= cell["full"] * (1.0 - GATE_MARGIN)
+            margin = _margin_for(shared)
+            verdict = cell["cascade"] <= cell["full"] * (1.0 - margin)
             _decisions[(num_tokens, shared)] = verdict
             print(f"[cas-gate] N={num_tokens} P={shared} "
                   f"cascade={cell['cascade']:.0f}us full={cell['full']:.0f}us "
+                  f"margin={margin:.0%} "
                   f"-> {'on' if verdict else 'OFF'}", flush=True)
 
     with _lock:

@@ -22,6 +22,8 @@ gate = pytest.importorskip("vllm_ascend_split_batch.cascade_gate")
 def _clean(monkeypatch):
     monkeypatch.delenv(gate.ENV_GATE, raising=False)
     monkeypatch.delenv(gate.ENV_OVERRIDE, raising=False)
+    monkeypatch.delenv(gate.ENV_SMALLP_MARGIN, raising=False)
+    monkeypatch.delenv(gate.ENV_SMALLP_MAXPREFIX, raising=False)
     gate.reset_for_tests()
     yield
     gate.reset_for_tests()
@@ -93,3 +95,60 @@ def test_prefix_grid():
     assert gate._prefix_grid(4096, 20480) == [4096, 8192, 16384]
     assert gate._prefix_grid(8192, 16384) == [8192]   # 2x capped by half len
     assert gate._prefix_grid(20480, 20480) == []      # min prefix too large
+
+
+class TestBucketedMarginVerdict:
+    """Verdict computation with the e2e-calibrated small-prefix guard.
+
+    All probe numbers are archived measurements (v1-ev3-rerun sec.8.1): the
+    4k cells were benched at MIN_PREFIX=4096 while the default MIN_PREFIX=8192
+    never produces a small-prefix bucket.
+    """
+
+    def test_verdict_small_prefix_guard_flips_recorded_loss_cell(self):
+        # (64,4096) r1/r2: bench +10.7%/+10.8%, e2e loss -> under the 25%
+        # small-prefix margin both recorded cells must read OFF.
+        assert gate._verdict(734, 822, 4096) is False   # r1
+        assert gate._verdict(737, 826, 4096) is False   # r2
+
+    def test_verdict_keeps_recorded_8k_win(self):
+        # (32,8192) r1/r2: bench +10.9%/+10.1%, e2e win; the fix must not
+        # touch the 8k bucket verdicts.
+        assert gate._verdict(688, 772, 8192) is True    # r1
+        assert gate._verdict(698, 776, 8192) is True    # r2
+
+    def test_verdict_4k_large_margin_still_on(self):
+        # (128,4096) r+: bench +48.2%; a 4k bucket with ample margin stays on.
+        assert gate._verdict(831, 1603, 4096) is True
+
+    def test_verdict_loss_cell_off(self):
+        # (32,4096): cascade slower than full at the same 4k bucket.
+        assert gate._verdict(672, 430, 4096) is False
+
+    def test_verdict_boundary_is_inclusive(self):
+        # <= semantics: exactly full*(1-0.25) is still ON, one us above is OFF.
+        assert gate._verdict(768, 1024, 4096) is True
+        assert gate._verdict(769, 1024, 4096) is False
+
+    def test_verdict_env_margin_override(self, monkeypatch):
+        monkeypatch.setenv(gate.ENV_SMALLP_MARGIN, "0.05")
+        # 734/822 = +10.7% clears a relaxed 5% small-prefix margin.
+        assert gate._verdict(734, 822, 4096) is True
+
+    def test_verdict_env_maxprefix_shrinks_small_bucket(self, monkeypatch):
+        monkeypatch.setenv(gate.ENV_SMALLP_MAXPREFIX, "2048")
+        # 4096 is no longer "small": the plain GATE_MARGIN applies and the
+        # recorded +10.7% cell is on again (as before this change).
+        assert gate._verdict(734, 822, 4096) is True
+
+    def test_verdict_invalid_env_falls_back_to_defaults(self, monkeypatch):
+        monkeypatch.setenv(gate.ENV_SMALLP_MARGIN, "bogus")
+        monkeypatch.setenv(gate.ENV_SMALLP_MAXPREFIX, "bogus")
+        # upstream override() style: illegal values are ignored.
+        assert gate._verdict(734, 822, 4096) is False
+        assert gate._verdict(688, 772, 8192) is True
+
+    def test_margin_for_default_buckets(self):
+        assert gate._margin_for(4096) == 0.25
+        assert gate._margin_for(8192) == 0.02
+        assert gate._margin_for(16384) == 0.02
