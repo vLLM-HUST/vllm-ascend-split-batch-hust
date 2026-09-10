@@ -82,7 +82,21 @@
   `num_dcp_pcp_tokens`、`_model_forward` 参数约定。所有包装器改 `*args/**kwargs`
   原样转发 + try/except 单次 warning 委托(fail-open 契约兑现);新增
   `tests/test_host_signature_drift.py`(13 例,含变异测试证明有效)。
-- CPU 门槛:`pytest -q` **102 passed** + `ruff check` 干净。
+- **G6 gate 覆盖缺口已修复**(`c4121e2`,2026-09-10):证据③暴露的 `(64,4096)`
+  亏损格 bench 判 `on` 不回落。归因:gate 微基准探测用逐请求不相交 block table
+  (W0 防故障约束),测的是无 prefix-cache 复用世界,4k 共享前缀在引擎内可被 FULL
+  路径经 L2 复用,cascade 流量优势归零;且 `(64,4096)` 与 `(32,8192)` 留档 bench
+  margin(+10.7% vs +10.9%)不可分离,单一阈值无解。修复:分档 margin——
+  `P≤4096` 桶要求 ≥25%(`SMALL_PREFIX_MARGIN`,env 可调),其余桶维持 2%;
+  默认 `MIN_PREFIX=8192` 不 bench 出小桶,默认行为零变化。验证:留档 8 格回放
+  8/8;NPU 4 腿重验(预注册判据)——4/4 腿 `(64,4096)→OFF`,p420_b64 亏格收回
+  (+6.7%→+2.1%),8k/16k 赢格保留(−14.5%/−32.5%),`(128,4096)` 大 margin 格
+  不受影响,0 TypeError;cascade key hit 379→254(Δ≈125,step 级关闭佐证)。
+  证据:`flashinfer-migration/cascade-evidence/section3-gatefix-addendum.md`
+  + `logs/v1-ev3-gatefix/`(含跑前预注册)。**G6 关闭;翻 active 剩余阻塞 = 缺口 A**
+  (stand-in 形态正确性口径,等真模型或团队决策)。
+- CPU 门槛:`pytest -q` **111 passed**(2026-09-10,+9 例 gate 分档 margin 测试)
+  + `ruff check` 干净。
 
 ### 阶段 5:fi_sampling 采样接入(W2b,2026-09-09)
 
