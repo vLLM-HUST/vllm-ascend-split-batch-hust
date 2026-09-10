@@ -45,7 +45,7 @@ main (`0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`), CANN 9.1.0.
 > (D1–D4 below) — exactly the failure mode `docs/pitfalls.md` §2.1 warns about.
 > Existence is not compatibility: a monkeypatched method must match the host's
 > *parameter list and call convention*. Use the AST audit
-> (`flashinfer-migration/cascade-evidence/logs/sig_audit2.py` semantics) before
+> (`knowledge/evidence/cascade/logs/sig_audit2.py` semantics) before
 > any `host.version_range` change.
 
 | Anchor | Host signature (current) | Plugin wrapper | Status |
@@ -69,7 +69,7 @@ original on any internal failure with a single warning.
 **Carrier status (2026-09-09)**: carriers remain `import_only`. The three
 acceptance evidences were gathered on 0.23.0rc1 and do NOT transfer across a
 host change; the new-baseline re-run
-(`flashinfer-migration/cascade-evidence/EVIDENCE-V1-BASELINE.md`) **failed
+(`knowledge/evidence/cascade/EVIDENCE-V1-BASELINE.md`) **failed
 evidence #2 and partially failed #3** because of D1–D4. Path back to `active`:
 fix D1–D4 (done in a follow-up commit), then re-run release.md 三项证据 on this
 baseline and keep the pin. `host.version_range` stays at the exact verified
