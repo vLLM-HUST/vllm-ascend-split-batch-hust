@@ -1,7 +1,7 @@
 # Review 材料：fia-demask（decode FIA 去掩码）
 
-> 一页材料，可独立阅读。结论先行：**建议翻 active**——正确性构造性等价 + 逐 token 全等，
-> 性能 +3.1~4.6% TPOT 远超 1% 门槛，default-off 零差异。
+> 一页材料，可独立阅读。结论先行：**已翻 active（§3 全绿）**——正确性构造性等价 + 逐 token
+> 全等，六格全量 TPOT geomean **+6.43%**（全部 ≥1% 门槛），default-off 零差异。
 
 ## 1. 它是什么
 
@@ -20,7 +20,8 @@
 | CPU 守护 | 41 tests（demask 35 + manifest 守护）+ ruff 全绿 | `tests/test_fia_demask.py`、`tests/test_manifest.py` |
 | 门控证据 | OFF 腿 observe 行（mask 存在）/ ON 腿 `de-mask applied` + `ACTIVE` 行；/health 200 | `profiles/.../probe-fia/`、`raw/serve_demask_{off,on}.log` |
 | 逐 token 等价 | greedy 8/8 **bit 级全等**（diff 为空） | `probe-fia/e2e/parity_diff.txt` |
-| e2e decode 账 | p1600×B32 **+3.10%**、B64 **+4.61%** TPOT（3+3 轮） | `probe-fia/E2E-mask-removal.md` §3 |
+| e2e decode 账（双格深钻） | p1600×B32 **+3.10%**、B64 **+4.61%** TPOT（3+3 轮） | `probe-fia/E2E-mask-removal.md` §3 |
+| **六格全量 + e2e 账** | TPOT +3.30~+10.11%（p420/800/1600 × B32/64，**geomean +6.43%**）；e2e random 1000/1000 吞吐 **+3.52%**（42 轮） | `E2E-mask-removal.md` §3.1 |
 | 单算子口径 | 去掩码使 FIA 单调 −8…−23%（中位 −12%），108 cell sweep | `probe-fia/REPORT.md` §(c) |
 
 **两条必随事实**：(1) 每腿首轮 bench 为预热离群（四组对称出现，OFF 52.1/70.8 vs ON
