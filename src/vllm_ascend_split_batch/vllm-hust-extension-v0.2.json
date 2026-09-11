@@ -66,21 +66,6 @@
       "permissions": [
         "device_access"
       ]
-    },
-    {
-      "component_id": "fia-decode-demask",
-      "implementation_ref": "vllm_ascend_split_batch.fia_demask_plugin:load",
-      "contracts": [
-        "vllm.general_plugins"
-      ],
-      "execution_planes": [
-        "worker",
-        "device"
-      ],
-      "isolation": "trusted_in_process",
-      "permissions": [
-        "device_access"
-      ]
     }
   ],
   "implementation": [
@@ -101,12 +86,6 @@
       "module": "vllm_ascend_split_batch.cascade_graph_plugin",
       "object": "install",
       "status": "active"
-    },
-    {
-      "type": "python_module",
-      "module": "vllm_ascend_split_batch.fia_demask_plugin",
-      "object": "load",
-      "status": "import_only"
     }
   ],
   "requires_services": [],

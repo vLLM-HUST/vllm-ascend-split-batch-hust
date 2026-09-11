@@ -5,9 +5,13 @@ import tomllib
 from vllm_hust_ext.manifest import activation_blocker, load_manifest
 
 import vllm_ascend_split_batch
+import vllm_ascend_split_batch.fia_demask as fia_demask_module
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = Path(vllm_ascend_split_batch.__file__).with_name(
+    "vllm-hust-extension-v0.2.json"
+)
+FIA_DEMASK_MANIFEST_PATH = Path(fia_demask_module.__file__).with_name(
     "vllm-hust-extension-v0.2.json"
 )
 
@@ -51,6 +55,27 @@ def test_only_cascade_carriers_are_active() -> None:
     for module in CASCADE_CARRIERS:
         assert carriers[module] == "active", module
     assert carriers[PLANNER_CARRIER] == "import_only"
+    # The demask carrier moved to its own bundle; it must not linger here.
+    assert "vllm_ascend_split_batch.fia_demask_plugin" not in carriers
+
+
+def test_fia_demask_bundle_is_import_only_until_activation() -> None:
+    """The standalone demask bundle starts import_only with its own env key.
+
+    Activation evidence (E2E-mask-removal.md) exists, but the flip to
+    ``active`` happens only together with the release.md section-3 run; this
+    guard pins the pre-activation state and the injection key.
+    """
+    manifest = load_manifest(FIA_DEMASK_MANIFEST_PATH)
+    assert manifest.bundle_id == "org.vllm-hust.fia-demask"
+    raw = json.loads(FIA_DEMASK_MANIFEST_PATH.read_text(encoding="utf-8"))
+    carriers = {i["module"]: i["status"] for i in raw["implementation"]}
+    assert carriers["vllm_ascend_split_batch.fia_demask_plugin"] == "import_only"
+    env = raw["activation"]["environment"]
+    assert env == {"VLLM_HUST_FIA_DEMASK": "1"}
+    for key, value in env.items():
+        assert value in {"0", "1"}, key
+    assert raw["host"]["version_range"] == _manifest_json()["host"]["version_range"]
 
 
 def test_host_version_range_pins_the_verified_baseline() -> None:

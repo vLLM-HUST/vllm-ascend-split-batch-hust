@@ -152,3 +152,36 @@ e2e greedy 逐 token 对拍（见证据文件）。
   ≈ **3.1% TPOT**（范围 1.7–6.1%）。若 e2e 落在噪声带内，按噪声如实上报。
 - 本插件不改任何数值语义，故**不**需要 new kernel；同样不触碰
   `manifest.host.version_range`（仍钉 `==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`）。
+
+## 8. activation 面决策（2026-09-11，独立 bundle）
+
+**决策：独立 bundle `org.vllm-hust.fia-demask`，不并入
+`org.vllm-hust.split-batch-full-graph`。**
+
+理由：
+
+1. 单能力独立开关——并入意味着 `enable` 同时打开 cascade 与 demask，
+   "关 A 开 B"在 manager 面不可表达，违背 default-off 单能力语义；
+2. demask 与 cascade 无共享契约（protocols 为空），没有同 bundle 的技术理由；
+3. 生命周期不同步：cascade 已 active，demask 刚过验收，独立 bundle 让两者
+   各自走各自的 §3/翻 active 节奏。
+
+发现机制约束（`extension-manager/src/vllm_hust_ext/discovery.py`）：
+
+- 每个 `vllm_hust.extension_bundles` entry point 必须指向一个**静态模块目录**，
+  目录内**恰好一份** manifest（文件名白名单 `vllm-hust-extension-v0.2.json` 等）；
+- 同一 distribution 可注册多个 bundle（各自模块目录独立）。
+
+落地形态：
+
+- 新模块目录 `src/vllm_ascend_split_batch/fia_demask/`（`__init__.py` +
+  `vllm-hust-extension-v0.2.json`，bundle_id `org.vllm-hust.fia-demask`，
+  `activation.environment = {"VLLM_HUST_FIA_DEMASK": "1"}`，protocols 空数组）；
+- 旧 bundle manifest 移除 demask 的 component + implementation 项（避免双注册）；
+- pyproject 增加 entry point `"org.vllm-hust.fia-demask" = "vllm_ascend_split_batch.fia_demask"`；
+- `tests/test_manifest.py` 新增 `test_fia_demask_bundle_is_import_only_until_activation`
+  （守 import_only + 注入键 + version_range 与主 bundle 一致）+ 旧测试补"demask 不残留"断言。
+
+注意：新增 entry point 需要**本地 editable 重注册**才对 importlib.metadata 可见
+（`pip install --no-deps -e .`，不触碰任何依赖，torch/triton 配对不受影响）——
+这是对该仓库唯一安全的 pip 用法，执行后须复核 `torch==2.13.0` 未动。
