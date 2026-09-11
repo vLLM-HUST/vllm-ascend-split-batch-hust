@@ -96,7 +96,12 @@ class _HostTree:
     """The fake host surface the carrier leans on."""
 
     def __init__(
-        self, monkeypatch, register: bool = True, variants: dict | None = None
+        self,
+        monkeypatch,
+        register: bool = True,
+        variants: dict | None = None,
+        has_triton: bool = True,
+        base_rope_310p: bool = False,
     ):
         variants = variants or {}
         self.registry = {}
@@ -105,10 +110,26 @@ class _HostTree:
         self.registry_during_registration = None
         self.recorded_cache = []
         self.triton_calls = []
+        self.delegate_calls = []
+
+        tree = self
 
         class AscendRotaryEmbedding:
             def forward_oot(self, *args, **kwargs):
+                tree.delegate_calls.append(("910", args, kwargs))
                 return ("ascend-forward-oot", args, kwargs)
+
+        class AscendRotaryEmbedding310(AscendRotaryEmbedding):
+            """Compatibility-build variant: the host swaps the base key for this."""
+
+            def forward_oot(self, *args, **kwargs):
+                tree.delegate_calls.append(("310p", args, kwargs))
+                return ("ascend-forward-oot-310p", args, kwargs)
+
+        base_rope_cls = (
+            AscendRotaryEmbedding310 if base_rope_310p else AscendRotaryEmbedding
+        )
+        self.base_rope_cls = base_rope_cls
 
         class AscendMRotaryEmbedding:
             _ASCEND_TRITON_GRID_LIMIT = 65535
@@ -147,8 +168,6 @@ class _HostTree:
         self.AscendYaRNRotaryEmbedding = AscendYaRNRotaryEmbedding
         self.Llama3RotaryEmbedding = Llama3RotaryEmbedding
 
-        tree = self
-
         def register_ascend_customop(vllm_config=None):
             tree.registration_calls.append(vllm_config)
             if tree.registered:
@@ -161,7 +180,7 @@ class _HostTree:
             # swaps entries) and then plant it, asserting each name is still
             # absent -- exactly like ``CustomOp.register_oot`` does.
             registered = {
-                "RotaryEmbedding": AscendRotaryEmbedding,
+                "RotaryEmbedding": base_rope_cls,
                 "MRotaryEmbedding": AscendMRotaryEmbedding,
                 "YaRNScalingRotaryEmbedding": AscendYaRNRotaryEmbedding,
             }
@@ -209,8 +228,13 @@ class _HostTree:
                 "AscendMRotaryEmbedding": AscendMRotaryEmbedding,
                 "AscendYaRNRotaryEmbedding": AscendYaRNRotaryEmbedding,
                 "_record_cos_sin_cache": record_cos_sin_cache,
+                # The fork module binds the kernel at module level under
+                # HAS_TRITON; the carrier mirrors defect ② from *this* binding.
+                "HAS_TRITON": has_triton,
             },
         }
+        if has_triton:
+            fake_tree["vllm_ascend.ops.rotary_embedding"]["triton_mrope"] = triton_mrope
         self.modules = {}
         for name, attrs in fake_tree.items():
             module = _fake_module(name, **attrs)
@@ -425,6 +449,96 @@ def test_install_failure_fails_open_with_one_warning(monkeypatch, caplog) -> Non
     assert plugin.stats()["applied"] == {}
 
 
+def test_half_installation_is_rolled_back(monkeypatch, caplog) -> None:
+    """A failure *after* the wrap must not leave a live downgrading wrapper.
+
+    The wrapper is installed first (its whole point is to run after the host's
+    registration pass), so an override failure there used to leave the wrapper in
+    place while the log claimed the process "stays on the fork's stock rope
+    classes" -- the next registration call would then downgrade silently.  The
+    rollback makes the log line and ``stats()`` true.
+    """
+
+    tree = _HostTree(monkeypatch)
+    monkeypatch.setenv(ENV, "1")
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("injected eager override failure")
+
+    monkeypatch.setattr(plugin, "_apply_overrides", _boom)
+    with caplog.at_level(logging.WARNING):
+        assert plugin.load() is False
+
+    # No half state: the host reference is restored, the state is empty.
+    assert plugin.stats()["installed"] is False
+    assert plugin.stats()["wrapped"] == []
+    assert (
+        tree.modules["vllm_ascend.utils"].register_ascend_customop
+        is tree.register_ascend_customop
+    )
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum("installation failed" in m for m in messages) == 1, messages
+    assert not any("carrier is ACTIVE" in m for m in messages)
+
+    # A later registration call therefore keeps the fork classes untouched.
+    monkeypatch.undo()
+    tree.call_registration()
+    assert tree.registry[plugin.KEY_MROPE] is tree.AscendMRotaryEmbedding
+    assert plugin.KEY_LLAMA3 not in tree.registry
+
+
+def test_load_after_registration_applies_eagerly(monkeypatch) -> None:
+    """The real worker ordering: registration first, ``load()`` after it.
+
+    ``NPUWorker.__init__`` calls ``register_ascend_customop`` before
+    ``super().__init__()``, and vLLM loads general plugins after that, so the
+    wrapper will never fire in that process.  ``install()`` must notice and apply
+    the overrides immediately.
+    """
+    tree = _HostTree(monkeypatch)
+    monkeypatch.setenv(ENV, "1")
+
+    # 1) the host pass runs before the plugin is ever loaded
+    assert tree.call_registration() == "registered"
+    assert plugin.KEY_LLAMA3 not in tree.registry
+
+    # 2) the plugin loads afterwards
+    assert plugin.load() is True
+
+    assert (
+        tree.registry[plugin.KEY_LLAMA3] is plugin._OVERRIDE_CLASSES[plugin.KEY_LLAMA3]
+    )
+    assert tree.registry[plugin.KEY_MROPE] is plugin._OVERRIDE_CLASSES[plugin.KEY_MROPE]
+    assert tree.registry[plugin.KEY_YARN] is plugin._OVERRIDE_CLASSES[plugin.KEY_YARN]
+    assert plugin.stats()["installed"] is True
+    assert plugin.stats()["applied"][plugin.KEY_LLAMA3].startswith("created")
+
+
+def test_missing_triton_skips_the_mrope_override_only(monkeypatch, caplog) -> None:
+    """Defect ② needs the fork's own ``triton_mrope`` binding.
+
+    Without triton the fork's ``forward_triton`` is unreachable as well, and the
+    mirrored body would call a ``None`` global at *model forward* time -- a hard
+    runtime failure instead of a load-time fail-open.  So key ② is not installed
+    while ① and ③ still are.
+    """
+    tree = _HostTree(monkeypatch, has_triton=False)
+    monkeypatch.setenv(ENV, "1")
+    with caplog.at_level(logging.WARNING):
+        assert plugin.load() is True
+        tree.call_registration()
+
+    assert plugin.KEY_MROPE not in plugin._OVERRIDE_CLASSES
+    assert tree.registry[plugin.KEY_MROPE] is tree.AscendMRotaryEmbedding
+    assert tree.registry[plugin.KEY_YARN] is plugin._OVERRIDE_CLASSES[plugin.KEY_YARN]
+    assert (
+        tree.registry[plugin.KEY_LLAMA3] is plugin._OVERRIDE_CLASSES[plugin.KEY_LLAMA3]
+    )
+    assert "not built" in plugin.stats()["skipped"][plugin.KEY_MROPE]
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum("triton_mrope is missing" in m for m in messages) == 1, messages
+
+
 def test_override_application_error_never_escapes_the_wrapper(
     monkeypatch, caplog
 ) -> None:
@@ -533,6 +647,57 @@ def test_mrope_override_passes_the_missing_is_neox_style(monkeypatch) -> None:
     assert call[4] == [16, 24, 24]
     assert rope.cos is cos_stub and rope.sin is sin_stub
     assert out[0].reshaped == (4, 512) and out[1].reshaped == (4, 128)
+
+
+def test_llama3_delegate_follows_the_registered_base_rope_class(monkeypatch) -> None:
+    """The delegate is resolved from the *live* base-rope entry.
+
+    A compatibility build (310P) swaps ``op_registry_oot["RotaryEmbedding"]`` for
+    a class with its own ``forward_oot``.  Delegating to a hard-coded 910 class
+    would hand such a build an unimplemented/incorrect kernel, so the override
+    must follow whatever the build registered.
+    """
+    tree = _installed_tree(monkeypatch)
+    tree.call_registration()
+    cls = plugin._OVERRIDE_CLASSES[plugin.KEY_LLAMA3]
+
+    rope = cls(128, 128, 131072, 1e6, True, "bf16", 8.0, 1.0, 4.0, 8192)
+    rope.forward_oot("pos", "q", "k")
+
+    assert [call[0] for call in tree.delegate_calls] == ["910"]
+    assert rope._rope_delegate is tree.base_rope_cls.forward_oot
+    assert tree.base_rope_cls is tree.AscendRotaryEmbedding
+
+
+def test_llama3_delegate_prefers_the_compatibility_class(monkeypatch) -> None:
+    """310P ordering: register first (base key swapped), then load the carrier."""
+    tree = _HostTree(monkeypatch, base_rope_310p=True)
+    monkeypatch.setenv(ENV, "1")
+    assert tree.call_registration() == "registered"
+    assert plugin.load() is True
+
+    cls = plugin._OVERRIDE_CLASSES[plugin.KEY_LLAMA3]
+    rope = cls(128, 128, 131072, 1e6, True, "bf16", 8.0, 1.0, 4.0, 8192)
+    rope.forward_oot("pos", "q", "k")
+
+    assert [call[0] for call in tree.delegate_calls] == ["310p"]
+    assert rope._rope_delegate is tree.base_rope_cls.forward_oot
+    assert tree.base_rope_cls is not tree.AscendRotaryEmbedding
+
+
+def test_llama3_delegate_falls_back_when_the_base_key_is_not_a_class(
+    monkeypatch,
+) -> None:
+    """A non-class registry entry must not break instantiation (fail-open)."""
+    tree = _HostTree(monkeypatch, variants={plugin.KEY_BASE_ROTARY: object()})
+    monkeypatch.setenv(ENV, "1")
+    assert plugin.load() is True
+    tree.call_registration()
+
+    cls = plugin._OVERRIDE_CLASSES[plugin.KEY_LLAMA3]
+    rope = cls(128, 128, 131072, 1e6, True, "bf16", 8.0, 1.0, 4.0, 8192)
+    rope.forward_oot("pos", "q", "k")
+    assert [call[0] for call in tree.delegate_calls] == ["910"]  # module fallback
 
 
 # --------------------------------------------------- live host integration

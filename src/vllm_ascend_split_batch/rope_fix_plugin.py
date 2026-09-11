@@ -47,8 +47,10 @@ Carrier mechanism (no host source edit, no second ``register_oot``):
 * The three fixes are plugin-side subclasses of the *host* rope classes (defined
   lazily inside :func:`_make_override_classes`, so the default-off path never
   imports torch/torch_npu/vllm_ascend).  A per-key precondition check refuses an
-  override it does not understand (e.g. the 310P compatibility variants) and
-  keeps the host implementation instead.
+  override it does not understand (e.g. a compatibility build's SoC-specific
+  class) and keeps the host implementation instead; the llama3 override resolves
+  its forward delegate from the live registry, so a 310P build keeps its own rope
+  implementation instead of being handed the 910 kernel.
 
 Default-off contract: with ``VLLM_HUST_ROPE_FIX`` unset :func:`load` returns
 before importing ``vllm_ascend`` / ``torch`` / ``torch_npu``, before touching
@@ -57,7 +59,8 @@ bit-identical to stock vllm/vllm-ascend.
 
 Fail-open contract: a missing/renamed host seam, an unexpected registry entry or
 any internal error only produces ONE warning and leaves the stock rope classes in
-place -- nothing is ever raised into the plugin loader or into a worker.
+place -- nothing is ever raised into the plugin loader or into a worker, and a
+half-installed state is rolled back so the observable state matches the log.
 
 Drift guard: ``tests/test_rope_fix_drift.py`` asserts, source-level, that the
 three *defects are still present* upstream (so that an upstream fix fails the
@@ -95,6 +98,10 @@ KEY_LLAMA3 = "Llama3RotaryEmbedding"
 KEY_MROPE = "MRotaryEmbedding"
 KEY_YARN = "YaRNScalingRotaryEmbedding"
 OVERRIDE_KEYS = (KEY_LLAMA3, KEY_MROPE, KEY_YARN)
+#: the base rope key the fork always registers; its presence is the signal that
+#: the host's registration pass has already run (and the delegate source for the
+#: llama3 override, which follows a compatibility build's swap of this entry).
+KEY_BASE_ROTARY = "RotaryEmbedding"
 
 #: marker set on the wrapper so a second ``install()`` cannot wrap itself.
 _WRAP_MARKER = "_vllm_hust_rope_fix_wrapper"
@@ -156,7 +163,9 @@ def _make_override_classes() -> dict:
     """Build the plugin-side subclasses (lazy: needs torch / vllm_ascend).
 
     Only ever called from :func:`install`, i.e. only on the enabled path, so the
-    default-off ``load()`` imports nothing.
+    default-off ``load()`` imports nothing.  A key is left out of the returned
+    dict when its precondition is not met (the caller keeps the host entry); no
+    class is ever built against a seam that cannot be reached.
     """
     global triton_mrope
 
@@ -178,15 +187,14 @@ def _make_override_classes() -> dict:
             "miss the cache record).",
             HOST_ROPE_MODULE,
         )
-    # ``triton_mrope`` is imported by the fork module under ``if HAS_TRITON`` only;
-    # without triton ``forward_triton`` is unreachable there as well.
-    try:
-        from vllm.model_executor.layers.rotary_embedding.mrope import (
-            triton_mrope as host_triton_mrope,
-        )
-    except Exception:  # noqa: BLE001 -- no triton: the mirrored path stays cold
-        host_triton_mrope = None
-    triton_mrope = host_triton_mrope
+    # Defect ② is carried by re-stating ``forward_triton``, whose kernel call is
+    # the *fork module's own* ``triton_mrope`` global (bound under HAS_TRITON).
+    # Bind the very same object the call site uses: any other route could bind a
+    # different symbol, and a missing one would turn into a runtime
+    # ``'NoneType' object is not callable`` inside the model forward.
+    triton_mrope = getattr(fork_rope, "triton_mrope", None)
+
+    classes = {}
 
     class AscendFixLlama3RotaryEmbedding(Llama3RotaryEmbedding):
         """llama3-scaling rope on the Ascend kernel (defect ①).
@@ -194,11 +202,18 @@ def _make_override_classes() -> dict:
         Same 10-argument construction signature as the host class (so
         ``CustomOp.__new__`` can instantiate it with the host's own argument
         list), plus the two side effects the fork's rope classes carry
-        (``use_mtp`` for the draft-model all-gather branch of
-        ``AscendRotaryEmbedding.forward_oot``, and the module-level cos/sin cache
-        record), plus ``forward_oot`` delegating to that same Ascend forward.
-        Only the forward path changes: the cache generation of
-        ``Llama3RotaryEmbedding`` is already fp32-exact and single-rounded.
+        (``use_mtp`` for the draft-model all-gather branch of the Ascend rope
+        forward, and the module-level cos/sin cache record), plus
+        ``forward_oot`` delegating to that same Ascend forward.
+
+        The delegate is resolved from the *live* out-of-tree registry
+        (``op_registry_oot["RotaryEmbedding"]``, i.e. whatever implementation
+        this build uses for the base rope) instead of a hard-coded 910 class:
+        the compatibility (310P) build swaps that entry for a SoC-specific class
+        with its own ``forward_oot``, and pinning the 910 kernel there would
+        replace a working path with an unreachable one.  Only the forward path
+        changes: the cache generation of ``Llama3RotaryEmbedding`` is already
+        fp32-exact and single-rounded.
         """
 
         def __init__(
@@ -231,6 +246,12 @@ def _make_override_classes() -> dict:
                 vllm_config.speculative_config
                 and vllm_config.speculative_config.method == "mtp"
             )
+            # Resolved at construction (model load), i.e. after the host's
+            # registration pass, and cached: no per-forward registry lookup, so
+            # the call stays ACL-graph-capture friendly.
+            self._rope_delegate = (
+                _base_rope_class() or AscendRotaryEmbedding
+            ).forward_oot
             if record_cos_sin_cache is not None:
                 record_cos_sin_cache(self.cos_sin_cache)
 
@@ -243,7 +264,7 @@ def _make_override_classes() -> dict:
             is_neox_style_override: bool | None = None,
             out_dtype: torch.dtype | None = None,
         ):
-            return AscendRotaryEmbedding.forward_oot(
+            return self._rope_delegate(
                 self,
                 positions,
                 query,
@@ -253,66 +274,86 @@ def _make_override_classes() -> dict:
                 out_dtype,
             )
 
-    class AscendFixMRotaryEmbedding(AscendMRotaryEmbedding):
-        """Interleaved mrope with the missing ``is_neox_style`` (defect ②).
+    classes[KEY_LLAMA3] = AscendFixLlama3RotaryEmbedding
 
-        ``forward_triton`` is mirrored statement by statement from
-        ``vllm_ascend.ops.rotary_embedding.AscendMRotaryEmbedding.forward_triton``
-        with exactly one delta: the trailing ``self.is_neox_style`` handed to
-        ``triton_mrope``.  The fork hard-codes the 8-argument call in the middle
-        of that method and offers no seam to inject the ninth one (``triton_mrope``
-        is a module global, the call site takes no hook), so re-stating the body
-        in a subclass is the smallest carrier that needs no host edit; the mirror
-        is policed by the AST comparison in ``tests/test_rope_fix_drift.py``.
+    if triton_mrope is None:
+        # No triton on this build: the fork's own forward_triton is unreachable
+        # too, and the mirrored body would call a None global at model-forward
+        # time.  Fail open by not installing key ② at all.
+        _warn_once(
+            "RoPE fix: %s.triton_mrope is missing (HAS_TRITON=%r), so defect ② "
+            "cannot be carried: op_registry_oot['MRotaryEmbedding'] keeps the "
+            "fork class (its interleaved path is unreachable on this build "
+            "anyway).",
+            HOST_ROPE_MODULE,
+            getattr(fork_rope, "HAS_TRITON", None),
+        )
+    else:
 
-        No docstring on purpose: the drift guard compares the AST of this method
-        with the host's, and a docstring would show up as an extra node.
-        """
+        class AscendFixMRotaryEmbedding(AscendMRotaryEmbedding):
+            """Interleaved mrope with the missing ``is_neox_style`` (defect ②).
 
-        def forward_triton(
-            self,
-            positions: torch.Tensor,
-            query: torch.Tensor,
-            key: torch.Tensor | None = None,
-            offsets: torch.Tensor | None = None,
-        ):
-            assert positions.ndim == 2
-            assert key is not None
+            ``forward_triton`` is mirrored statement by statement from
+            ``vllm_ascend.ops.rotary_embedding.AscendMRotaryEmbedding.forward_triton``
+            with exactly one delta: the trailing ``self.is_neox_style`` handed to
+            ``triton_mrope``.  The fork hard-codes the 8-argument call in the
+            middle of that method and offers no seam to inject the ninth one
+            (``triton_mrope`` is a module global, the call site takes no hook), so
+            re-stating the body in a subclass is the smallest carrier that needs
+            no host edit; the mirror is policed by the AST comparison in
+            ``tests/test_rope_fix_drift.py``.
 
-            self._match_cos_sin_cache_dtype(query)
-            self.cos = None
-            self.sin = None
-            if self.cos is None and self.sin is None:
-                cos_sin = self.cos_sin_cache[positions]  # type: ignore
-                cos, sin = cos_sin.chunk(2, dim=-1)
-                self.cos = cos.contiguous()
-                self.sin = sin.contiguous()
-            query_shape = query.shape
-            key_shape = key.shape
+            No docstring on purpose: the drift guard compares the AST of this
+            method with the host's, and a docstring would show up as an extra
+            node.
+            """
 
-            assert self.mrope_section
-
-            # When the grid becomes large, enable TRITON_ALL_BLOCKS_PARALLEL
-            # to avoid scheduler/runtime failures.
-            if (
-                query_shape[0] > self._ASCEND_TRITON_GRID_LIMIT
-                and os.environ.get("TRITON_ALL_BLOCKS_PARALLEL") != "1"
+            def forward_triton(
+                self,
+                positions: torch.Tensor,
+                query: torch.Tensor,
+                key: torch.Tensor | None = None,
+                offsets: torch.Tensor | None = None,
             ):
-                os.environ["TRITON_ALL_BLOCKS_PARALLEL"] = "1"
+                assert positions.ndim == 2
+                assert key is not None
 
-            q, k = triton_mrope(
-                query,
-                key,
-                self.cos,
-                self.sin,
-                self.mrope_section,
-                self.head_size,
-                self.rotary_dim,
-                self.mrope_interleaved,
-                self.is_neox_style,  # defect ② fix: the fork dropped this one
-            )
+                self._match_cos_sin_cache_dtype(query)
+                self.cos = None
+                self.sin = None
+                if self.cos is None and self.sin is None:
+                    cos_sin = self.cos_sin_cache[positions]  # type: ignore
+                    cos, sin = cos_sin.chunk(2, dim=-1)
+                    self.cos = cos.contiguous()
+                    self.sin = sin.contiguous()
+                query_shape = query.shape
+                key_shape = key.shape
 
-            return q.reshape(query_shape), k.reshape(key_shape)
+                assert self.mrope_section
+
+                # When the grid becomes large, enable TRITON_ALL_BLOCKS_PARALLEL
+                # to avoid scheduler/runtime failures.
+                if (
+                    query_shape[0] > self._ASCEND_TRITON_GRID_LIMIT
+                    and os.environ.get("TRITON_ALL_BLOCKS_PARALLEL") != "1"
+                ):
+                    os.environ["TRITON_ALL_BLOCKS_PARALLEL"] = "1"
+
+                q, k = triton_mrope(
+                    query,
+                    key,
+                    self.cos,
+                    self.sin,
+                    self.mrope_section,
+                    self.head_size,
+                    self.rotary_dim,
+                    self.mrope_interleaved,
+                    self.is_neox_style,  # defect ② fix: the fork dropped this one
+                )
+
+                return q.reshape(query_shape), k.reshape(key_shape)
+
+        classes[KEY_MROPE] = AscendFixMRotaryEmbedding
 
     class AscendFixYaRNRotaryEmbedding(AscendYaRNRotaryEmbedding):
         """YaRN rope with the vLLM/HF ``truncate`` default (defect ③).
@@ -327,33 +368,54 @@ def _make_override_classes() -> dict:
         def __init__(self, *args, truncate: bool = True, **kwargs) -> None:
             super().__init__(*args, truncate=truncate, **kwargs)
 
-    return {
-        KEY_LLAMA3: AscendFixLlama3RotaryEmbedding,
-        KEY_MROPE: AscendFixMRotaryEmbedding,
-        KEY_YARN: AscendFixYaRNRotaryEmbedding,
-    }
+    classes[KEY_YARN] = AscendFixYaRNRotaryEmbedding
+
+    return classes
+
+
+def _base_rope_class():
+    """The implementation this build uses for the base ``RotaryEmbedding``.
+
+    Read from the live out-of-tree registry, so a compatibility build (310P
+    swaps in ``AscendRotaryEmbedding310`` / ``AscendMRotaryEmbedding310``) is
+    followed instead of being shadowed by a hard-coded 910 class.  Returns
+    ``None`` before the host's registration pass has run.
+    """
+    try:
+        from vllm.model_executor.custom_op import op_registry_oot
+    except Exception:  # noqa: BLE001 -- registry not importable: use the fallback
+        return None
+    candidate = op_registry_oot.get(KEY_BASE_ROTARY)
+    return candidate if isinstance(candidate, type) else None
 
 
 def _host_registration_ran() -> bool:
     """True when the host's registration pass has already populated the registry.
 
-    Used by ``install()`` to decide whether an *eager* override attempt is
-    meaningful (registration ran before ``load()``) or premature (the wrapper
-    will do the work later).
+    Keyed on the base ``RotaryEmbedding`` entry (always written by the fork), so
+    the answer does not depend on which of the three overrides this build can
+    carry.  Used by ``install()`` to decide whether an *eager* override attempt is
+    meaningful (registration ran before ``load()``, which is the order inside the
+    worker subprocess: ``NPUWorker.__init__`` registers, and
+    ``load_general_plugins()`` runs after it) or premature (the wrapper will do
+    the work later).
     """
     try:
         from vllm.model_executor.custom_op import op_registry_oot
     except Exception:  # noqa: BLE001 -- nothing to inspect yet
         return False
-    return any(op_registry_oot.get(key) is not None for key in (KEY_MROPE, KEY_YARN))
+    return op_registry_oot.get(KEY_BASE_ROTARY) is not None
 
 
 def _apply_overrides(post_registration: bool) -> dict:
-    """Point the three ``op_registry_oot`` keys at the plugin classes.
+    """Point the ``op_registry_oot`` keys at the plugin classes.
 
     Idempotent and fail-open per key: an entry this carrier does not recognise
-    (e.g. the 310P compatibility variants, or an upstream fix that already wired
-    something) is left alone with one warning instead of being clobbered.
+    (e.g. a compatibility build's SoC-specific class, or an upstream fix that
+    already wired something) is left alone with one warning instead of being
+    clobbered.  Keys whose override class was not built (see
+    :func:`_make_override_classes`, e.g. defect ② without triton) are skipped
+    entirely.
 
     ``post_registration`` states whether the host's registration pass has already
     returned.  It is deliberately required -- and the answer matters: **nothing is
@@ -373,26 +435,32 @@ def _apply_overrides(post_registration: bool) -> dict:
     applied = dict(_STATE["applied"])
     skipped = dict(_STATE["skipped"])
 
-    cls = _OVERRIDE_CLASSES[KEY_LLAMA3]
-    current = op_registry_oot.get(KEY_LLAMA3)
-    if current is cls:
-        pass
-    elif current is None:
-        if post_registration:
-            # Defect ① is a coverage gap: there is nothing to replace, the key
-            # has to be created.  The host pass never writes this name, so the
-            # creation cannot trip its duplicate-name assert.
-            op_registry_oot[KEY_LLAMA3] = cls
-            applied[KEY_LLAMA3] = "created (defect ①: the fork never wired it)"
+    cls = _OVERRIDE_CLASSES.get(KEY_LLAMA3)
+    if cls is None:
+        skipped[KEY_LLAMA3] = "the override class was not built on this build"
     else:
-        skipped[KEY_LLAMA3] = f"a foreign entry is already registered: {current!r}"
+        current = op_registry_oot.get(KEY_LLAMA3)
+        if current is cls:
+            pass
+        elif current is None:
+            if post_registration:
+                # Defect ① is a coverage gap: there is nothing to replace, the key
+                # has to be created.  The host pass never writes this name, so the
+                # creation cannot trip its duplicate-name assert.
+                op_registry_oot[KEY_LLAMA3] = cls
+                applied[KEY_LLAMA3] = "created (defect ①: the fork never wired it)"
+        else:
+            skipped[KEY_LLAMA3] = f"a foreign entry is already registered: {current!r}"
 
     bases = {
         KEY_MROPE: fork_rope.AscendMRotaryEmbedding,
         KEY_YARN: fork_rope.AscendYaRNRotaryEmbedding,
     }
     for key, base in bases.items():
-        cls = _OVERRIDE_CLASSES[key]
+        cls = _OVERRIDE_CLASSES.get(key)
+        if cls is None:
+            skipped[key] = "the override class was not built on this build"
+            continue
         current = op_registry_oot.get(key)
         if current is cls:
             continue
@@ -401,7 +469,8 @@ def _apply_overrides(post_registration: bool) -> dict:
             continue
         if current is base:
             # Only the fork class this carrier subclasses is replaced; anything
-            # else (310P variants, a future upstream rework) stays untouched.
+            # else (a compatibility build's SoC-specific class, a future upstream
+            # rework) stays untouched.
             _ORIG.setdefault(key, current)
             op_registry_oot[key] = cls
             applied[key] = f"replaced {base.__name__}"
@@ -494,6 +563,27 @@ def _wrap_registration(host_utils):
     return _wrapped
 
 
+def _unwrap_registration(wrapper) -> None:
+    """Undo :func:`_wrap_registration` (every rebound module back to the original).
+
+    Also used by ``uninstall()``, and by ``install()`` to roll back a *half*
+    installation: a live wrapper whose eager override pass failed would keep
+    downgrading the process on the next registration call, which is exactly the
+    state the failure log must not claim to have avoided.
+    """
+    original = getattr(wrapper, "__wrapped__", None)
+    for _mod_name, module in list(sys.modules.items()):
+        if module is None:
+            continue
+        try:
+            if getattr(module, HOST_REGISTRATION_FUNC, None) is wrapper:
+                setattr(module, HOST_REGISTRATION_FUNC, original)
+        except Exception:  # noqa: BLE001 -- best-effort restore
+            continue
+    _STATE["wrapper"] = None
+    _STATE["wrapped"] = []
+
+
 # ---------------------------------------------------------------- install/load
 
 
@@ -502,8 +592,9 @@ def install() -> bool:
 
     Returns True when the wrapper + the override classes are in place.  A
     missing/renamed seam or any internal error only warns once and leaves the
-    process on the stock rope classes; this method never raises into the plugin
-    loader.
+    process on the stock rope classes -- including the *half* installation case:
+    a failure after the wrapper was installed rolls it back, so ``stats()`` and
+    the log line match reality.  This method never raises into the plugin loader.
     """
     global _installed
     if _installed:
@@ -522,6 +613,7 @@ def install() -> bool:
                 exc,
             )
             return False
+        wrapper = None
         try:
             if not _OVERRIDE_CLASSES:
                 _OVERRIDE_CLASSES.update(_make_override_classes())
@@ -541,6 +633,8 @@ def install() -> bool:
                 "fork's stock rope classes.",
                 exc,
             )
+            if wrapper is not None:
+                _unwrap_registration(wrapper)
             return False
         _installed = True
         logger.warning(
@@ -560,15 +654,7 @@ def uninstall() -> None:
     with _lock:
         wrapper = _STATE["wrapper"]
         if wrapper is not None:
-            original = getattr(wrapper, "__wrapped__", None)
-            for _mod_name, module in list(sys.modules.items()):
-                if module is None:
-                    continue
-                try:
-                    if getattr(module, HOST_REGISTRATION_FUNC, None) is wrapper:
-                        setattr(module, HOST_REGISTRATION_FUNC, original)
-                except Exception:  # noqa: BLE001 -- best-effort restore
-                    continue
+            _unwrap_registration(wrapper)
         try:
             from vllm.model_executor.custom_op import op_registry_oot
 
@@ -583,6 +669,7 @@ def uninstall() -> None:
             logger.exception("RoPE fix uninstall could not restore the registry")
         _ORIG.clear()
         _STATE["wrapper"] = None
+        _STATE["wrapped"] = []
         _STATE["applied"].clear()
         _STATE["skipped"].clear()
         _installed = False
