@@ -6,12 +6,16 @@ from vllm_hust_ext.manifest import activation_blocker, load_manifest
 
 import vllm_ascend_split_batch
 import vllm_ascend_split_batch.fia_demask as fia_demask_module
+import vllm_ascend_split_batch.rope_fix as rope_fix_module
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = Path(vllm_ascend_split_batch.__file__).with_name(
     "vllm-hust-extension-v0.2.json"
 )
 FIA_DEMASK_MANIFEST_PATH = Path(fia_demask_module.__file__).with_name(
+    "vllm-hust-extension-v0.2.json"
+)
+ROPE_FIX_MANIFEST_PATH = Path(rope_fix_module.__file__).with_name(
     "vllm-hust-extension-v0.2.json"
 )
 
@@ -77,6 +81,22 @@ def test_fia_demask_bundle_is_activatable() -> None:
     assert env == {"VLLM_HUST_FIA_DEMASK": "1"}
     for key, value in env.items():
         assert value in {"0", "1"}, key
+    assert raw["host"]["version_range"] == _manifest_json()["host"]["version_range"]
+
+
+def test_rope_fix_bundle_is_import_only_with_its_own_key() -> None:
+    """The rope-fix carrier is env-gated and stays ``import_only``.
+
+    The three defects it carries are fixed plugin-side, but the acceptance
+    ladder (default-off smoke / correctness / performance) is not closed for it
+    yet, so the manifest must NOT advertise it as ``active``.
+    """
+    manifest = load_manifest(ROPE_FIX_MANIFEST_PATH)
+    assert manifest.bundle_id == "org.vllm-hust.rope-fix"
+    raw = json.loads(ROPE_FIX_MANIFEST_PATH.read_text(encoding="utf-8"))
+    carriers = {i["module"]: i["status"] for i in raw["implementation"]}
+    assert carriers["vllm_ascend_split_batch.rope_fix_plugin"] == "import_only"
+    assert raw["activation"]["environment"] == {"VLLM_HUST_ROPE_FIX": "1"}
     assert raw["host"]["version_range"] == _manifest_json()["host"]["version_range"]
 
 

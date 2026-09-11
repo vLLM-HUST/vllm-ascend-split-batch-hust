@@ -20,12 +20,14 @@ test = ["pytest>=8", "ruff>=0.12", "vllm-hust-ext==0.2.0.dev0"]
 [project.entry-points."vllm_hust.extension_bundles"]
 "org.vllm-hust.split-batch-full-graph" = "vllm_ascend_split_batch"
 "org.vllm-hust.fia-demask" = "vllm_ascend_split_batch.fia_demask"
+"org.vllm-hust.rope-fix" = "vllm_ascend_split_batch.rope_fix"
 
 [project.entry-points."vllm.general_plugins"]
 "cascade-attention" = "vllm_ascend_split_batch.cascade_plugin:load"
 "fi-sampling" = "vllm_ascend_split_batch.fi_sampling_plugin:load"
 "fi-gelu" = "vllm_ascend_split_batch.fi_gelu_plugin:load"
 "fia-demask" = "vllm_ascend_split_batch.fia_demask_plugin:load"
+"rope-fix" = "vllm_ascend_split_batch.rope_fix_plugin:load"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vllm_ascend_split_batch"]
