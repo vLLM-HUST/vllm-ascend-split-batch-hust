@@ -176,3 +176,12 @@
 - 三级验收全绿：CPU 35 tests；逐 token 等价 8/8；e2e decode 账 B32 **+3.10%** / B64 **+4.61%** TPOT
   （r1 预热离群对称，热轮腿内 0.2%）。证据：
   `profiles/qwen14b-instruct-hotspot-20260910/probe-fia/E2E-mask-removal.md`。
+
+## 2026-09-11 fia-demask 翻 active（独立 bundle）
+
+- `org.vllm-hust.fia-demask` carrier 翻 active + §3 启用验证全绿：check/enabled/
+  dry-run 注入 `VLLM_HUST_FIA_DEMASK=1` / 真模型 serve（与 cascade enable 态共存，
+  capture_sizes 封顶）→ `de-mask applied` + `ACTIVE` 证据行 → /health → 冒烟 OK，
+  0 fail-open。补账：六格 TPOT +3.3~+10.1%（geomean +6.43%）、e2e 吞吐 +3.52%。
+- 证据：`profiles/.../probe-fia/E2E-mask-removal.md` §3.1、`serve_demask_s3.log`、
+  review 材料 `docs/evidence/fia-demask-review.md`、上游素材 `docs/upstream/fia-decode-demask.md`。
