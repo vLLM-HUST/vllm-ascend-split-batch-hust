@@ -1,6 +1,6 @@
 {
  "pre_sentinel_ok": true,
- "pre_sentinel_rel": 1.4906819706040496e-07,
+ "pre_sentinel_rel": 2.985892404860137e-07,
  "cases": [
   {
    "combo": "seq3",
@@ -23,7 +23,7 @@
     "bitwise": true,
     "pass_pre_bf16": true
    },
-   "sentinel_rel": 3.8759619814641163e-07,
+   "sentinel_rel": 1.298532320859026e-07,
    "sentinel_ok": true
   },
   {
@@ -47,7 +47,7 @@
     "bitwise": true,
     "pass_pre_bf16": true
    },
-   "sentinel_rel": 2.5015181088022796e-07,
+   "sentinel_rel": 5.241723727743559e-07,
    "sentinel_ok": true
   }
  ]

@@ -213,3 +213,29 @@
   `guard-selftest/`；设计说明 `docs/design/rope-variant-defects.md`；
   宿主 seam 与锚点 `HOST_CONTRACT.md`「rope_fix component」；
   宿主升级核对项 `docs/release.md` §4。manifest 保持 `import_only`（三证据未齐）。
+
+### 复审收尾（同日，9 条 F 全部落实）
+
+- **F1（310P fail-open 缺口）**：①的 `forward_oot` 不再硬编码 910 类，改为在
+  `__init__` 解析并缓存 `op_registry_oot["RotaryEmbedding"]`（本 build 实际用于基础
+  rope 的实现），310P 档因此跟随 `AscendRotaryEmbedding310` 自己的
+  `npu_apply_rotary_pos_emb` 路径；键上非类时退回模块级 `AscendRotaryEmbedding`。
+  ⚠️ 本机是 910B2，**310P 真机未实测**（构造级 mock 覆盖），进入 310P 验证域时升级复核。
+- **F3（`triton_mrope` 静默 None）**：kernel 绑定改取 fork 模块自身的
+  `triton_mrope`（与调用点同源）；为 `None`（无 triton）时**不安装 ②** + 单条 warning，
+  避免把 load 期 fail-open 变成模型 forward 期的 `'NoneType' object is not callable`。
+- **F4（半安装状态）**：包装体已装后覆写抛错 → **回滚包装体**，`stats()` 与日志措辞与
+  真实状态一致。
+- **F2**：补"注册先于 `load()`"（worker 子进程真实次序）用例 → 三键立即覆写、
+  `installed is True`。
+- **F8/F9（守卫）**：宿主树不可发现时 **fail 而非 skip**；定位回退改为基于本文件位置的
+  确定性路径；补 `worker.py` 仍直接 `from ... import` 且仍调用的源级断言；镜像断言在
+  "宿主已补第 9 参"时改报 `upstream fixed defect ②`。
+- **F5/F6/F7（证据/文档）**：`compare.py` 的 mrope 行改打印真实判据
+  （`包装正常返回`，不再空真 `all([])`）；证据计数统一；`extension_version` 一致性扩到
+  三个 bundle manifest。
+- 复跑：CPU `pytest -q` **261 passed** + `ruff check .` 零告警；NPU 卡 7（flock）carrier 主腿 +
+  atb 腿 + default-off 对照腿全部 rc=0，四变体判定与修前一轮**逐字段相同**（无回归）；
+  守卫自测新增 no-host 案例（fail 而非 skip）。
+- 复审后仍未做（如实）：310P 真机核对（无该卡）、服务级真模型 A/B（无 checkpoint）、
+  entry point 元数据刷新（纪律禁 pip）。

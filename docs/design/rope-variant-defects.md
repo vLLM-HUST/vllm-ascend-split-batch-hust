@@ -82,8 +82,8 @@
 
 | # | 形态 | 为什么这样取 |
 |---|---|---|
-| ① | 逐参复刻 10 参 `__init__` + `forward_oot` 委托 `AscendRotaryEmbedding.forward_oot` | `CustomOp.__new__` 用宿主原参数实例化，签名必须一致；forward 委托保证与 fork 既有 Ascend 路径**同一实现**。仅 forward 改路：cache 生成端（`_compute_inv_freq` 三段式重映射）本身已在 fp32 内完成且单次舍入（探针 `recompute_max_abs=0`） |
-| ② | **镜像** `forward_triton` 方法体 + 补第 9 参 | fork 在方法**中间**硬编码了 8 参调用，`triton_mrope` 是模块全局、调用点没有任何 hook 可注入第 9 参；子类重述方法体是"零宿主改动"下最小可行载体。为避免"镜像悄悄过期"，`tests/test_rope_fix_drift.py` 做 **AST 等价断言**（镜像体去掉注入实参后必须与宿主方法体逐节点相等），宿主一改方法体就报 `anchor drifted` |
+| ① | 逐参复刻 10 参 `__init__` + `forward_oot` 委托 **`op_registry_oot["RotaryEmbedding"]`（缺失时退回模块级 `AscendRotaryEmbedding`）** | `CustomOp.__new__` 用宿主原参数实例化，签名必须一致；委托目标**跟随本 build 实际注册的基础 rope 类**（310P 档是 `AscendRotaryEmbedding310`，见 §6.3），而不是硬编码 910 类。委托在 `__init__`（模型加载期，注册之后）解析并缓存在实例上，避免每 forward 查表、保持 ACL graph 可捕获。仅 forward 改路：cache 生成端（`_compute_inv_freq` 三段式重映射）本身已在 fp32 内完成且单次舍入（探针 `recompute_max_abs=0`） |
+| ② | **镜像** `forward_triton` 方法体 + 补第 9 参；kernel 从 **fork 模块自身的 `triton_mrope`** 绑定 | fork 在方法**中间**硬编码了 8 参调用，`triton_mrope` 是模块全局、调用点没有任何 hook 可注入第 9 参；子类重述方法体是"零宿主改动"下最小可行载体。为避免"镜像悄悄过期"，`tests/test_rope_fix_drift.py` 做 **AST 等价断言**（镜像体去掉注入实参后必须与宿主方法体逐节点相等）。kernel 绑定取自调用点**同一个** `fork_rope.triton_mrope`（不再另走 `vllm...mrope` import 路径）；该绑定为 `None`（无 triton）时**不安装 ②** 并单条 warning——否则镜像体会在**模型 forward 期**调 `None` 硬失败，而不是 load 期 fail-open |
 | ③ | `def __init__(self, *args, truncate: bool = True, **kwargs)` 签名无关转发 | 只改缺省值这一件事；`*args/**kwargs` 让宿主 `get_rope` 的调用形态变化（新增关键字）不会把插件类打成 `TypeError`，而显式 `truncate` 仍原样透传（逃生舱保留） |
 
 ②的镜像体**不带 docstring**（docstring 会成为额外的 AST 节点），方法体内的注释
@@ -98,9 +98,13 @@
 - **fail-open（逐键）**：
   - `register_ascend_customop` 不存在 → 单条 warning，返回 `False`，**什么都不做**；
   - 覆写流程任何异常 → 单条 warning，注册调用照常返回；
+  - **半安装回滚**：包装体已装、随后（`install()` 里的即时施加）抛错时，包装体被
+    回滚还原，`stats()["installed"]` 与 `stats()["wrapped"]` 反映真实状态——否则
+    日志说"保持宿主原样"而包装体仍在，下一次注册会静默降档；
   - 目标键上不是"本 carrier 继承的那个 fork 类"（例如 310P 的
     `AscendMRotaryEmbedding310`，或上游已自行接线）→ **不覆写**，单条 warning
     说明"expected X, found Y"，行为保持宿主原样；
+  - ②的 kernel 绑定缺失（无 triton）→ **不安装 ②**，单条 warning；
   - 覆写时机若晚于注册（例如注册已跑完才 `load()`）→ `install()` 内检测后立即施加
     一次；否则由包装体在注册返回后施加（注册前一律不写 registry，见 §2.4）。
 
@@ -110,21 +114,30 @@
 
 | 层 | 断言 | 运行前提 |
 |---|---|---|
-| **反向缺陷断言**（核心） | ①注册 dict **仍无** `Llama3RotaryEmbedding`；②`forward_triton` 的 `triton_mrope` 调用**仍是 8 个位置参且无 `is_neox_style` 关键字**；③`AscendYaRNRotaryEmbedding.__init__` 的 `truncate` 缺省**仍是 `False`** | 纯 `ast` + 源文件（`importlib.util.find_spec` 定位宿主树，**不 import**），CPU 可跑 |
-| **镜像等价断言** | carrier 的 `forward_triton`（去掉注入实参后）与宿主方法体 **AST 逐节点相等** | 同上（CPU） |
-| **接口断言** | `op_registry_oot` 存在 + `CustomOp.__new__` 仍查它 + `register_oot` 仍拒绝重名；`Llama3RotaryEmbedding.__init__` 10 参签名；`AscendRotaryEmbedding.forward_oot` 签名；`AscendMRotaryEmbedding` MRO 仍设置 `mrope_interleaved/is_neox_style/head_size`（任务书的 `head_dim` 在本基线叫 `head_size`）；`triton_mrope` 形参个数 9（末位 `is_neox_style`） | `pytest.importorskip`（需 vllm/vllm-ascend/triton） |
+| **反向缺陷断言**（核心） | ①注册 dict **仍无** `Llama3RotaryEmbedding`；②`forward_triton` 的 `triton_mrope` 调用**仍是 8 个位置参且无 `is_neox_style` 关键字**；③`AscendYaRNRotaryEmbedding.__init__` 的 `truncate` 缺省**仍是 `False`** | 纯 `ast` + 源文件（`importlib.util.find_spec` + 本文件位置确定性定位宿主树，**不 import**），CPU 可跑 |
+| **镜像等价断言** | carrier 的 `forward_triton`（去掉注入实参后）与宿主方法体 **AST 逐节点相等**；镜像调用点注入的实参必须是 `self.is_neox_style` | 同上（CPU） |
+| **接口断言** | `op_registry_oot` 存在 + `CustomOp.__new__` 仍查它 + `register_oot` 仍拒绝重名；`Llama3RotaryEmbedding.__init__` 10 参签名；`AscendRotaryEmbedding.forward_oot` 签名；`AscendMRotaryEmbedding` MRO 仍设置 `mrope_interleaved/is_neox_style/head_size`（任务书的 `head_dim` 在本基线叫 `head_size`）；`worker.py` 仍直接 `from vllm_ascend.utils import register_ascend_customop` 且仍调用它；fork 报 `HAS_TRITON` 时 `fork_rope.triton_mrope` 必须存在且形参个数 9（末位 `is_neox_style`） | `pytest.importorskip`（需 vllm/vllm-ascend） |
 
 两种失败措辞（`FIXED` / `DRIFT` 常量）：
 
 - `upstream fixed defect ①/②/③ → drop the corresponding override`
   ——锚点还在、缺陷没了：**删掉对应覆写**（留着就是死代码/遮蔽上游修复）；
 - `anchor drifted → re-audit HOST_CONTRACT`
-  ——seam 被改名/移位/改形：**先重新审 HOST_CONTRACT 的载体小节**，再改 carrier。
+  ——seam 被移位/改形/消失：**先重新审 HOST_CONTRACT 的载体小节**，再改 carrier。
+
+镜像等价断言会**区分原因**：宿主调用点已补第 9 参时报 `upstream fixed defect ②`
+（覆写已冗余），其余情况报 `anchor drifted`。
+
+**缺证据即红**：宿主树定位失败（既无 editable 路径、也无 `VLLM_ASCEND_HUST_ROOT`、也
+不在工作区同层）时模块级 **fail**（不是 skip）——skip 会让"守卫没跑"看起来像"守卫通过"。
+CPU 门槛要求的就是这三层断言真的执行。`VLLM_ASCEND_HUST_ROOT` 指向宿主 checkout
+可在任意布局下运行。
 
 守卫本身做过**双向自测**（不触碰宿主树：把宿主两文件复制到 `/tmp`，注入"上游已修"
 与"锚点漂移"两种变异，用 `VLLM_ASCEND_HUST_ROOT` 指向副本运行）：3 条反向断言 +
-镜像断言按预期红，措辞分别为 `upstream fixed defect ①②③` 与 `anchor drifted`。
-证据：`docs/evidence/rope-fix/guard-selftest/`。
+镜像断言按预期红，措辞分别为 `upstream fixed defect ①②③` 与 `anchor drifted`
+（02 变异同时命中两条——这正是 §5 末尾"区分原因"的作用）。证据：
+`docs/evidence/rope-fix/guard-selftest/`。
 
 ## 6. 已知偏差与未尽事项
 
@@ -137,7 +150,19 @@
    `docs/evidence/rope-fix/`）。
 2. **未做真模型服务级 e2e A/B**：本机无 llama3 / Qwen2.5-yarn / Qwen2.5-VL
    checkpoint，价值仍以算子级/构造级证据闭环（与 fork 侧报告同口径）。
-3. **310P 与未来上游变体**：`MRotaryEmbedding`/`YaRNScalingRotaryEmbedding`
-   两个键只替换"本 carrier 继承的那个 fork 类"，其它实现一律跳过 + 单条 warning。
+3. **310P（兼容档）与未来上游变体**：
+   - **替换键**（`MRotaryEmbedding` / `YaRNScalingRotaryEmbedding`）：只替换"本 carrier
+     继承的那个 fork 类"，兼容档的 `AscendMRotaryEmbedding310` 等实现一律跳过 + 单条
+     warning；
+   - **①的委托**：不硬编码 910 类，而是解析 `op_registry_oot["RotaryEmbedding"]`
+     （即本 build 实际用于基础 rope 的实现）。310P 档该键被换成
+     `AscendRotaryEmbedding310`，其 `forward_oot` 走 310P 自己的
+     `npu_apply_rotary_pos_emb` 路径 ⇒ 插件把 llama3 接到**该档自己的**实现上，
+     而不是把可用的原生路径换成 910 kernel（后者会 `NotImplementedError`/算错）。
+     委托在 `__init__` 解析并缓存；键上不是类（异常注册表）时退回模块级
+     `AscendRotaryEmbedding`，仍不改行为语义。
+     —— 这条**不**依赖 `get_current_hardware_profile()`：跟随注册表比再写一份
+     硬件判定更贴近"宿主自己选了什么"。
 4. **②的镜像体**必须在宿主改动时同步（守卫会红）；这是"零宿主改动"的代价，
-   有意接受。
+   有意接受。无 triton 的 build 上 ② 不安装（见 §3）——该档 fork 自身的
+   `forward_triton` 也不可达。

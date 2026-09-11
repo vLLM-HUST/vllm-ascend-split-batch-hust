@@ -48,6 +48,24 @@ def _row(data: dict, variant: str) -> dict:
     cases = [case for case in data["cases"] if case["variant"] == variant]
     assert cases, variant
     first = cases[0]
+    if variant == "mrope":
+        # mrope has no ``prod_forward`` leg at all (the probe exercises the
+        # wrapper instead), so an ``all(...)`` over the remaining cases would be
+        # vacuously True.  Report the actual criterion for this variant.
+        wiring = (
+            "True"
+            if all(c.get("kernel_wrapper", {}).get("ok") for c in cases)
+            else "**False**"
+        )
+    else:
+        wiring = all(
+            bool(
+                case.get("prod_forward", {})
+                .get("o_vs_direct_kernel", {})
+                .get("bitwise")
+            )
+            for case in cases
+        )
     return {
         "cls": first["gen"]["cls"],
         "fwd": first["gen"]["fwd_method"],
@@ -62,15 +80,10 @@ def _row(data: dict, variant: str) -> dict:
         "formula_divergence_max": data["summary"][variant]["e2e"][
             "formula_divergence_max"
         ],
-        "prod_vs_direct_kernel_bitwise": all(
-            bool(
-                case.get("prod_forward", {})
-                .get("o_vs_direct_kernel", {})
-                .get("bitwise")
-            )
-            for case in cases
-            if case["variant"] != "mrope"
-        ),
+        # non-mrope: production forward ≡ the direct kernel call (O≡直接kernel);
+        # mrope:    the wrapper call returns instead of raising (包装正常返回).
+        "wiring_proof": wiring,
+        "wiring_label": "包装正常返回" if variant == "mrope" else "O≡直接kernel",
         "mrope_wrapper_ok": (
             all(bool(case.get("kernel_wrapper", {}).get("ok")) for case in cases)
             if variant == "mrope"
@@ -102,7 +115,7 @@ def main() -> int:
 
     print("## 探针四腿对比（四变体 × 四腿）\n")
     header = (
-        "| 腿 | 生产类 | 实际 fwd | kernel_reachable | O≡直接kernel "
+        "| 腿 | 生产类 | 实际 fwd | kernel_reachable | 接线判据 "
         "| e2e 判定 | 对 host 公式偏差 | 公式分歧 |"
     )
     for variant in VARIANTS:
@@ -113,7 +126,8 @@ def main() -> int:
             row = rows[name][variant]
             print(
                 f"| {name} | `{row['cls']}` | `{row['fwd'].split('.')[-1]}` | "
-                f"{row['reachable']} | {_fmt(row['prod_vs_direct_kernel_bitwise'])} | "
+                f"{row['reachable']} | {_fmt(row['wiring_proof'])} "
+                f"({row['wiring_label']}) | "
                 f"{row['e2e_status']} | {_fmt(row['vs_host_formula_max_abs'])} | "
                 f"{_fmt(row['formula_divergence_max'])} |"
             )
@@ -127,7 +141,7 @@ def main() -> int:
         "chain_selfconsistent_max_abs",
         "vs_host_formula_max_abs",
         "formula_divergence_max",
-        "prod_vs_direct_kernel_bitwise",
+        "wiring_proof",
         "mrope_wrapper_ok",
     )
     verdicts = {"carrier_vs_forkfix": True, "control_off_vs_prefix": True}

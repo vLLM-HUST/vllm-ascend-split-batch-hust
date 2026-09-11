@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Two-way self-test of the reverse drift guard, WITHOUT touching the host tree.
+# Three-way self-test of the drift guard, WITHOUT touching the host tree.
 #
 # The guard reads the host sources through VLLM_ASCEND_HUST_ROOT (or the
 # editable-install path).  Here the two host files are copied into /tmp and
@@ -7,6 +7,7 @@
 #
 #   fixed    -> inject "upstream already fixed the defect" into all three anchors
 #   drifted  -> rename/move the anchors instead
+#   no-host  -> make the host tree undiscoverable: the guard must FAIL, not skip
 #
 # Usage: bash run.sh        (from this directory; needs the repo's pytest/ruff)
 set -uo pipefail
@@ -16,6 +17,7 @@ REPO=/vllm-workspace/vllm-ascend-split-batch-hust
 HOST=/vllm-workspace/vllm-ascend-hust/vllm_ascend
 FIXED=/tmp/ropefix-drift-sim
 DRIFTED=/tmp/ropefix-drift-sim2
+NOHOST=/tmp/ropefix-nohost
 
 seed_tree() {
   local root=$1
@@ -74,3 +76,28 @@ echo "### case=drifted  VLLM_ASCEND_HUST_ROOT=$DRIFTED"
 VLLM_ASCEND_HUST_ROOT=$DRIFTED python -m pytest tests/test_rope_fix_drift.py -q \
   > "$HERE/selftest-drifted.txt" 2>&1
 grep -E "upstream fixed|anchor drifted|passed|failed" "$HERE/selftest-drifted.txt"
+
+# Missing evidence must be red: copy the guard next to *no* host tree and hide
+# the editable install from find_spec (a sitecustomize on PYTHONPATH), so the
+# guard cannot locate the anchors.  A skip here would look like a passing guard.
+echo "### case=no-host  (host tree undiscoverable)"
+rm -rf "$NOHOST"
+mkdir -p "$NOHOST/tests"
+cp "$REPO/tests/test_rope_fix_drift.py" "$NOHOST/tests/"
+cat > "$NOHOST/sitecustomize.py" <<'PY'
+import importlib.util
+
+_orig = importlib.util.find_spec
+
+
+def find_spec(name, *args, **kwargs):
+    if name == "vllm_ascend":
+        raise ModuleNotFoundError("simulated: no vllm-ascend checkout on this box")
+    return _orig(name, *args, **kwargs)
+
+
+importlib.util.find_spec = find_spec
+PY
+PYTHONPATH=$NOHOST python -m pytest "$NOHOST/tests/test_rope_fix_drift.py" -q -p no:cacheprovider \
+  > "$HERE/selftest-no-host.txt" 2>&1
+grep -E "source tree not found|skipped|passed|failed|error" "$HERE/selftest-no-host.txt" | head -5

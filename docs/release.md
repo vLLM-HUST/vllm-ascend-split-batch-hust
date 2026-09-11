@@ -92,13 +92,17 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
       `get_ascend_config().enable_reduce_sample` / `enable_async_exponential`
 - [ ] rope_fix 面(`tests/test_rope_fix_drift.py` 跑一遍;它的**反向断言**会
       自动红,`upstream fixed defect ①/②/③` = 该覆写已变冗余,`anchor drifted`
-      = seam 挪位需重审 HOST_CONTRACT.md「rope_fix component」小节):
+      = seam 挪位需重审 HOST_CONTRACT.md「rope_fix component」小节;
+      宿主树找不到时**直接红,不 skip**):
       三缺陷锚点(`REGISTERED_ASCEND_OPS` 仍缺 `Llama3RotaryEmbedding` /
       `AscendMRotaryEmbedding.forward_triton` 仍是 8 参 `triton_mrope` 调用 /
       `AscendYaRNRotaryEmbedding.__init__` 的 `truncate` 缺省仍是 `False`)、
-      `register_ascend_customop`(含 `worker.py` 的直接引用点)、
-      `op_registry_oot` 的实例化期读取与重名断言、`Llama3RotaryEmbedding`
-      10 参构造签名、`AscendRotaryEmbedding.forward_oot` 签名、`triton_mrope` 9 参
+      `register_ascend_customop`(含 `worker.py` 仍以 `from ... import` 直接绑定
+      并在 `NPUWorker.__init__` 调用它)、`op_registry_oot` 的实例化期读取与重名断言、
+      `Llama3RotaryEmbedding` 10 参构造签名、`AscendRotaryEmbedding.forward_oot` 签名、
+      `rotary_embedding.triton_mrope` 存在(当 fork 报 `HAS_TRITON`)且为 9 参;
+      ①的委托目标跟随 `op_registry_oot["RotaryEmbedding"]`——进入 310P 验证域时,
+      需补一条 310P 真机核对(本机 910B2 只有构造级 mock 证据)
 
 ## 5. 检查表
 

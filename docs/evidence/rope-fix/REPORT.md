@@ -11,7 +11,7 @@ CPU（`pytest`/`ruff` 在仓内跑，其余命令 `cd /tmp`）：
 
 ```bash
 cd /vllm-workspace/vllm-ascend-split-batch-hust
-python -m pytest -q                 # 254 passed（本 carrier 新增 27 例）
+python -m pytest -q                 # 261 passed（本 carrier 新增 34 例）
 ruff check .                        # All checks passed!
 
 # 守卫双向自测（宿主树零改动：副本注入变异 + VLLM_ASCEND_HUST_ROOT 指向副本）
@@ -77,30 +77,40 @@ python3 docs/evidence/rope-fix/compare.py --check    # 四腿对比 + 判定，r
 
 | 变异 | 期望措辞 | 实测 |
 |---|---|---|
-| 上游已修（注册 dict 加 `Llama3RotaryEmbedding`、`triton_mrope` 补第 9 参、`truncate` 缺省改 `True`） | `upstream fixed defect ①/②/③ → drop the corresponding override` | 3 条全部按此措辞红；镜像等价断言同时报 `anchor drifted`（宿主方法体已变） |
+| 上游已修（注册 dict 加 `Llama3RotaryEmbedding`、`triton_mrope` 补第 9 参、`truncate` 缺省改 `True`） | `upstream fixed defect ①/②/③ → drop the corresponding override` | 5 条红且**逐条**是 `upstream fixed defect ①②③②`（② 同时命中反向断言与镜像断言；镜像断言已能识别"宿主已补第 9 参"） |
 | 锚点漂移（`REGISTERED_ASCEND_OPS` 改名、`AscendMRotaryEmbedding` 改名、`truncate` 形参删除） | `anchor drifted → re-audit HOST_CONTRACT` | 4 条全部按此措辞红 |
+| 宿主树不可发现（副本 + `sitecustomize` 屏蔽 `find_spec`，无 `VLLM_ASCEND_HUST_ROOT`） | **fail 而非 skip**（缺证据即红） | 模块级 fail：`vllm-ascend source tree not found; ...` + `1 error during collection`（**无 skip 行**） |
 
 原始输出：`selftest-run.log`（摘要）、`selftest-fixed.txt`、`selftest-drifted.txt`（pytest 全量）。
 
-## 4. CPU 测试清单（新增 28 例）
+## 4. CPU 测试清单（新增 34 例）
 
-`tests/test_rope_fix_plugin.py`（17 例，mock 为主 + 1 例真宿主集成）：
+`tests/test_rope_fix_plugin.py`（23 例，mock 为主 + 1 例真宿主集成）：
 
 - default-off（子进程 `sys.modules` 纯净性：不 import `vllm`/`vllm_ascend`/`torch`/`torch_npu`/`triton`）；
 - `is_enabled()` 只认精确 `"1"`；
-- **时序**：安装后只有 ① 的键可提前创建，②③ 的替换键在宿主注册**之前**绝不出现在 registry
+- **时序（安装早于注册）**：安装后 registry 保持全空——注册**之前**一个键都不写
   （否则会撞 `CustomOp.register_oot` 的 `Duplicate op name` 断言），注册返回后三键齐覆写；
+- **时序（注册早于加载，= worker 子进程真实次序）**：先 `register_ascend_customop` 再
+  `load()` → 三键被**立即**覆写、`stats()["installed"] is True`；
 - 幂等：重复 `load()` / 重复注册 / 清空 once-guard 后再注册，registry 对象与告警条数都不变；
 - 包装体重绑所有直接引用点（模拟 `worker.py` 的 `from ... import` 绑定）；
 - fail-open：seam 缺失 / 类构造失败 / 覆写流程抛错 → 单条 warning、`load()` 返回 False、
-  registry 原样、注册调用照常返回；
+  registry 原样、注册调用照常返回；**半安装回滚**：包装已装后覆写抛错 → 包装体还原、
+  `stats()["installed"] is False`、后续注册不再降档；
 - 对外来条目（310P 式变体）不覆写、单条 warning、`stats()['skipped']` 说明原因；
-- 三个覆写类的行为：① 签名 = 宿主 11 参（self+10）、`use_mtp`/cache 记账/`forward_oot` 委托；
+- 三个覆写类的行为：① 签名 = 宿主 11 参（self+10）、`use_mtp`/cache 记账/`forward_oot` 委托
+  **到注册表里的基础 rope 类**（910 档 → `AscendRotaryEmbedding`；310P 档 →
+  `AscendRotaryEmbedding310`；键上非类 → 模块级回退）；
   ③ 缺省 `truncate=True` 且显式 `False` 逃生舱保留；② 镜像体把 `self.is_neox_style` 作为第 9 参传给 kernel；
+- **缺 `triton_mrope` 绑定（无 triton）**：② 不安装、单条 warning，①③ 照常；
 - 真宿主集成：`vllm_ascend.utils.register_ascend_customop` 真调用后三键指向插件类；
 - bundle/manifest 断言 + `pyproject.toml` 两组入口点声明（含 `org.vllm-hust.rope-fix`）。
 
-`tests/test_rope_fix_drift.py`（10 例，见设计说明 §5）；`tests/test_manifest.py` 追加 1 例。
+`tests/test_rope_fix_drift.py`（11 例，见设计说明 §5：3 条反向缺陷 + 1 条镜像等价 +
+7 条接口/源级，含 `worker.py` 直接引用断言；宿主树找不到时**模块级 fail 而非 skip**）；
+`tests/test_manifest.py` 追加 1 例（rope-fix bundle），并把 `extension_version` 一致性
+扩到三个 bundle。
 
 ## 5. 残留风险 / 未决点
 
@@ -112,7 +122,9 @@ python3 docs/evidence/rope-fix/compare.py --check    # 四腿对比 + 判定，r
    可作 §3 启用验证的入口。
 3. **②的镜像体是"零宿主改动"的代价**：宿主改 `forward_triton` 方法体即触发
    `anchor drifted`，须同步镜像（有意接受，守卫已覆盖）。
-4. **310P / 未来上游变体**：两个替换键只认"本 carrier 继承的那个 fork 类"，
-   其它实现跳过 + 单条 warning（不覆盖、不误伤）。
+4. **310P / 未来上游变体**：两个替换键只认"本 carrier 继承的那个 fork 类"（跳过 + 单条
+   warning）；①的委托改为跟随 `op_registry_oot["RotaryEmbedding"]`（不硬编码 910 类）——
+   **310P 本机未实测**（本机是 910B2），该结论由构造级 mock 单测覆盖（310P 式注册表
+   → 委托到 310P 类），真机行为待 310P 验证域进入时升级复核。
 5. **性能未测**：本包只做接线与数值正确性；① 的收益（bf16 数学 → triton fp32 路径）
    需真 llama3 模型在服务级标定。

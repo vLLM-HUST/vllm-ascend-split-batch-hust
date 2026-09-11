@@ -1,12 +1,12 @@
-INFO 09-11 17:43:52 [__init__.py:52] Available plugins for group vllm.platform_plugins:
-INFO 09-11 17:43:52 [__init__.py:54] - ascend -> vllm_ascend:register
-INFO 09-11 17:43:52 [__init__.py:57] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
-INFO 09-11 17:43:52 [__init__.py:272] Platform plugin ascend is activated
-INFO 09-11 17:43:52 [platform.py:70] Breakable CUDAGraph on Ascend is opt-in; using VLLM_USE_BREAKABLE_CUDAGRAPH=0.
-2026-09-11 17:43:52,542 - 1400140 - ServiceProfiler - INFO - VLLM_USE_V1 not set, auto-detected via vLLM 0.28.1.post1.dev143+gf18cf803c.empty: default 1
-INFO 09-11 17:44:04 [__init__.py:112] Registered model loader `<class 'vllm_ascend.model_loader.netloader.netloader.ModelNetLoaderElastic'>` with load format `netloader`
-INFO 09-11 17:44:04 [__init__.py:112] Registered model loader `<class 'vllm_ascend.model_loader.rfork.rfork_loader.RForkModelLoader'>` with load format `rfork`
-INFO 09-11 17:44:06 [cascade_plugin.py:147] cascade plugin loaded (gate=0, graph_gate=0, kernel_wheel=ok)
+INFO 09-11 18:22:24 [__init__.py:52] Available plugins for group vllm.platform_plugins:
+INFO 09-11 18:22:24 [__init__.py:54] - ascend -> vllm_ascend:register
+INFO 09-11 18:22:24 [__init__.py:57] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+INFO 09-11 18:22:24 [__init__.py:272] Platform plugin ascend is activated
+INFO 09-11 18:22:24 [platform.py:70] Breakable CUDAGraph on Ascend is opt-in; using VLLM_USE_BREAKABLE_CUDAGRAPH=0.
+2026-09-11 18:22:25,055 - 1464861 - ServiceProfiler - INFO - VLLM_USE_V1 not set, auto-detected via vLLM 0.28.1.post1.dev143+gf18cf803c.empty: default 1
+INFO 09-11 18:22:37 [__init__.py:112] Registered model loader `<class 'vllm_ascend.model_loader.netloader.netloader.ModelNetLoaderElastic'>` with load format `netloader`
+INFO 09-11 18:22:37 [__init__.py:112] Registered model loader `<class 'vllm_ascend.model_loader.rfork.rfork_loader.RForkModelLoader'>` with load format `rfork`
+INFO 09-11 18:22:38 [cascade_plugin.py:147] cascade plugin loaded (gate=0, graph_gate=0, kernel_wheel=ok)
 [runner] installed vllm.general_plugins entry points: {"cascade-attention": "vllm_ascend_split_batch.cascade_plugin:load", "fi-gelu": "vllm_ascend_split_batch.fi_gelu_plugin:load", "fi-sampling": "vllm_ascend_split_batch.fi_sampling_plugin:load", "fia-demask": "vllm_ascend_split_batch.fia_demask_plugin:load"}
 [runner] rope-fix entry point discovered: False (metadata is an install-time snapshot)
 [runner] carrier invoked directly (VLLM_HUST_ROPE_FIX=None): load() -> False
@@ -14,14 +14,14 @@ INFO 09-11 17:44:06 [cascade_plugin.py:147] cascade plugin loaded (gate=0, graph
 ==============================================================================
 RoPE 变体族端到端链 part=main（triton 路径；无 ATB 调用） device=7
 ==============================================================================
-INFO 09-11 17:44:07 [scheduler.py:331] Chunked prefill is enabled with max_num_batched_tokens=2048.
-INFO 09-11 17:44:07 [kernel.py:372] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
-WARNING 09-11 17:44:07 [platform.py:473] Model config is missing. Skipping Ascend-specific config updates.
-INFO 09-11 17:44:07 [compilation.py:329] Enabled custom fusions: norm_quant, act_quant
+INFO 09-11 18:22:40 [scheduler.py:331] Chunked prefill is enabled with max_num_batched_tokens=2048.
+INFO 09-11 18:22:40 [kernel.py:372] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+WARNING 09-11 18:22:40 [platform.py:473] Model config is missing. Skipping Ascend-specific config updates.
+INFO 09-11 18:22:40 [compilation.py:329] Enabled custom fusions: norm_quant, act_quant
 op_registry_oot rope keys: ['ApplyRotaryEmb', 'DeepseekScalingRotaryEmbedding', 'MRotaryEmbedding', 'RotaryEmbedding', 'YaRNScalingRotaryEmbedding']
 
 ### 变体 interleaved: AscendRotaryEmbedding fwd=AscendRotaryEmbedding.forward_oot neox=False
-[W911 17:44:08.078478324 NPUCachingAllocator.cpp:177] Warning: The current CANN and Soc versions require processing for 32 padding size, with memory allocation. (function operator())
+[W911 18:22:40.202807715 NPUCachingAllocator.cpp:177] Warning: The current CANN and Soc versions require processing for 32 padding size, with memory allocation. (function operator())
   [生成端] AscendRotaryEmbedding cache(32768, 128) bfloat16 recompute_max_abs=0.000e+00 bf16量化max_abs=1.953e-03 ref(AscendRotaryEmbedding) vs fork cache max_abs=0.000e+00
   [seq T=4096] cache bf16 底噪 G2 vs G1f max_abs=3.125e-02 (理论界 2*2^-8*max|x|=4.272e-02, 占=0.73) | 公式分歧 G1f vs G1 max_abs=0.000e+00
   [kernel triton] O(q) vs G2: bitwise=True max_abs=0.000e+00 | e2e O(q) vs G1 max_abs=3.125e-02 边内(bad=17160) 链自洽=True 底噪内=True

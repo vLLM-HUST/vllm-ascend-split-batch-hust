@@ -2,39 +2,39 @@
 
 ### interleaved
 
-| 腿 | 生产类 | 实际 fwd | kernel_reachable | O≡直接kernel | e2e 判定 | 对 host 公式偏差 | 公式分歧 |
+| 腿 | 生产类 | 实际 fwd | kernel_reachable | 接线判据 | e2e 判定 | 对 host 公式偏差 | 公式分歧 |
 |---|---|---|---|---|---|---|---|
-| prefix | `AscendRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
-| control-off | `AscendRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
-| carrier-on | `AscendRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
-| forkfix | `AscendRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| prefix | `AscendRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (O≡直接kernel) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| control-off | `AscendRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (O≡直接kernel) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| carrier-on | `AscendRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (O≡直接kernel) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| forkfix | `AscendRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (O≡直接kernel) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
 
 ### llama3
 
-| 腿 | 生产类 | 实际 fwd | kernel_reachable | O≡直接kernel | e2e 判定 | 对 host 公式偏差 | 公式分歧 |
+| 腿 | 生产类 | 实际 fwd | kernel_reachable | 接线判据 | e2e 判定 | 对 host 公式偏差 | 公式分歧 |
 |---|---|---|---|---|---|---|---|
-| prefix | `Llama3RotaryEmbedding` | `forward_oot` | 断点(生产类未接线/报错) | **False** | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
-| control-off | `Llama3RotaryEmbedding` | `forward_oot` | 断点(生产类未接线/报错) | **False** | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
-| carrier-on | `AscendFixLlama3RotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
-| forkfix | `AscendLlama3RotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| prefix | `Llama3RotaryEmbedding` | `forward_oot` | 断点(生产类未接线/报错) | **False** (O≡直接kernel) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| control-off | `Llama3RotaryEmbedding` | `forward_oot` | 断点(生产类未接线/报错) | **False** (O≡直接kernel) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| carrier-on | `AscendFixLlama3RotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (O≡直接kernel) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| forkfix | `AscendLlama3RotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (O≡直接kernel) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
 
 ### yarn
 
-| 腿 | 生产类 | 实际 fwd | kernel_reachable | O≡直接kernel | e2e 判定 | 对 host 公式偏差 | 公式分歧 |
+| 腿 | 生产类 | 实际 fwd | kernel_reachable | 接线判据 | e2e 判定 | 对 host 公式偏差 | 公式分歧 |
 |---|---|---|---|---|---|---|---|
-| prefix | `AscendYaRNRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS*(链自洽) — 但生成端公式与 host/GPU 分歧，端到端偏差被它主导 | 5.10156 | 5.09375 |
-| control-off | `AscendYaRNRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS*(链自洽) — 但生成端公式与 host/GPU 分歧，端到端偏差被它主导 | 5.10156 | 5.09375 |
-| carrier-on | `AscendFixYaRNRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
-| forkfix | `AscendYaRNRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| prefix | `AscendYaRNRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (O≡直接kernel) | PASS*(链自洽) — 但生成端公式与 host/GPU 分歧，端到端偏差被它主导 | 5.10156 | 5.09375 |
+| control-off | `AscendYaRNRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (O≡直接kernel) | PASS*(链自洽) — 但生成端公式与 host/GPU 分歧，端到端偏差被它主导 | 5.10156 | 5.09375 |
+| carrier-on | `AscendFixYaRNRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (O≡直接kernel) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| forkfix | `AscendYaRNRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (O≡直接kernel) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
 
 ### mrope
 
-| 腿 | 生产类 | 实际 fwd | kernel_reachable | O≡直接kernel | e2e 判定 | 对 host 公式偏差 | 公式分歧 |
+| 腿 | 生产类 | 实际 fwd | kernel_reachable | 接线判据 | e2e 判定 | 对 host 公式偏差 | 公式分歧 |
 |---|---|---|---|---|---|---|---|
-| prefix | `AscendMRotaryEmbedding` | `forward_oot` | 断点(生产类未接线/报错) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
-| control-off | `AscendMRotaryEmbedding` | `forward_oot` | 断点(生产类未接线/报错) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
-| carrier-on | `AscendFixMRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
-| forkfix | `AscendMRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| prefix | `AscendMRotaryEmbedding` | `forward_oot` | 断点(生产类未接线/报错) | **False** (包装正常返回) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| control-off | `AscendMRotaryEmbedding` | `forward_oot` | 断点(生产类未接线/报错) | **False** (包装正常返回) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| carrier-on | `AscendFixMRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (包装正常返回) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
+| forkfix | `AscendMRotaryEmbedding` | `forward_oot` | PASS(生产类接线到 triton) | True (包装正常返回) | PASS(链自洽；总偏差=cache bf16 底噪) | 0.03125 | 0 |
 
 ## 判定字段（carrier-on vs forkfix / control-off vs prefix）
 

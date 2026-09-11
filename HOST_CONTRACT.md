@@ -118,25 +118,30 @@ plugin-side (design note `docs/design/rope-variant-defects.md`). It rides ONLY:
   the overrides), and the wrapper is rebound in every already-imported module
   holding a direct reference, `vllm_ascend.worker.worker` included
   (`worker.py:95` binds the function, `:150` calls it).
-- `vllm_ascend.ops.rotary_embedding`: `AscendRotaryEmbedding.forward_oot`
-  (delegation target of the llama3 override), `AscendMRotaryEmbedding`
-  (subclassed; the mirrored `forward_triton` reads `mrope_interleaved`,
-  `is_neox_style`, `head_size`, `cos_sin_cache`, `_ASCEND_TRITON_GRID_LIMIT`),
-  `AscendYaRNRotaryEmbedding` (subclassed; only the keyword-only `truncate`
-  default changes) and the private `_record_cos_sin_cache` helper.
+- `vllm_ascend.ops.rotary_embedding`: the module-level `triton_mrope` binding (bound
+  under `HAS_TRITON`; the mirrored `forward_triton` calls the *same* object the host
+  call site resolves, and defect ② is simply not installed when it is absent),
+  `AscendRotaryEmbedding.forward_oot` (the module-level delegation fallback of the
+  llama3 override), `AscendMRotaryEmbedding` (subclassed; the mirrored
+  `forward_triton` reads `mrope_interleaved`, `is_neox_style`, `head_size`,
+  `cos_sin_cache`, `_ASCEND_TRITON_GRID_LIMIT`), `AscendYaRNRotaryEmbedding`
+  (subclassed; only the keyword-only `truncate` default changes) and the private
+  `_record_cos_sin_cache` helper.
 - `vllm.model_executor.layers.rotary_embedding`: `Llama3RotaryEmbedding`
-  (10-argument construction signature mirrored verbatim) and
-  `rotary_embedding.mrope.triton_mrope` (9 positional parameters, the last one
-  `is_neox_style`).
+  (10-argument construction signature mirrored verbatim) and `triton_mrope`
+  (9 positional parameters, the last one `is_neox_style`).
 
 ### Anchor map (baseline `main@74f0c0a27`)
 
 | Anchor | Host reality (verified) | Carrier | Status |
 | --- | --- | --- | --- |
 | `REGISTERED_ASCEND_OPS` (utils.py:735-765) | `RotaryEmbedding` / `MRotaryEmbedding` / `YaRNScalingRotaryEmbedding` / `DeepseekScalingRotaryEmbedding`, **no `Llama3RotaryEmbedding`** | creates `op_registry_oot["Llama3RotaryEmbedding"]` | defect ① (coverage gap) |
+| `op_registry_oot["RotaryEmbedding"]` (set by the same pass; 310P swaps in `AscendRotaryEmbedding310`) | the implementation the build actually uses for the base rope | resolved at construction and delegated to by the llama3 override | compatibility-build contract |
 | `AscendMRotaryEmbedding.forward_triton` (:513-552) | calls `triton_mrope` with **8** positional args | mirrored subclass + `self.is_neox_style` (9th arg) | defect ② |
+| `rotary_embedding.triton_mrope` (module global, `HAS_TRITON`) | the kernel object the call site resolves | bound from this module; absent -> defect ② not installed | defect ② precondition |
 | `AscendYaRNRotaryEmbedding.__init__` (:281-298) | `truncate: bool = False` (vLLM/HF default is `True`) | subclass changing only that default to `True` | defect ③ |
-| `register_ascend_customop` (:688) | early-returns on `_ASCEND_CUSTOMOP_IS_REIGISTERED`; registers every key at :813-814 | wrapped; overrides applied **after** the original returns | ordering contract |
+| `register_ascend_customop` (:688) | early-returns on `_ASCEND_CUSTOMOP_IS_REIGISTERED`; registers every key at :813-814 | wrapped; overrides applied **after** the original returns; rolled back if that eager pass fails | ordering contract |
+| `worker.py:95/150` | `from vllm_ascend.utils import register_ascend_customop` + a call inside `NPUWorker.__init__` | the wrapper is rebound in this module too (an attribute patch alone would miss the live call site) | call-site rebinding |
 | `CustomOp.register_oot` (:339-351) | `assert reg_name not in op_registry_oot` | never called by the carrier (why the entries are replaced instead) | lever justification |
 
 Host-upgrade checklist item: `tests/test_rope_fix_drift.py` (see
@@ -144,10 +149,12 @@ Host-upgrade checklist item: `tests/test_rope_fix_drift.py` (see
 one of the three defects (`upstream fixed defect ①/②/③ → drop the corresponding
 override`) and use a second wording when a seam moved
 (`anchor drifted → re-audit HOST_CONTRACT`); the seam list above is what that
-second wording asks the reader to re-audit.
+second wording asks the reader to re-audit. A missing host tree is a **failure**,
+not a skip: an unevaluated guard must not look like a passing one.
 
 Default-off semantics: with `VLLM_HUST_ROPE_FIX` unset `load()` returns before
 importing `vllm_ascend` / `torch` / `torch_npu` / `triton`, touches no registry
 and logs nothing. Fail-open: a missing/renamed seam, a foreign registry entry
 (e.g. the 310P variants) or any internal error warns once and leaves the host
-implementation in place.
+implementation in place; a failure *after* the wrapper was installed rolls it back
+so `stats()` matches the log.
