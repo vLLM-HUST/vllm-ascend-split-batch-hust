@@ -52,7 +52,7 @@ vllm 模块;宿主源码不可修改,宿主能力只走公开面(entry point、
 | `implementation[].status` | `active` 才可 `enable`。当前 cascade 两个 carrier(`cascade_plugin:load` / `cascade_graph_plugin:install`)为 `active`;`planner:plan_dual_pad` 仍是 `import_only`(无验收证据,review F7) |
 | `activation.environment` | **enable 时注入的值**,不是文档。当前声明 `ENABLE_CASCADE_DECODE=1` + `ENABLE_CASCADE_GRAPH=1`;不 enable 则什么都不注入 |
 | `protocols[].version_range` | 四个协议均 `null`(**不独立版本化**):宿主不存在 `vllm.plugins.contracts`,manager 探测不到版本;声明具体区间只会让 `run` 以"version is unavailable"拒启。约束由 `host.version_range` + 验收证据承担,理由详见 [release.md](release.md) §0 |
-| `host.version_range` | 钉**实际验证域**(`>=0.23.0rc1,<0.24`);宿主是 `0.23.0rc1`,prerelease 不在 `>=0.23.0` 内 |
+| `host.version_range` | 钉**实际验证域**(现 `==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27` 点钉,见 release.md §0.1);prerelease 不在 `>=X.Y.Z` 形式的下界内,区间写法必须对照 packaging 判定 |
 | `components[].contracts` / `execution_planes` | `dual-pad-planner` 与 `cascade-two-stage-decode` 声明在 worker/device plane,permissions 含 `device_access` |
 | 发现 vs 导入 | `extension list/inspect/check` 只读元数据不 import 实现;import 实现的只有 vllm 的 `general_plugins` 加载(`load()` 内部再按 env 门控) |
 

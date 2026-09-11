@@ -107,7 +107,8 @@ The Manifest 0.2 descriptor marks the two cascade carriers `active` (the
 planner stays `import_only`): `vllm-hust-ext extension enable` injects the
 `activation.environment` flags, and installation alone changes no vLLM
 behavior because the cascade capability is env-gated at runtime. Verified
-host range: `vllm-ascend>=0.23.0rc1,<0.24` (see `docs/release.md` §0.1).
+host range: `vllm-ascend==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`
+(point-pinned; see `docs/release.md` §0.1).
 
 ```bash
 python -m pip install -e ".[test]"

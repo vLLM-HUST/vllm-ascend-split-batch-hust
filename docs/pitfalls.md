@@ -106,3 +106,21 @@ kernel wheel 由 `NpuExtension` 自动产出 `cp312-cp312-linux_aarch64` 正确 
 manager,手工设置即拒绝);已 enable 的扩展被卸载(卸载前先 `disable`/`forget`)。
 完整清单见 bidkv 指南 §13(vllm-hust-docs 仓库 `operations/bidkv-packaging-
 and-release-guide.md`)。
+
+### 3.5 cascade 图捕获在默认 capture_sizes 下 NPU OOM(2026-09-11)
+
+**症状**:`vllm-hust-ext run`(cascade 已 enable)用默认
+`cudagraph_capture_sizes` 起服,cascade twin capture 反复
+`Tried to allocate 418.00 MiB ... 224.63 MiB free` NPU-OOM →
+`cascade graph capture failed; capturing the standard graph instead`
+fail-open 刷屏(143+ 次),引擎永远到不了 ready。
+
+**修复**:启用 capture-size 封顶(§3 验证过的 harness 口径):
+
+```bash
+--compilation-config '{"cudagraph_capture_sizes":[32,64,128]}'
+```
+
+**定性**:config 面问题,非正确性缺陷——封顶后 144 次 capture(3 桶 × 48 层)
+全成功、0 fail-open。§3 启用验证日志:
+`knowledge/evidence/cascade/logs/v1-active-enablement/serve-active-enablement.log`。

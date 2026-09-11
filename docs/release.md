@@ -11,10 +11,12 @@
 - 翻 `active` 前,`activation.environment` 必须是可注入的真实值
   (`"1"`,由 `tests/test_manifest.py` 保证格式);default-off 语义由
   "不 enable 就不注入 + `load()` 内部门控" 双层保证。
-- `host.version_range` 钉住**实际验证域**(当前 `>=0.23.0rc1,<0.24`),禁止
-  `>=0`。宿主装的是 `vllm-ascend==0.23.0rc1`,packaging 语义下 prerelease
-  不属于 `>=0.23.0,<0.24`,写后者会让 `extension check` 判 INCOMPATIBLE。
-  区间收窄/放宽前先过 §4 清单并留档验证环境(见 §0.1)。
+- `host.version_range` 钉住**实际验证域**(当前
+  `==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27` 点钉,2026-09-11 起),禁止
+  `>=0`。历史教训:packaging 语义下 prerelease 不属于
+  `>=X.Y.Z,<next` 形式的下界(如 `0.23.0rc1 ∉ >=0.23.0`),区间写法必须对照
+  实装版本核 packaging 判定。区间收窄/放宽前先过 §4 清单并留档验证环境
+  (见 §0.1)。
 - `protocols[].version_range` 为 `null`:这四个协议(`vllm.graph.runtime-key` /
   `vllm.forward.split-context` / `vllm.ascend.graph-pool` /
   `vllm.worker.split-executor`)是本仓库单方面遵守的弱契约,**宿主不独立
@@ -24,15 +26,15 @@
   由宿主区间 + 验收证据共同约束,manager 会记录一条 "not independently
   versioned" 证据。
 
-### 0.1 已验证域留档(F1)
+### 0.1 已验证域留档(F1,2026-09-11 更新为现行基线)
 
 | 项 | 值 |
 |---|---|
-| `host.version_range` | `>=0.23.0rc1,<0.24` |
-| vllm-ascend | `0.23.0rc1`,`f4a08bddd`(`v0.23.0rc1` tag) |
-| vllm | `0.23.0+empty`,`0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665` |
-| 验证环境 | Python 3.12.13 / torch 2.10.0+cpu / torch_npu 2.10.0.post2 / CANN 9.0.1 / 910B2 |
-| 验证证据 | `extension check` → compatible;default-off serve 冒烟;`knowledge/evidence/cascade/EVIDENCE.md` |
+| `host.version_range` | `==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`(点钉) |
+| vllm-ascend | `0.25.1rc2.dev125+hust.20260903.4`,`74f0c0a272376412b51e1c1864803d5f3a0f1b5f`(main) |
+| vllm | `0.28.1.post1.dev143+gf18cf803c.empty`,`f18cf803c5f63625e2c71253ddaf8b0bad0bad1a`(vllm-hust release v1) |
+| 验证环境 | Python 3.12.14 / torch 2.13.0+cpu / torch_npu 2.13.0rc1 / CANN 9.1.0 (`/usr/local/ascend91`) / 910B2 |
+| 验证证据 | `extension check` → compatible;§3 启用验证(`knowledge/evidence/cascade/section4-active-enablement.md`);正确性 `section2-real-model-rerun.md`(真模型 6/64);历史域(0.23.0rc1 / CANN 9.0.1,已退役)留档于 `EVIDENCE.md` 与 c3-legacy 产物 |
 
 ## 1. 版本与构建
 
