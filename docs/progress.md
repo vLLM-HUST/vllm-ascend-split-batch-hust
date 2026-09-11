@@ -105,6 +105,18 @@
   FULL_AND_PIECEWISE 启动崩(见 pitfalls §1.3)。
 - CPU 门槛:`pytest -q` **153 passed**(2026-09-10,+29 gelu kernel +13 接线)
   + `ruff check` 干净。
+- **cascade 翻 `active` + release.md §3 启用验证通过**(2026-09-11):manifest 两个 cascade
+  carrier(`cascade_plugin:load` / `cascade_graph_plugin:install`)由 `import_only` → `active`,
+  planner 保持 `import_only`;三项证据在新基线齐备(真模型 6/64 见
+  `section2-real-model-rerun.md`,gatefix 见 `section3-gatefix-addendum.md`)。
+  `extension check` 转 **compatible+configured**,`run --dry-run` 注入
+  `VLLM_ASCEND_ENABLE_CASCADE_DECODE/GRAPH=1`;真模型 serve 启动日志 2 条
+  `cascade plugin loaded (gate=1, graph_gate=1, kernel_wheel=ok)`,cascade twin
+  `capture body SUCCESS` ×144、0 TypeError,`/health` 200、chat 冒烟 200。发现:cascade
+  图车道在 `--gpu-memory-utilization 0.85` 下需把 `cudagraph_capture_sizes` 收到
+  `[32,64,128]`(默认全网格 twin capture 触发 NPU OOM → capture 级 fail-open)。CPU 门槛
+  `pytest -q` **190 passed** + `ruff check` 干净。详情
+  `knowledge/evidence/cascade/section4-active-enablement.md`。
 
 ### 阶段 5:fi_sampling 采样接入(W2b,2026-09-09)
 

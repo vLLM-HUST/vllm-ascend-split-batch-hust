@@ -66,15 +66,21 @@ method kills the engine, which violates the documented fail-open contract. All
 cascade wrappers must (a) match the host call convention and (b) delegate to the
 original on any internal failure with a single warning.
 
-**Carrier status (2026-09-09)**: carriers remain `import_only`. The three
-acceptance evidences were gathered on 0.23.0rc1 and do NOT transfer across a
-host change; the new-baseline re-run
-(`knowledge/evidence/cascade/EVIDENCE-V1-BASELINE.md`) **failed
-evidence #2 and partially failed #3** because of D1–D4. Path back to `active`:
-fix D1–D4 (done in a follow-up commit), then re-run release.md 三项证据 on this
-baseline and keep the pin. `host.version_range` stays at the exact verified
-build (`==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`); packaging rejects
-local-version labels in ordered comparators, hence the point-`==` form.
+**Carrier status (2026-09-11)**: the two cascade carriers
+(`cascade_plugin:load` / `cascade_graph_plugin:install`) are `active`; the
+planner keeps `import_only` (no acceptance evidence, review F7). The D1–D4
+signature drifts were fixed and the three acceptance evidences were re-run on
+this pinned baseline: default-off smoke PASS
+(`EVIDENCE-V1-BASELINE.md` §1), real-model correctness 6/64 like-for-like
+(`section2-real-model-rerun.md`), performance/gate margin closed
+(`section3-gatefix-addendum.md`). release.md §3 enablement verification then
+passed on the real model (`knowledge/evidence/cascade/section4-active-enablement.md`):
+`extension check` compatible+configured, `run` gate proof
+`gate=1, graph_gate=1, kernel_wheel=ok`, cascade twin capture 144/144 with 0
+TypeError, `/health` + functional smoke 200. `host.version_range` stays at the
+exact verified build (`==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`);
+packaging rejects local-version labels in ordered comparators, hence the
+point-`==` form.
 
 ## fi_sampling component (implemented, default-off)
 

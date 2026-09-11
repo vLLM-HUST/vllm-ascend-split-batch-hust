@@ -23,35 +23,34 @@ CASCADE_CARRIERS = (
 PLANNER_CARRIER = "vllm_ascend_split_batch.planner"
 
 
-def test_descriptor_is_discoverable_and_blocked_pending_rerun() -> None:
-    """Discoverable, but activation is blocked while carriers are import_only.
+def test_descriptor_is_discoverable_and_activatable() -> None:
+    """Discoverable and activatable: the cascade carriers now carry evidence.
 
-    The W4 active flip was reverted when the host baseline moved (see
-    test_all_carriers_are_import_only_after_host_change); the blocker coming
-    back is the guard working as designed.
+    The three acceptance evidences were re-run on the pinned host baseline
+    (default-off smoke / real-model correctness 6/64 / gatefix performance
+    margin), so the cascade carrier guard is lifted and an active carrier
+    makes the bundle enable-able.
     """
     manifest = load_manifest(MANIFEST_PATH)
     assert manifest.bundle_id == "org.vllm-hust.split-batch-full-graph"
-    blocker = activation_blocker(manifest)
-    assert blocker is not None
-    assert "import_only" in blocker
+    assert activation_blocker(manifest) is None
 
 
-def test_all_carriers_are_import_only_after_host_change() -> None:
-    """W4 flipped the cascade carriers to active on 0.23.0rc1 evidence.
+def test_only_cascade_carriers_are_active() -> None:
+    """Flip the two cascade carriers to active; the planner stays inert.
 
-    The working baseline moved to vllm-ascend-hust main
-    (0.25.1rc2.dev125+hust, worker/model_runner_v1 + compilation/acl_graph
-    anchors).  The three acceptance evidences have NOT been re-run on that
-    host, so per release.md discipline the carriers are demoted back to
-    ``import_only`` until the re-run passes.  The planner stays inert
-    regardless (review F7: no acceptance evidence at all).
+    The evidence re-run on the pinned host baseline closed the flip blockers,
+    so both cascade carriers (``cascade_plugin:load`` /
+    ``cascade_graph_plugin:install``) are ``active``.  The planner has no
+    acceptance evidence (review F7), so it must keep ``import_only`` -- an
+    accidental flip would silently enable an unimplemented host contract.
     """
     carriers = {
         item["module"]: item["status"] for item in _manifest_json()["implementation"]
     }
-    for module in (*CASCADE_CARRIERS, PLANNER_CARRIER):
-        assert carriers[module] == "import_only", module
+    for module in CASCADE_CARRIERS:
+        assert carriers[module] == "active", module
+    assert carriers[PLANNER_CARRIER] == "import_only"
 
 
 def test_host_version_range_pins_the_verified_baseline() -> None:
