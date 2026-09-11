@@ -24,6 +24,7 @@ test = ["pytest>=8", "ruff>=0.12", "vllm-hust-ext==0.2.0.dev0"]
 "cascade-attention" = "vllm_ascend_split_batch.cascade_plugin:load"
 "fi-sampling" = "vllm_ascend_split_batch.fi_sampling_plugin:load"
 "fi-gelu" = "vllm_ascend_split_batch.fi_gelu_plugin:load"
+"fia-demask" = "vllm_ascend_split_batch.fia_demask_plugin:load"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vllm_ascend_split_batch"]

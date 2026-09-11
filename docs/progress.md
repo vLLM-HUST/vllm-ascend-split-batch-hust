@@ -166,3 +166,13 @@
    B∈[64,256) 区间证据(W2 bench 显示该区间 ours 输 1.33×–3.83×)。
 
 每条动手前:更新本文件状态,证据落到 PR 描述或 `docs/evidence/`(新建)。
+
+## 2026-09-11 fia-demask（decode FIA 去掩码）
+
+- 新 carrier `fia_demask_plugin:load`（**import_only**，开关 `VLLM_HUST_FIA_DEMASK=1`，
+  observe `VLLM_HUST_FIA_DEMASK_TRACE=1`），op 面 wrapper（FIA v1 + .out + workspace 查询），
+  纯 decode 谓词（TND + sparse_mode=3 + pre/next=INT_MAX + 方形 int8 mask + Q_S=1/请求），
+  fail-open 检查 / fail-closed 安装，default-off 零差异。
+- 三级验收全绿：CPU 35 tests；逐 token 等价 8/8；e2e decode 账 B32 **+3.10%** / B64 **+4.61%** TPOT
+  （r1 预热离群对称，热轮腿内 0.2%）。证据：
+  `profiles/qwen14b-instruct-hotspot-20260910/probe-fia/E2E-mask-removal.md`。
