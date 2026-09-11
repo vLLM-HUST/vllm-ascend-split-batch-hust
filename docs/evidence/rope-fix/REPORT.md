@@ -11,7 +11,7 @@ CPU（`pytest`/`ruff` 在仓内跑，其余命令 `cd /tmp`）：
 
 ```bash
 cd /vllm-workspace/vllm-ascend-split-batch-hust
-python -m pytest -q                 # 261 passed（本 carrier 新增 34 例）
+python -m pytest -q                 # 261 passed（本 carrier 新增 35 例：23+11+1）
 ruff check .                        # All checks passed!
 
 # 守卫双向自测（宿主树零改动：副本注入变异 + VLLM_ASCEND_HUST_ROOT 指向副本）
@@ -83,7 +83,7 @@ python3 docs/evidence/rope-fix/compare.py --check    # 四腿对比 + 判定，r
 
 原始输出：`selftest-run.log`（摘要）、`selftest-fixed.txt`、`selftest-drifted.txt`（pytest 全量）。
 
-## 4. CPU 测试清单（新增 34 例）
+## 4. CPU 测试清单（新增 35 例：23 carrier + 11 守卫 + 1 manifest）
 
 `tests/test_rope_fix_plugin.py`（23 例，mock 为主 + 1 例真宿主集成）：
 
