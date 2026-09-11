@@ -154,9 +154,10 @@
    三项归档后,按 release.md 第 3 节走启用验证,再改 `implementation.status`。
 2. ~~**kernel wheel extras 联动**~~(已完成,见阶段 4 W4 条目):`kernels`
    extra 已声明,fail-open 守卫与单测已落地。
-3. **宿主 seam 上游化**:split-batch 四协议仍是提案;推动 vllm-hust 宿主提供
-   typed contract(参照 bidkv/victim-selector 的宿主适配路径),摆脱
-   monkeypatch 弱契约。
+3. ~~**宿主 seam 上游化**~~(**2026-09-11 关闭**:不做上游 PR/上游化,见工作区
+   AGENTS.md 硬性约束与 §1 第 6 条):split-batch 四协议**永久保持**插件侧弱契约
+   (`protocols[].version_range = null`,理由见 release.md §0),不再推动 vllm-hust
+   提供 typed contract。
 4. **发布渠道**:证据齐后走 `uv publish` 到 pypi 或内部索引;发布前补
    release.md 第 2 节的隔离安装冒烟自动化。
 5. **fi_sampling e2e 收益显形**(W2b 遗留):无截断路径在 B=64 下采样仅占
@@ -165,7 +166,8 @@
    形态显形须下调 `VLLM_HUST_FI_SAMPLING_JOINT_MIN_BATCH`,但下调前须补
    B∈[64,256) 区间证据(W2 bench 显示该区间 ours 输 1.33×–3.83×)。
 
-每条动手前:更新本文件状态,证据落到 PR 描述或 `docs/evidence/`(新建)。
+每条动手前:更新本文件状态,证据落到 `docs/evidence/`(新建)或本文件。
+(2026-09-11:**不写 PR 描述**——本仓不做上游 PR,改动只本地落地。)
 
 ## 2026-09-11 fia-demask（decode FIA 去掩码）
 
@@ -184,4 +186,5 @@
   capture_sizes 封顶）→ `de-mask applied` + `ACTIVE` 证据行 → /health → 冒烟 OK，
   0 fail-open。补账：六格 TPOT +3.3~+10.1%（geomean +6.43%）、e2e 吞吐 +3.52%。
 - 证据：`profiles/.../probe-fia/E2E-mask-removal.md` §3.1、`serve_demask_s3.log`、
-  review 材料 `docs/evidence/fia-demask-review.md`、上游素材 `docs/upstream/fia-decode-demask.md`。
+  review 材料 `docs/evidence/fia-demask-review.md`、~~上游素材~~ `docs/upstream/fia-decode-demask.md`
+  （**2026-09-11 冻结**：不做上游 PR，该素材只作技术论据留档，不再维护）。
