@@ -115,3 +115,38 @@ enablement、写 `installation`）属"对外提交动作"，**本材料不执行
 5. **k=1 argmax / RNG 语义差异**：见 §5，未做 tie 专项对拍与逐位对拍。
 6. **vendor 目录 lint 例外**：`src/vllm_ascend_split_batch/fi_sampling/` 逐字复制自源包，已入 ruff
    `extend-exclude`；升级源包需重新同步并记录 hash。
+
+## 9. 裁决（2026-09-11）
+
+- **日期**：2026-09-11
+- **裁决人**：用户（团队拍板）
+- **裁决依据**：本材料 §4（两条形态事实）、§5（风险评估）、§6（推荐路径 A）
+- **裁决内容（三条）**：
+
+  1. **不因性能翻 `qualified`**：catalog 条目 `org.vllm-hust.fi-sampling` 保持
+     `maturity=preview` / `availability=preview` / `recommendation.level=not-recommended-for-tested-cell`。
+     理由：唯一实质增量是"可启用"，而已验证形态下 enablement **买不到时延**（api1 六腿 Δmedian
+     −0.052% 落在 0.368% 噪声带内不可判），却引入"第二套采样语义"的默认可达面。
+  2. **不注册 manifest**：维持 `fi_sampling_plugin` **刻意不注册**现状（无 `implementation[]`/
+     `component`、无 `activation.environment` 键），即 `run --dry-run` 继续**不注入**
+     `VLLM_HUST_FI_SAMPLING`（该事实已记入 §3 记录 §2.1/§7）。
+  3. **不注册独立 bundle**：未选择本材料 §6 的备选路径 B（"可启用"分支），`pyproject.toml`
+     与 manifest 均不动。
+
+- **生效动作清单**：
+
+  | # | 动作 | 落点 |
+  | --- | --- | --- |
+  | 1 | 条目文本刷新为新基线口径（api1 −0.052%/噪声带 0.368% 不可判、FI 路由 1300/1300、joint 512-ctx `max_B=504` 且常规 4k 死分支 B≈122<256、§3 与 review 引用、manager 不注入开关的事实与未来独立 bundle 路径） | `knowledge/surveys/catalog/extension-catalog-hust-mods.json`（条目 `org.vllm-hust.fi-sampling`；**工作区知识库，不在版本控制内**） |
+  | 2 | 裁决留痕（本小节） | `docs/evidence/fi-sampling-review.md` §9（本 commit） |
+  | 3 | 目录说明同步（状态表 + 路径 B 描述 + 陈旧的 `flashinfer-migration` 路径） | `knowledge/surveys/catalog/README.md` |
+  | 4 | `manifest` / `host.version_range` / 其它 bundle / `profiles/` | **未改**（裁决明确不动） |
+
+  > 说明：§7 表中"目录侧 … **本次未改**"描述的是上一 commit（`b84e511`）时的状态；本次按本裁决
+  > 完成了条目刷新（动作 1），以本小节为准。
+
+- **未来若要"可启用"（裁决未选，仅留路径）**：按 fia-demask 先例（`docs/design/fia-decode-demask.md`
+  §8：单能力独立开关）注册独立 bundle `org.vllm-hust.fi-sampling`
+  （`implementation[]` + `activation.environment={"VLLM_HUST_FI_SAMPLING":"1"}`）并重跑一次纯 §3；
+  但 catalog `qualified` 在缺 `installation`（不可变安装目标：wheel/源码 + sha256）时**仍不可达**，
+  且性能口径不变（本裁决不因性能翻）。
