@@ -188,3 +188,28 @@
 - 证据：`profiles/.../probe-fia/E2E-mask-removal.md` §3.1、`serve_demask_s3.log`、
   review 材料 `docs/evidence/fia-demask-review.md`、~~上游素材~~ `docs/upstream/fia-decode-demask.md`
   （**2026-09-11 冻结**：不做上游 PR，该素材只作技术论据留档，不再维护）。
+
+## 2026-09-11 rope-fix（fork RoPE 三缺陷的插件侧 carrier + 反向漂移守卫）
+
+- 新 carrier `rope_fix_plugin:load`（**import_only**，开关 `VLLM_HUST_ROPE_FIX=1`，
+  bundle `org.vllm-hust.rope-fix`）：把 fork 三处真实缺陷做成插件侧一等公民——
+  ① llama3-scaling 接线到 Ascend rope kernel（`op_registry_oot["Llama3RotaryEmbedding"]`
+  创建 + 10 参签名子类）、② mrope 补 `triton_mrope` 第 9 参 `is_neox_style`
+  （镜像 `forward_triton` 的 AST 守卫）、③ YaRN `truncate` 缺省对齐 vLLM/HF（`True`）。
+  机制：包裹 `register_ascend_customop`（原函数先跑、返回后覆写 registry 条目；
+  包装体同时重绑 `worker.py` 等直接引用点），默认关时零 import/零 patch/零日志。
+- CPU：`pytest -q` **254 passed**、`ruff check .` 零告警（新增 28 例：17 carrier +
+  10 守卫 + 1 manifest；含真宿主注册路径集成例与子进程 import 纯净性例）。
+- **守卫双向自测**（宿主树零改动，`/tmp` 副本注入变异）：三条反向断言在"上游已修"
+  变异下报 `upstream fixed defect ①②③ → drop the corresponding override`，在
+  "锚点漂移"变异下报 `anchor drifted → re-audit HOST_CONTRACT`。
+- **NPU 探针 carrier 形态复现**（卡 7 + flock，**不用 PYTHONPATH 覆盖**）：
+  四变体 gen/kernel/`kernel_reachable`/e2e **全 PASS**、`kernel_reachable` 齐
+  "生产类接线到 triton"、总偏差 **3.125e-2**（cache bf16 底噪）= fork-fix 参考值；
+  env 未置的对照腿逐字复现修前三断点（llama3 落 `CustomOp.forward_oot`、
+  mrope `TypeError: triton_mrope() missing 1 required positional argument`、
+  yarn 公式分歧 5.09375）。
+- 证据：`docs/evidence/rope-fix/REPORT.md` + `comparison.md`（四腿对比表）+
+  `guard-selftest/`；设计说明 `docs/design/rope-variant-defects.md`；
+  宿主 seam 与锚点 `HOST_CONTRACT.md`「rope_fix component」；
+  宿主升级核对项 `docs/release.md` §4。manifest 保持 `import_only`（三证据未齐）。

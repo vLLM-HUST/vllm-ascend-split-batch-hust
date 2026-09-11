@@ -90,6 +90,15 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
       `forward_native(logits, generators, k, p)` 签名、`AscendSampler.__init__`
       的构造点、`vllm.envs.VLLM_BATCH_INVARIANT` 与
       `get_ascend_config().enable_reduce_sample` / `enable_async_exponential`
+- [ ] rope_fix 面(`tests/test_rope_fix_drift.py` 跑一遍;它的**反向断言**会
+      自动红,`upstream fixed defect ①/②/③` = 该覆写已变冗余,`anchor drifted`
+      = seam 挪位需重审 HOST_CONTRACT.md「rope_fix component」小节):
+      三缺陷锚点(`REGISTERED_ASCEND_OPS` 仍缺 `Llama3RotaryEmbedding` /
+      `AscendMRotaryEmbedding.forward_triton` 仍是 8 参 `triton_mrope` 调用 /
+      `AscendYaRNRotaryEmbedding.__init__` 的 `truncate` 缺省仍是 `False`)、
+      `register_ascend_customop`(含 `worker.py` 的直接引用点)、
+      `op_registry_oot` 的实例化期读取与重名断言、`Llama3RotaryEmbedding`
+      10 参构造签名、`AscendRotaryEmbedding.forward_oot` 签名、`triton_mrope` 9 参
 
 ## 5. 检查表
 
