@@ -66,6 +66,11 @@ from vllm_ascend_split_batch import rope_fix_plugin as plugin
 FIXED = "upstream fixed defect {} → drop the corresponding override"
 DRIFT = "anchor drifted → re-audit HOST_CONTRACT"
 
+#: host seam names, imported from the carrier so both sides cannot drift apart.
+HOST_UTILS_MODULE = plugin.HOST_UTILS_MODULE
+HOST_REGISTRATION_FUNC = plugin.HOST_REGISTRATION_FUNC
+HOST_ROPE_MODULE = plugin.HOST_ROPE_MODULE
+
 PLUGIN_SRC = Path(plugin.__file__).resolve()
 
 
@@ -74,9 +79,10 @@ def _host_root() -> Path | None:
 
     ``importlib.util.find_spec`` reads the editable-install path hooks and does
     NOT execute the package, so the source-level guards stay import-free (and
-    therefore runnable on a CPU-only box).
+    therefore runnable on a CPU-only box).  The last candidate is derived from
+    this file's own location (deterministic -- no CWD dependency): the workspace
+    layout puts the host checkout next to this repository.
     """
-    override = Path("./vllm-ascend-hust/vllm_ascend")
     env = __import__("os").environ.get("VLLM_ASCEND_HUST_ROOT")
     candidates = []
     if env:
@@ -89,7 +95,9 @@ def _host_root() -> Path | None:
     if spec is not None:
         for location in spec.submodule_search_locations or ():
             candidates.append(Path(location))
-    candidates.append(override)  # workspace sibling, if the spec is unavailable
+    # <workspace>/vllm-ascend-split-batch-hust/tests/x.py -> <workspace>
+    workspace = Path(__file__).resolve().parents[2].parent
+    candidates.append(workspace / "vllm-ascend-hust" / "vllm_ascend")
     for candidate in candidates:
         if (candidate / "utils.py").is_file() and (
             candidate / "ops" / "rotary_embedding.py"
@@ -100,14 +108,20 @@ def _host_root() -> Path | None:
 
 HOST_ROOT = _host_root()
 if HOST_ROOT is None:
-    pytest.skip(
-        "vllm-ascend source tree not found (set VLLM_ASCEND_HUST_ROOT); the "
-        "reverse defect guard cannot run.",
-        allow_module_level=True,
+    # Deliberately a failure, not a skip: this guard is the only thing standing
+    # between the carrier and a silent upstream fix (or a silently moved seam).
+    # Missing evidence must be red -- a green "skipped" run would look like a
+    # passing guard.  Point VLLM_ASCEND_HUST_ROOT at the host checkout to run it.
+    pytest.fail(
+        "vllm-ascend source tree not found; the reverse defect guard (and the "
+        "mirror-equivalence proof) cannot be evaluated.  Set "
+        "VLLM_ASCEND_HUST_ROOT to the vllm-ascend checkout to run it.",
+        pytrace=False,
     )
 
 UTILS_PY = HOST_ROOT / "utils.py"
 ROPE_PY = HOST_ROOT / "ops" / "rotary_embedding.py"
+WORKER_PY = HOST_ROOT / "worker" / "worker.py"
 
 LLAMA3_SIGNATURE = (
     "head_size",
@@ -415,20 +429,68 @@ def test_ascend_mrope_attributes_the_mirror_touches_still_exist() -> None:
 
 
 def test_triton_mrope_arity_is_still_nine() -> None:
-    """The mirrored call appends argument #9; the host must still want nine."""
-    pytest.importorskip(
-        "triton",
-        reason="triton_mrope only exists on a triton-enabled build",
-    )
-    mrope = pytest.importorskip(
-        "vllm.model_executor.layers.rotary_embedding.mrope",
-        reason="the live kernel signature needs vllm",
-    )
-    params = list(inspect.signature(mrope.triton_mrope).parameters)
+    """The mirrored call appends argument #9; the host must still want nine.
+
+    Read from the *fork module's own* binding -- the object the mirrored call site
+    resolves -- so this cannot pass against a different symbol.  When the fork
+    reports ``HAS_TRITON`` the check is mandatory (a missing binding here means
+    the carrier silently stops carrying defect ②, so it must be red, not skipped);
+    only a triton-less build may skip, where nothing carries ② either.
+    """
+    fork_rope = _host_rope()
+    if not getattr(fork_rope, "HAS_TRITON", False):
+        pytest.skip("build without triton: neither the fork nor the carrier has ②")
+
+    kernel = getattr(fork_rope, "triton_mrope", None)
+    if kernel is None:
+        pytest.fail(
+            f"{DRIFT}: the fork reports HAS_TRITON but {HOST_ROPE_MODULE}"
+            ".triton_mrope is missing; defect ② has nothing to be carried with.",
+            pytrace=False,
+        )
+    params = list(inspect.signature(kernel).parameters)
     if len(params) != 9 or params[-1] != "is_neox_style":
         pytest.fail(
             f"{DRIFT}: triton_mrope takes {params} (the fork's call site passes "
             "9 positional arguments, the last one is_neox_style)",
+            pytrace=False,
+        )
+
+
+def test_worker_module_still_binds_the_registration_function_directly() -> None:
+    """The wrapper rebinding list is not hypothetical.
+
+    ``vllm_ascend/worker/worker.py`` does ``from vllm_ascend.utils import
+    register_ascend_customop`` and calls it at ``NPUWorker.__init__`` time, so a
+    carrier that only patched the ``vllm_ascend.utils`` attribute would miss the
+    live call site entirely.  If upstream ever switches to
+    ``vllm_ascend.utils.register_ascend_customop(...)``, the rebinding rationale
+    (and HOST_CONTRACT.md's anchor note) has to be re-audited.
+    """
+    tree = _parse(WORKER_PY)
+    imported = [
+        alias
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == HOST_UTILS_MODULE
+        for alias in node.names
+        if alias.name == HOST_REGISTRATION_FUNC
+    ]
+    if not imported:
+        pytest.fail(
+            f"{DRIFT}: {WORKER_PY} no longer imports "
+            f"{HOST_REGISTRATION_FUNC} from {HOST_UTILS_MODULE} directly; "
+            "re-audit the wrapper's call-site rebinding list.",
+            pytrace=False,
+        )
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _called_name(node) == HOST_REGISTRATION_FUNC
+    ]
+    if not calls:
+        pytest.fail(
+            f"{DRIFT}: {WORKER_PY} imports {HOST_REGISTRATION_FUNC} but never "
+            "calls it; re-audit the registration-order contract.",
             pytrace=False,
         )
 
@@ -486,6 +548,12 @@ def test_mirrored_forward_triton_is_the_host_body_plus_one_argument() -> None:
     Any *other* change upstream (new guard, new cache handling, reordered
     statement) invalidates the mirror silently, so the two bodies are compared
     as ASTs after removing the injected argument.
+
+    A body mismatch has two possible causes, and the wording says which:
+
+    * the host call site already supplies the 9th argument -> upstream fixed
+      defect ② itself, the override is now dead code;
+    * anything else -> the seam moved, re-audit HOST_CONTRACT.
     """
     host_tree = _parse(ROPE_PY)
     host_cls = _class_def(host_tree, "AscendMRotaryEmbedding")
@@ -518,13 +586,24 @@ def test_mirrored_forward_triton_is_the_host_body_plus_one_argument() -> None:
     assert isinstance(mirrored, ast.FunctionDef)
     _strip_injected_argument(mirrored)
     if _normalised_dump(mirrored) != _normalised_dump(host_func):
+        host_calls = _calls_to(host_func, "triton_mrope")
+        host_fixed = bool(host_calls) and _host_call_passes_neox_style(host_calls[0])
+        reason = FIXED.format("②") if host_fixed else DRIFT
         pytest.fail(
-            f"{DRIFT}: the mirrored forward_triton no longer equals the host "
-            f"body plus the injected `self.is_neox_style`.\n"
+            f"{reason}: the mirrored forward_triton no longer equals the host "
+            f"body plus the injected `self.is_neox_style`"
+            f"{' (the host call site now passes it)' if host_fixed else ''}.\n"
             f"host  : {ast.unparse(host_func)}\n"
             f"mirror: {ast.unparse(plugin_func)}",
             pytrace=False,
         )
+
+
+def _host_call_passes_neox_style(call: ast.Call) -> bool:
+    """True when the host's ``triton_mrope`` call already supplies argument #9."""
+    if any(keyword.arg == "is_neox_style" for keyword in call.keywords):
+        return True
+    return len(call.args) >= 9
 
 
 def test_yarn_override_stays_signature_agnostic_with_truncate_true() -> None:

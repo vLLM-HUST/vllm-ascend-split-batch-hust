@@ -120,9 +120,22 @@ def test_host_version_range_pins_the_verified_baseline() -> None:
 
 
 def test_extension_version_matches_distribution_version() -> None:
-    manifest = _manifest_json()
+    """Every bundle manifest must carry the distribution's version.
+
+    The root bundle is not the only one shipped in the wheel: the standalone
+    ``org.vllm-hust.fia-demask`` and ``org.vllm-hust.rope-fix`` manifests are
+    discovered separately, and a stale ``extension_version`` there would survive
+    a release bump unnoticed.
+    """
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
-    assert manifest["extension_version"] == pyproject["project"]["version"]
+    version = pyproject["project"]["version"]
+    for path in (
+        MANIFEST_PATH,
+        FIA_DEMASK_MANIFEST_PATH,
+        ROPE_FIX_MANIFEST_PATH,
+    ):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        assert raw["extension_version"] == version, path
 
 
 def test_activation_environment_values_are_injectable_flags() -> None:
