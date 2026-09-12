@@ -1,0 +1,380 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
+# Licensed under the Apache License, Version 2.0 (the "License").
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""CPU tests for the zero-new-kernel wiring carrier (default-off, guarded).
+
+Covers four things, none of which needs an NPU, ``torch_npu`` or a serving
+engine:
+
+* the default-off contract: with both env vars unset :func:`load` returns
+  before importing ``torch``/``vllm_ascend`` and leaves every seam untouched;
+* the pure identity predicate (the only numeric-relevant piece of ①);
+* the AST rewrite itself, exercised against a synthetic host class that has the
+  same statement shapes as ``attention_v1`` -- so the guard/injection behaviour
+  is asserted *behaviourally* (the copy is really skipped / really kept) and not
+  just by string matching;
+* a drift guard on the real host source: the anchors ①/② lean on must still be
+  there, worded so a host bump that moves them fails loudly.
+"""
+
+from __future__ import annotations
+
+import ast
+import importlib.util
+import linecache
+import os
+import subprocess
+import sys
+import textwrap
+import types
+
+import pytest
+import torch
+
+from vllm_ascend_split_batch import zerocost_wiring as carrier
+
+HOST_METHODS = (
+    ("AscendAttentionBackendImpl", "forward"),
+    ("AscendAttentionBackendImpl", "forward_fused_infer_attention"),
+)
+
+SYNTHETIC_HOST = '''
+class DeviceOperator:
+    """Stand-in for vllm_ascend.device.device_op.DeviceOperator."""
+
+    calls = []
+
+    @classmethod
+    def npu_fused_infer_attention_score(cls, query=None, scale=1.0, **kwargs):
+        cls.calls.append(kwargs)
+        dest = kwargs.get("_zc_fi_out")
+        if dest is None:
+            return query.new_zeros(query.shape[0], 2, 2), None
+        dest.zero_()
+        return dest, None
+
+
+class FakeImpl:
+    def forward(self, attn_output, output, num_tokens):
+        output[:num_tokens] = attn_output[:num_tokens]
+        return output
+
+    def forward_fused_infer_attention(self, output, num_tokens, query):
+        attn_output, _ = DeviceOperator.npu_fused_infer_attention_score(
+            query=query, scale=1.0
+        )
+        output[:num_tokens] = attn_output[:num_tokens]
+        return output
+'''
+
+
+AMBIGUOUS_HOST = '''
+class DeviceOperator:
+    @classmethod
+    def npu_fused_infer_attention_score(cls, **kwargs):
+        return None, None
+
+
+class Ambiguous:
+    def forward(self, attn_output, output, num_tokens):
+        output[:num_tokens] = attn_output[:num_tokens]
+        output[:num_tokens] = attn_output[:num_tokens]
+
+    def forward_fused_infer_attention(self, output, num_tokens):
+        attn_output, _ = DeviceOperator.npu_fused_infer_attention_score()
+        output[:num_tokens] = attn_output[:num_tokens]
+        output[:num_tokens] = attn_output[:num_tokens]
+'''
+
+
+def _synthetic_module(name: str = "zc_synthetic_host", source: str = SYNTHETIC_HOST):
+    """A host stand-in whose methods ``inspect.getsource`` can still read."""
+    filename = f"<{name}.py>"
+    linecache.cache[filename] = (
+        len(source),
+        None,
+        source.splitlines(keepends=True),
+        filename,
+    )
+    module = types.ModuleType(name)
+    module.__dict__["__file__"] = filename
+    module.__dict__[carrier.IDENTITY_HELPER] = carrier._identity_helper
+    exec(compile(source, filename, "exec"), module.__dict__)
+    return module
+
+
+@pytest.fixture(autouse=True)
+def _clean_stats():
+    carrier._reset_for_tests()
+    yield
+    carrier._reset_for_tests()
+
+
+# --------------------------------------------------------------- default-off
+
+
+def test_default_off_imports_nothing_and_returns_false():
+    """The unset-env path must not touch torch/torch_npu/vllm_ascend at all."""
+    script = textwrap.dedent(
+        """
+        import os, sys
+        for key in (
+            "VLLM_HUST_FI_PREFILL_OUT",
+            "VLLM_HUST_SKIP_COS_SIN",
+            "VLLM_HUST_ZC_STATS_FILE",
+        ):
+            os.environ.pop(key, None)
+        from vllm_ascend_split_batch import zerocost_wiring as zc
+        assert zc.load() is False
+        assert zc._installed == set()
+        assert zc._orig == {}
+        assert zc.rewritten_sources() == {}
+        leaked = [
+            name
+            for name in ("torch", "torch_npu", "vllm_ascend")
+            if name in sys.modules
+        ]
+        assert leaked == [], f"default-off imported {leaked}"
+        print("clean")
+        """
+    )
+    env = dict(os.environ)
+    for key in ("VLLM_HUST_FI_PREFILL_OUT", "VLLM_HUST_SKIP_COS_SIN"):
+        env.pop(key, None)
+    proc = subprocess.run(
+        [sys.executable, "-c", script], env=env, capture_output=True, text=True
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "clean" in proc.stdout
+
+
+def test_enable_tokens_are_exact(monkeypatch):
+    monkeypatch.setenv(carrier.ENV_FI_OUT, "1")
+    monkeypatch.setenv(carrier.ENV_SKIP_COS_SIN, "1")
+    assert carrier.is_fi_out_enabled() and carrier.is_skip_cos_sin_enabled()
+    for value in ("0", "true", "yes", " 1", ""):
+        monkeypatch.setenv(carrier.ENV_FI_OUT, value)
+        assert not carrier.is_fi_out_enabled(), value
+
+
+# ------------------------------------------------------- identity predicate
+
+
+def test_identity_copy_predicate():
+    output = torch.zeros(4, 2, 3)
+    other = torch.ones(4, 2, 3)
+    ident = carrier._identity_copy
+    # identical object / identical region
+    assert ident(output, output, 4)
+    assert ident(output[:4], output, 4)
+    assert ident(output[:2], output, 2)
+    # different buffer, different region
+    assert not ident(other, output, 4)
+    assert not ident(other[:2], output, 2)
+    # a shorter source must still take the copy
+    assert not ident(other[:2], output, 4)
+    # vacuous and degenerate inputs are "nothing to do"
+    assert ident(other, output, 0)
+    assert not ident(None, output, 4)
+    assert not ident(other, output, None)
+
+
+# ------------------------------------------------------- the AST rewrite
+
+
+def test_inject_fi_out_rewrites_the_destination():
+    module = _synthetic_module()
+    carrier._rewrite_method(
+        module,
+        module.FakeImpl,
+        "forward_fused_infer_attention",
+        carrier._transform_fia_method,
+    )
+    impl = module.FakeImpl()
+    output = torch.zeros(2, 2, 2)
+    query = torch.randn(2, 2, 2)
+    result = impl.forward_fused_infer_attention(output, 2, query)
+    assert result is output
+    assert module.DeviceOperator.calls, "FIA stand-in was never called"
+    received = module.DeviceOperator.calls[-1]
+    assert "_zc_fi_out" in received, "destination kwarg not injected"
+    assert received["_zc_fi_out"].shape == (2, 2, 2)
+
+
+def test_guard_skips_only_identity_copies():
+    module = _synthetic_module()
+    carrier._rewrite_method(
+        module, module.FakeImpl, "forward", carrier._guard_tail_copy
+    )
+    impl = module.FakeImpl()
+    output = torch.zeros(3, 2, 2)
+
+    # attn_output IS output -> the statement cannot change a byte: skipped
+    impl.forward(output, output, 3)
+    assert carrier.stats()["selfcopy_identity"] == 1
+    assert carrier.stats()["selfcopy_copied"] == 0
+
+    # a distinct producer -> the copy still happens and really lands
+    producer = torch.arange(12, dtype=torch.float32).reshape(3, 2, 2)
+    target = torch.zeros(3, 2, 2)
+    impl.forward(producer, target, 3)
+    assert carrier.stats()["selfcopy_copied"] == 1
+    assert torch.equal(target, producer)
+
+
+def test_rewrite_refuses_ambiguous_anchors():
+    module = _synthetic_module("zc_synthetic_ambiguous", AMBIGUOUS_HOST)
+    with pytest.raises(RuntimeError):
+        carrier._rewrite_method(
+            module, module.Ambiguous, "forward", carrier._guard_tail_copy
+        )
+    with pytest.raises(RuntimeError):
+        carrier._rewrite_method(
+            module,
+            module.Ambiguous,
+            "forward_fused_infer_attention",
+            carrier._transform_fia_method,
+        )
+
+
+def test_rewrite_source_is_the_host_body_plus_the_guard():
+    """The ported body must be the host source with exactly the guard added."""
+    module = _synthetic_module("zc_synthetic_host_b")
+    carrier._rewrite_method(
+        module, module.FakeImpl, "forward", carrier._guard_tail_copy
+    )
+    try:
+        ported = carrier.rewritten_sources()["FakeImpl.forward"]
+    finally:
+        carrier._rewritten.clear()
+    assert ported.count(carrier.IDENTITY_HELPER) == 1
+    original_fn = ast.parse(textwrap.dedent(SYNTHETIC_HOST)).body[1].body[0]
+    ported_fn = ast.parse(ported).body[0]
+    tail = ported_fn.body[-2]
+    assert isinstance(tail, ast.If)
+    assert ast.unparse(tail.test) == (
+        f"not {carrier.IDENTITY_HELPER}(attn_output, output, num_tokens)"
+    )
+    assert len(tail.body) == 1
+    assert ast.unparse(tail.body[0]) == "output[:num_tokens] = attn_output[:num_tokens]"
+    # every other statement is untouched (same source text, same order)
+    assert [ast.unparse(node) for node in ported_fn.body[:-2]] == [
+        ast.unparse(node) for node in original_fn.body[:-2]
+    ]
+    assert ast.unparse(ported_fn.body[-1]) == "return output"
+
+
+# ------------------------------------------------------------ drift anchors
+
+
+def _host_root() -> str:
+    override = os.getenv("VLLM_ASCEND_HUST_ROOT")
+    if override:
+        return override
+    spec = importlib.util.find_spec("vllm_ascend")
+    if spec is None or not spec.origin:
+        pytest.skip("vllm_ascend is not importable")
+    return os.path.dirname(spec.origin)
+
+
+def _fn_source(path: str, class_name: str, fn_name: str) -> ast.FunctionDef:
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            for child in node.body:
+                if isinstance(child, ast.FunctionDef) and child.name == fn_name:
+                    return child
+    raise AssertionError(f"{class_name}.{fn_name} not found in {path}")
+
+
+def _count_tail_copies(fn: ast.FunctionDef) -> int:
+    return sum(
+        1
+        for stmt in fn.body
+        if isinstance(stmt, ast.Assign)
+        and len(stmt.targets) == 1
+        and isinstance(stmt.targets[0], ast.Subscript)
+        and isinstance(stmt.targets[0].value, ast.Name)
+        and stmt.targets[0].value.id == "output"
+        and isinstance(stmt.value, ast.Subscript)
+        and isinstance(stmt.value.value, ast.Name)
+        and stmt.value.value.id == "attn_output"
+    )
+
+
+def test_attention_anchors_still_present():
+    """host drift guard for ①: re-audit HOST_CONTRACT if this fails."""
+    root = _host_root()
+    path = os.path.join(root, "attention", "attention_v1.py")
+    if not os.path.exists(path):
+        pytest.skip(f"{path} not present")
+    forward = _fn_source(path, carrier.ATTENTION_CLASS, carrier.METHOD_FORWARD)
+    assert _count_tail_copies(forward) == 1, "anchor drifted → re-audit HOST_CONTRACT"
+    fia = _fn_source(path, carrier.ATTENTION_CLASS, carrier.METHOD_FIA)
+    assert _count_tail_copies(fia) == 1, "anchor drifted → re-audit HOST_CONTRACT"
+    adaptor_calls = [
+        node
+        for node in ast.walk(fia)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == carrier.FIA_SYMBOL
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == carrier.ADAPTOR_ATTR
+    ]
+    assert len(adaptor_calls) == 1, "anchor drifted → re-audit HOST_CONTRACT"
+
+
+def test_rope_anchors_still_present():
+    """host drift guard for ②: re-audit HOST_CONTRACT if this fails."""
+    root = _host_root()
+    path = os.path.join(root, "ops", "rotary_embedding.py")
+    if not os.path.exists(path):
+        pytest.skip(f"{path} not present")
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    names = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert carrier.ROTARY_UPDATE in names
+    assert carrier.ROTARY_READ in names
+    body = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == carrier.ROTARY_UPDATE
+    )
+    flat = ast.unparse(body)
+    assert "_cos[:, :num_tokens] =" in flat, "anchor drifted → re-audit HOST_CONTRACT"
+    assert "_cos_slice = _cos[:, :num_tokens]" in flat
+
+
+def test_rope_readers_are_the_known_pair():
+    """② is only sound because exactly these two modules read the buffers."""
+    root = _host_root()
+    expected = {
+        "vllm_ascend._310p.ops.rotary_embedding": os.path.join(
+            root, "_310p", "ops", "rotary_embedding.py"
+        ),
+        "vllm_ascend.patch.worker.patch_minimax_m2": os.path.join(
+            root, "patch", "worker", "patch_minimax_m2.py"
+        ),
+    }
+    assert set(carrier.ROPE_READER_MODULES) == set(expected)
+    for module_name, path in expected.items():
+        assert os.path.exists(path), f"{module_name} moved away"
+        with open(path, encoding="utf-8") as handle:
+            assert carrier.ROTARY_READ in handle.read()
