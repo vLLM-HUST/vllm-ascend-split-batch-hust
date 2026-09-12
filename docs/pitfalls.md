@@ -71,8 +71,9 @@ cascade 两段式与任何 microbatching(`use_ubatching`: DBO 或 `ubatch_size>1
 - 同进程内 `fa_fp32_stage1` 之后跑 kv≥8k 的 FIA v2 TND 块表形态会触发
   fftsplus aicore 0x800000——micro-bench 必须分组进程(gate 的
   `cascade_gate_self.py` 因此用子进程,别改回同进程)。
-- CANN FIA v2 的 TND 均匀变长+无 mask 角落会静默 NaN:**任何 FIA 计时前先
-  同数据对拍正确性,存活≠正确**。
+- FIA TND 计时类探针**必须逐请求传** `actual_seq_kvlen`（传累计值会越界读 →
+  垃圾块号 → MTE DDR 越界 0x800000 或静默 NaN；2026-09-08 定案，非布局限制、
+  非算子缺陷）。**任何 FIA 计时前先同数据对拍正确性,存活≠正确**。
 - gate 探针的 block table 必须逐请求独立分配,shared/reused 块表会踩内存
   (历史 fix 9899f00)。
 - 详见 kernel 仓库 README §4-§5。
