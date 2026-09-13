@@ -92,7 +92,7 @@
   8/8;NPU 4 腿重验(预注册判据)——4/4 腿 `(64,4096)→OFF`,p420_b64 亏格收回
   (+6.7%→+2.1%),8k/16k 赢格保留(−14.5%/−32.5%),`(128,4096)` 大 margin 格
   不受影响,0 TypeError;cascade key hit 379→254(Δ≈125,step 级关闭佐证)。
-  证据:`knowledge/evidence/cascade/section3-gatefix-addendum.md`
+  证据:`knowledge/evidence/cascade/section3-performance.md`
   + `logs/v1-ev3-gatefix/`(含跑前预注册)。**G6 关闭;翻 active 剩余阻塞 = 缺口 A**
   (stand-in 形态正确性口径,等真模型或团队决策)。
 - **W3.1 fi_gelu(gelu_and_mul triton 融合)已结题**(`51f5818`,2026-09-10):
@@ -108,7 +108,7 @@
 - **cascade 翻 `active` + release.md §3 启用验证通过**(2026-09-11):manifest 两个 cascade
   carrier(`cascade_plugin:load` / `cascade_graph_plugin:install`)由 `import_only` → `active`,
   planner 保持 `import_only`;三项证据在新基线齐备(真模型 6/64 见
-  `section2-real-model-rerun.md`,gatefix 见 `section3-gatefix-addendum.md`)。
+  `section2-correctness.md`,gatefix 见 `section3-performance.md`)。
   `extension check` 转 **compatible+configured**,`run --dry-run` 注入
   `VLLM_ASCEND_ENABLE_CASCADE_DECODE/GRAPH=1`;真模型 serve 启动日志 2 条
   `cascade plugin loaded (gate=1, graph_gate=1, kernel_wheel=ok)`,cascade twin

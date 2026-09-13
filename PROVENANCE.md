@@ -25,7 +25,7 @@ Closed does not mean merged, and open does not mean accepted. These references a
 - Source package (worktree, authority for statistical-equivalence evidence):
   `/vllm-workspace/flashinfer-migration/sampling/fi_sampling/`, W2 package
   reviewed and approved 2026-09-09; report
-  `flashinfer-migration/sampling/报告-W2-sampling-migration-2026-09-09.md`
+  `flashinfer-migration/sampling/报告-fi_sampling-w2-w3-2026-09-09.md`
   (191 PASS / 0 FAIL; micro-bench V=152064).
 - Vendored files and sha256 of the source at vendoring time (2026-09-09):
 

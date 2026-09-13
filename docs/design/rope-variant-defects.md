@@ -8,8 +8,8 @@
 - 入口：`vllm.general_plugins` → `vllm_ascend_split_batch.rope_fix_plugin:load`
   （bundle `org.vllm-hust.rope-fix`，`vllm_hust.extension_bundles` → `...rope_fix`）
 - 缺陷来源与数值证据（本仓外，只读）：
-  `knowledge/surveys/contrast/norm-rope-act/验证-rope-variants-端到端-2026-09-10.md`（修前断点）、
-  `.../修复-rope-变体断点-2026-09-10.md`（fork 分支 `/tmp/vah-ropefix` 的修法与修后数字）、
+  `knowledge/surveys/contrast/norm-rope-act/对照-rope.md`（修前断点）、
+  `.../对照-rope.md`（fork 分支 `/tmp/vah-ropefix` 的修法与修后数字）、
   `.../patches_ropefix_2026-09-10/combined-main-to-fix.diff`（参考 diff）。
 - 本仓证据：`docs/evidence/rope-fix/`（CPU 守卫 + NPU 探针 carrier 形态复现）。
 

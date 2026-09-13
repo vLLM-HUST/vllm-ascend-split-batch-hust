@@ -34,7 +34,7 @@
 | vllm-ascend | `0.25.1rc2.dev125+hust.20260903.4`,`74f0c0a272376412b51e1c1864803d5f3a0f1b5f`(main) |
 | vllm | `0.28.1.post1.dev143+gf18cf803c.empty`,`f18cf803c5f63625e2c71253ddaf8b0bad0bad1a`(vllm-hust release v1) |
 | 验证环境 | Python 3.12.14 / torch 2.13.0+cpu / torch_npu 2.13.0rc1 / CANN 9.1.0 (`/usr/local/ascend91`) / 910B2 |
-| 验证证据 | `extension check` → compatible;§3 启用验证(`knowledge/evidence/cascade/section4-active-enablement.md`);正确性 `section2-real-model-rerun.md`(真模型 6/64);历史域(0.23.0rc1 / CANN 9.0.1,已退役)留档于 `EVIDENCE.md` 与 c3-legacy 产物 |
+| 验证证据 | `extension check` → compatible;§3 启用验证(`knowledge/evidence/cascade/section4-active-enablement.md`);正确性 `section2-correctness.md`(真模型 6/64);历史域(0.23.0rc1 / CANN 9.0.1,已退役)留档于 `EVIDENCE.md` 与 c3-legacy 产物 |
 
 ## 1. 版本与构建
 
