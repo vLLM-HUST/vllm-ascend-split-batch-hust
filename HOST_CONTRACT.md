@@ -71,7 +71,7 @@ original on any internal failure with a single warning.
 planner keeps `import_only` (no acceptance evidence, review F7). The D1–D4
 signature drifts were fixed and the three acceptance evidences were re-run on
 this pinned baseline: default-off smoke PASS
-(`EVIDENCE-V1-BASELINE.md` §1), real-model correctness 6/64 like-for-like
+(`EVIDENCE.md` §1), real-model correctness 6/64 like-for-like
 (`section2-correctness.md`), performance/gate margin closed
 (`section3-performance.md`). release.md §3 enablement verification then
 passed on the real model (`knowledge/evidence/cascade/section4-active-enablement.md`):

@@ -76,7 +76,7 @@
   (4k 亏 +12.3%/+6.7%、8k −3.5%/−13.5%、16k −20.2%/−31.6%,区间均分离),但
   `(64,4096)` 亏损未被自适应 gate 覆盖(gate 微基准判 `on`)。**故 cascade 保持
   `import_only`,不翻 active**;详情 `knowledge/evidence/cascade/
-  EVIDENCE-V1-BASELINE.md`。
+  EVIDENCE.md`。
 - **D1–D4 宿主签名漂移已修复**(`ddc0120`):`_capture_cudagraphs` 缺 `profiler`、
   `_update_full_graph_params_if_needed` 多传 `positions`、`update_graph_params` 多传
   `num_dcp_pcp_tokens`、`_model_forward` 参数约定。所有包装器改 `*args/**kwargs`
