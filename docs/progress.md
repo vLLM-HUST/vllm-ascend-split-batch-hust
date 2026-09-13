@@ -239,3 +239,22 @@
   守卫自测新增 no-host 案例（fail 而非 skip）。
 - 复审后仍未做（如实）：310P 真机核对（无该卡）、服务级真模型 A/B（无 checkpoint）、
   entry point 元数据刷新（纪律禁 pip）。
+
+## 2026-09-13 zerocost-wiring §3 启用验证（**阻塞，未翻 active**）
+
+- 新 carrier `zerocost_wiring:load`（**import_only**，bundle `org.vllm-hust.zerocost-wiring`，
+  开关 `VLLM_HUST_FI_PREFILL_OUT=1` + `VLLM_HUST_SKIP_COS_SIN=1`；交付面 `e308e78`）。
+- §3 阶梯与 default-off 腿全绿：`inspect`/`check`/`status`/`enable`/`run --dry-run` 注入正确；
+  default-off 腿 `/health` 200 + 2 chat 200 + 日志零 zerocost 痕迹；收尾 HBM 回 5%。
+- **阻塞**：§3 正式 serve（`vllm-hust-ext run -- vllm serve`，本工作区**必然** co-enable
+  cascade graph）下 **① 静默 fail-open**（`zero-cost wiring ① refused … a host anchor moved`），
+  仅 ② ACTIVE。根因：`zerocost_wiring._host_func` 只支持**一层**插件 wrapper——`graph_gate=1` 的
+  `cascade_graph_plugin.install()` 在 `cascade_plugin` 的 pass-through wrapper 之上再叠一层
+  （`install.<locals>.forward_fused_infer_attention`），其闭包指向的是**上一层插件 wrapper** 而非宿主文件函数
+  ⇒ 解析 `break` → ① 整项回滚。隔离腿（plain `vllm serve` + 两 env，cascade 关）复现 Y1 条件：
+  **①+② 均 ACTIVE**。⇒ Y1「cascade wrapper 在场时 ① 仍 ACTIVE」成立但**仅限 decode gate**（`serve2.log`
+  实测 `gate=0, graph_gate=0`）。
+- **处置**：按 release.md §0/§3 与硬纪律**不翻 active**，manifest 保持 `import_only`；manager 侧 `enable`
+  已 `disable` 回退；`_host_func` 修复（穿双层 wrapper）与文档纠偏列为未决 B1/B2。
+- CPU：`pytest -q` **272 passed**、`ruff check .` 干净。证据：
+  `docs/evidence/zerocost-activation-20260913.md` + `docs/evidence/zerocost-activation-20260913/raw/`。
