@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import linecache
 import os
 import subprocess
@@ -498,3 +499,134 @@ def test_rope_readers_are_the_known_pair():
         assert os.path.exists(path), f"{module_name} moved away"
         with open(path, encoding="utf-8") as handle:
             assert carrier.ROTARY_READ in handle.read()
+
+
+# ------------------------------------------------- phase snapshots (2026-09-13)
+#
+# The counters are cumulative, so a phase split (startup vs serving) can only be
+# obtained from a dump taken *between* the phases.  These tests pin the three
+# properties the serving-side measurement relies on: the file name/shape of an
+# on-demand snapshot, that the SIGUSR1 hook is installed exactly when the stats
+# file is configured (and restored on uninstall), and that a ① call is
+# attributed to its num_tokens.
+
+
+def _signals_unavailable() -> str | None:
+    """Reason the SIGUSR1 tests cannot run here (empty string = they can)."""
+    import signal as _signal
+
+    if not hasattr(_signal, "SIGUSR1"):
+        return "platform has no SIGUSR1"
+    try:
+        _signal.getsignal(_signal.SIGUSR1)
+    except ValueError:  # not the main thread
+        return "tests are not running in the main thread"
+    return None
+
+
+def _read_json(path) -> dict:
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def test_snapshot_file_name_shape_and_env_gate(tmp_path, monkeypatch):
+    base = str(tmp_path / "zc.json")
+    monkeypatch.delenv(carrier.ENV_STATS_FILE, raising=False)
+    assert carrier.snapshot() is None, "unset env must not write anything"
+    assert list(tmp_path.iterdir()) == []
+
+    monkeypatch.setenv(carrier.ENV_STATS_FILE, base)
+    carrier._stats["fi_out_calls"] = 7
+    carrier._tally_tokens(torch.zeros(2048, 4, 8))
+    carrier._tally_tokens(torch.zeros(2048, 4, 8))
+    carrier._tally_tokens(torch.zeros(128, 4, 8))
+
+    first = carrier.snapshot()
+    second = carrier.snapshot()
+    assert first == f"{base}.snap1.json" and os.path.exists(first)
+    assert second == f"{base}.snap2.json" and os.path.exists(second)
+    assert not os.path.exists(f"{base}.tmp"), "atomic write left a temp file"
+
+    payload = _read_json(second)
+    assert set(payload) == {
+        "pid",
+        "utc",
+        "stats",
+        "fi_out_tokens",
+        "fi_out_states",
+        "installed",
+    }
+    assert payload["pid"] == os.getpid()
+    assert payload["stats"]["fi_out_calls"] == 7
+    assert payload["fi_out_tokens"] == {"128": 1, "2048": 2}
+    assert payload["utc"].endswith("Z")
+
+
+def test_state_histogram_tallies_by_state_and_survives_odd_input():
+    class _State:
+        name = "DecodeOnly"
+
+    class _Metadata:
+        attn_state = _State()
+
+    carrier._tally_state(_Metadata())
+    carrier._tally_state(_Metadata())
+    carrier._tally_state(object())  # no attn_state at all
+    assert carrier.state_histogram() == {"DecodeOnly": 2, "none": 1}
+
+
+def test_exit_dump_carries_the_same_payload(tmp_path, monkeypatch):
+    """The exit dump and the snapshots must be comparable by subtraction."""
+    base = str(tmp_path / "zc_exit.json")
+    monkeypatch.setenv(carrier.ENV_STATS_FILE, base)
+    carrier._tally_tokens(torch.zeros(64, 4, 8))
+    carrier._dump_stats_on_exit()
+    payload = _read_json(base)
+    assert payload["fi_out_tokens"] == {"64": 1}
+    assert "stats" in payload and "installed" in payload
+    # pid-tagged copy: several processes share the env var, so the shared path
+    # alone cannot say which process wrote it (measured collision 2026-09-13).
+    tagged = _read_json(f"{base}.{os.getpid()}.json")
+    assert tagged == payload
+    assert f"zc_exit.json.{os.getpid()}.json" in os.listdir(tmp_path)
+
+
+def test_token_histogram_ignores_non_tensors():
+    """A diagnostics hook must never break the host call it measures."""
+    carrier._tally_tokens(object())  # no .shape
+    carrier._tally_tokens(None)
+    assert carrier.token_histogram() == {}
+    carrier._tally_tokens(torch.zeros(3, 2))
+    assert carrier.token_histogram() == {"3": 1}
+
+
+def test_snapshot_hook_installed_only_with_env_and_restored(tmp_path, monkeypatch):
+    import signal as _signal
+
+    reason = _signals_unavailable()
+    if reason:
+        pytest.skip(reason)
+    pristine = _signal.getsignal(_signal.SIGUSR1)
+
+    # env unset -> the hook must not touch the process
+    monkeypatch.delenv(carrier.ENV_STATS_FILE, raising=False)
+    carrier._install_stats_snapshot()
+    assert _signal.getsignal(_signal.SIGUSR1) is pristine
+    assert carrier._prev_snapshot_handler is carrier._UNSET
+
+    monkeypatch.setenv(carrier.ENV_STATS_FILE, str(tmp_path / "zc_sig.json"))
+    carrier._install_stats_snapshot()
+    assert _signal.getsignal(_signal.SIGUSR1) is carrier._snapshot_handler
+
+    # the hook really writes the phase file
+    carrier._stats["fi_out_calls"] = 3
+    _signal.raise_signal(_signal.SIGUSR1)
+    written = tmp_path / "zc_sig.json.snap1.json"
+    assert written.exists(), "SIGUSR1 did not produce a snapshot"
+    assert _read_json(written)["stats"]["fi_out_calls"] == 3
+
+    carrier._restore_stats_snapshot()
+    assert _signal.getsignal(_signal.SIGUSR1) is pristine
+    # idempotent + no-op once restored
+    carrier._restore_stats_snapshot()
+    assert _signal.getsignal(_signal.SIGUSR1) is pristine

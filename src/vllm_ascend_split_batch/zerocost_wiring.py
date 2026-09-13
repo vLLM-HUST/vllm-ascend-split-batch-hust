@@ -82,20 +82,39 @@ is missing or ambiguous, and the wrapped adaptor delegates to the original
 whenever the out-overload path is not provably safe.  Nothing is ever raised
 into the plugin loader or into a worker; a half-installed feature is rolled
 back.
+
+Diagnostics (off unless ``VLLM_HUST_ZC_STATS_FILE`` is set, and only useful
+with a feature enabled): the counters are dumped as JSON at process exit -- to
+the configured path *and* to a ``<path>.<pid>.json`` copy, because every
+process of one serve inherits that env var and the shared path is last-writer-
+wins (the API server's all-zero dump was measured to overwrite the engine's) --
+and :func:`snapshot` dumps them *on demand* to ``<path>.snap<N>.json`` so a
+measurement can split the totals by phase (before traffic / after traffic /
+final).  ``SIGUSR1`` is wired to :func:`snapshot` for that purpose -- no other
+part of vllm / vllm-ascend / torch_npu installs a SIGUSR1 handler (checked
+2026-09-13), and the previous handler is recorded and restored by
+:func:`uninstall`.  Alongside the counters the payload carries
+``fi_out_tokens`` / ``fi_out_states``: histograms of the ``num_tokens`` and the
+``attn_state`` seen at every ① call, so a phase can be attributed to a shape (a
+capture dummy of 32/64/128 vs a real chunked-prefill chunk of ~2048) and to a
+phase of inference (chunked prefill vs decode) instead of being guessed.
 """
 
 from __future__ import annotations
 
 import ast
 import atexit
+import contextlib
 import importlib
 import inspect
 import json
 import logging
 import os
+import signal
 import sys
 import textwrap
 import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +124,10 @@ ENV_FI_OUT = "VLLM_HUST_FI_PREFILL_OUT"
 ENV_SKIP_COS_SIN = "VLLM_HUST_SKIP_COS_SIN"
 #: optional diagnostics: dump the counters as JSON on process exit.
 ENV_STATS_FILE = "VLLM_HUST_ZC_STATS_FILE"
+#: signal that triggers an on-demand dump to ``<ENV_STATS_FILE>.snap<N>.json``
+#: (phase split).  Not configurable: a signal number that the stack does not
+#: use is worth more than an extra knob.
+SNAPSHOT_SIGNAL = signal.SIGUSR1
 
 #: private kwarg the rewritten call site hands to the wrapped adaptor.
 FI_OUT_KWARG = "_zc_fi_out"
@@ -157,6 +180,16 @@ _stats: dict = {
 }
 #: last positions handed to the lazy rope wrapper (per process).
 _cos_sin_positions = None
+#: ``num_tokens -> calls`` histogram of the ① call sites (diagnostics only).
+_token_hist: dict = {}
+#: ``attn_state name -> calls`` histogram of the ① call sites (diagnostics only).
+_state_hist: dict = {}
+#: monotonic counter for :func:`snapshot` file names.
+_snapshot_seq = 0
+#: sentinel: "no SIGUSR1 handler was recorded yet".
+_UNSET = object()
+#: previous SIGUSR1 handler, recorded by :func:`_install_stats_snapshot`.
+_prev_snapshot_handler = _UNSET
 #: atexit hook registration guard.
 _atexit_registered = False
 #: ``{"Class.method": rewritten source}`` -- the ported host body, for reports
@@ -187,11 +220,54 @@ def stats() -> dict:
     return dict(_stats)
 
 
+def token_histogram() -> dict:
+    """``{num_tokens: calls}`` of the ① call sites (diagnostics / report)."""
+    return {str(k): _token_hist[k] for k in sorted(_token_hist)}
+
+
+def state_histogram() -> dict:
+    """``{attn_state: calls}`` of the ① call sites (diagnostics / report).
+
+    ``attn_state`` is ``AscendAttentionState`` (DecodeOnly / ChunkedPrefill /
+    PrefillNoCache / SpecDecoding): it separates a serving-side decode step that
+    fell through to eager from a chunked-prefill step, which ``num_tokens``
+    alone cannot (a small batch can be either).
+    """
+    return {k: _state_hist[k] for k in sorted(_state_hist)}
+
+
+def _tally_tokens(query) -> None:
+    """Count one ① call by its ``num_tokens`` (never breaks the host call).
+
+    Diagnostics only: this is one dict increment per ① call, next to the
+    ``fi_out_calls`` counter the wrapper already bumps, so it cannot move a
+    measurement whose object is a device-side copy per layer.
+    """
+    try:
+        key = int(query.shape[0])
+    except Exception:  # noqa: BLE001 -- a non-tensor query must not raise here
+        return
+    _token_hist[key] = _token_hist.get(key, 0) + 1
+
+
+def _tally_state(attn_metadata) -> None:
+    """Count one ① call by its attention state (diagnostics, never raises)."""
+    state = getattr(attn_metadata, "attn_state", None)
+    name = getattr(state, "name", None) or (
+        "none" if state is None else repr(state)
+    )
+    _state_hist[name] = _state_hist.get(name, 0) + 1
+
+
 def _reset_for_tests() -> None:
     """Clear counters and once-guards (does **not** unpatch)."""
+    global _snapshot_seq
     _ONCE.clear()
     for key in _stats:
         _stats[key] = 0
+    _token_hist.clear()
+    _state_hist.clear()
+    _snapshot_seq = 0
 
 
 def _warn_once(message: str, *args) -> None:
@@ -208,19 +284,117 @@ def _info_once(message: str, *args) -> None:
         logger.info(message, *args)
 
 
+def _payload() -> dict:
+    """The JSON body of both the exit dump and the on-demand snapshots."""
+    return {
+        "pid": os.getpid(),
+        "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "stats": stats(),
+        "fi_out_tokens": token_histogram(),
+        "fi_out_states": state_histogram(),
+        "installed": sorted(_installed),
+    }
+
+
+def _write_json(path: str, payload: dict) -> None:
+    """Atomically replace ``path`` (a reader must never see a half file)."""
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+    os.replace(tmp, path)
+
+
+def snapshot() -> str | None:
+    """Dump the counters NOW to ``<ENV_STATS_FILE>.snap<N>.json``.
+
+    Returns the path written, or ``None`` when the env var is unset.  This is
+    what splits a measurement into phases: the counters are cumulative, so a
+    snapshot taken after startup and before traffic gives the startup share by
+    subtraction (the exit dump is the last point).
+    """
+    global _snapshot_seq
+    path = os.getenv(ENV_STATS_FILE)
+    if not path:
+        return None
+    _snapshot_seq += 1
+    target = f"{path}.snap{_snapshot_seq}.json"
+    try:
+        _write_json(target, _payload())
+    except Exception:  # noqa: BLE001 -- diagnostics only
+        logger.exception("zero-cost wiring: stats snapshot failed")
+        return None
+    logger.warning("zero-cost wiring: stats snapshot #%d written to %s",
+                   _snapshot_seq, target)
+    return target
+
+
+def _snapshot_handler(_signum, _frame) -> None:
+    """``SIGUSR1`` -> :func:`snapshot` (installed only when the file is set)."""
+    snapshot()
+
+
+def _install_stats_snapshot() -> None:
+    """Wire ``SIGUSR1`` to :func:`snapshot` when ``ENV_STATS_FILE`` is set.
+
+    Fail-open: a non-main-thread install (``signal.signal`` raises there) or a
+    refused signal just logs once and leaves the process alone.
+    """
+    global _prev_snapshot_handler
+    if not os.getenv(ENV_STATS_FILE):
+        return
+    if _prev_snapshot_handler is not _UNSET:
+        return
+    try:
+        previous = signal.getsignal(SNAPSHOT_SIGNAL)
+        if previous not in (signal.SIG_DFL, signal.SIG_IGN, None):
+            _warn_once(
+                "zero-cost wiring: replacing the existing %s handler (%r) with "
+                "the stats snapshot hook",
+                signal.Signals(SNAPSHOT_SIGNAL).name,
+                previous,
+            )
+        signal.signal(SNAPSHOT_SIGNAL, _snapshot_handler)
+    except (OSError, ValueError, TypeError) as exc:
+        _warn_once(
+            "zero-cost wiring: cannot install the %s stats snapshot hook (%s: %s); "
+            "the exit dump is still available",
+            signal.Signals(SNAPSHOT_SIGNAL).name,
+            type(exc).__name__,
+            exc,
+        )
+        return
+    _prev_snapshot_handler = previous
+    _info_once(
+        "zero-cost wiring: %s now writes a stats snapshot to %s.snap<N>.json",
+        signal.Signals(SNAPSHOT_SIGNAL).name,
+        os.getenv(ENV_STATS_FILE),
+    )
+
+
+def _restore_stats_snapshot() -> None:
+    """Put the previous ``SIGUSR1`` handler back (rollback / uninstall)."""
+    global _prev_snapshot_handler
+    if _prev_snapshot_handler is _UNSET:
+        return
+    with contextlib.suppress(OSError, ValueError, TypeError):
+        signal.signal(SNAPSHOT_SIGNAL, _prev_snapshot_handler)
+    _prev_snapshot_handler = _UNSET
+
+
 def _dump_stats_on_exit() -> None:
     path = os.getenv(ENV_STATS_FILE)
     if not path:
         return
-    try:
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(
-                {"pid": os.getpid(), "stats": stats(), "installed": sorted(_installed)},
-                handle,
-                indent=2,
-            )
-    except Exception:  # noqa: BLE001 -- diagnostics only
-        pass
+    payload = _payload()
+    with contextlib.suppress(Exception):  # diagnostics only
+        _write_json(path, payload)
+    # One serve runs several processes that all inherit the env var, so the
+    # shared path is "last writer wins" -- measured 2026-09-13: the API server's
+    # all-zero dump overwrote the EngineCore's real one, and a reader could not
+    # tell.  The pid-tagged copy keeps the documented path working while making
+    # the writer unambiguous.
+    with contextlib.suppress(Exception):  # diagnostics only
+        _write_json(f"{path}.{os.getpid()}.json", payload)
 
 
 def _identity_copy(attn_output, output, num_tokens) -> bool:
@@ -522,6 +696,8 @@ def _make_fia_wrapper(orig):
         if dest is None:
             return orig(query, key, value, attn_metadata, *args, **kwargs)
         _stats["fi_out_calls"] += 1
+        _tally_tokens(query)
+        _tally_state(attn_metadata)
         try:
             return _fi_out_call(
                 orig, query, key, value, attn_metadata, args, kwargs, dest
@@ -673,6 +849,10 @@ def install() -> set:
         if not _atexit_registered:
             atexit.register(_dump_stats_on_exit)
             _atexit_registered = True
+        # Optional diagnostics (no-op unless ENV_STATS_FILE is set): phase
+        # snapshots on demand.  Installed here, next to the exit dump, so the
+        # rollback below takes it down with the features it measures.
+        _install_stats_snapshot()
 
         _LOCAL.installing = True
         try:
@@ -731,6 +911,7 @@ def _uninstall_locked() -> None:
         # our wrappers in their own namespace without a recorded original; undo
         # those first, while the originals are still in ``_orig``.
         _restore_late_imports()
+        _restore_stats_snapshot()
         for key, (owner, attribute, original) in list(_orig.items()):
             try:
                 if original is None:
