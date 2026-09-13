@@ -104,30 +104,34 @@ def test_rope_fix_bundle_is_import_only_with_its_own_key() -> None:
     assert raw["host"]["version_range"] == _manifest_json()["host"]["version_range"]
 
 
-def test_zerocost_bundle_is_import_only_with_its_own_keys() -> None:
-    """The zero-cost host-wiring carrier is env-gated and stays ``import_only``.
+def test_zerocost_bundle_is_active_with_its_own_keys() -> None:
+    """The zero-cost host-wiring carrier is env-gated and now ``active``.
 
-    It has the three acceptance items gathered (default-off smoke / bitwise
-    correctness / prefill TTFT -1.09% vs a 0.30% band), but the release.md §3
-    enablement ladder is blocked: under the manager launch (``vllm-hust-ext
-    run``, which co-enables cascade graph) ``cascade_graph_plugin.install()``
-    stacks a second wrapper over the host method, which
-    ``zerocost_wiring._host_func`` cannot traverse, so capability ① silently
-    fail-opens (evidence: ``docs/evidence/zerocost-activation-20260913.md``).
-    An earlier, still-standing reason applies too: flipping ``active`` injects
-    the two env keys for every deployment that enables the bundle, so the
-    opt-in contract must be deliberate.  Either way the manifest must NOT
-    advertise it as ``active``.
+    Three acceptance items were already gathered (default-off smoke / bitwise
+    correctness / prefill TTFT -1.09% vs a 0.30% band); the release.md §3
+    enablement blocker was then closed: ``zerocost_wiring._host_func`` now walks
+    the whole ``__closure__`` graph, so under the manager launch
+    (``vllm-hust-ext run``, which co-enables cascade graph) it resolves the host
+    body through ``cascade_graph_plugin``'s second wrapper as well -- the formal
+    leg now shows ① and ② both ACTIVE (evidence:
+    ``docs/evidence/zerocost-activation-20260913.md``).  Flipping ``active``
+    injects the two env keys for every deployment that enables the bundle, which
+    is now deliberate; the opt-in contract still holds because the manager does
+    not enable the bundle by default and ``load()`` gates internally.
     """
     manifest = load_manifest(ZEROCOST_MANIFEST_PATH)
     assert manifest.bundle_id == "org.vllm-hust.zerocost-wiring"
+    assert activation_blocker(manifest) is None
     raw = json.loads(ZEROCOST_MANIFEST_PATH.read_text(encoding="utf-8"))
     carriers = {i["module"]: i["status"] for i in raw["implementation"]}
-    assert carriers["vllm_ascend_split_batch.zerocost_wiring"] == "import_only"
-    assert raw["activation"]["environment"] == {
+    assert carriers["vllm_ascend_split_batch.zerocost_wiring"] == "active"
+    env = raw["activation"]["environment"]
+    assert env == {
         "VLLM_HUST_FI_PREFILL_OUT": "1",
         "VLLM_HUST_SKIP_COS_SIN": "1",
     }
+    for key, value in env.items():
+        assert value in {"0", "1"}, key
     assert raw["host"]["version_range"] == _manifest_json()["host"]["version_range"]
 
 

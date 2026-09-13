@@ -27,6 +27,11 @@ engine:
   just by string matching;
 * a drift guard on the real host source: the anchors ①/② lean on must still be
   there, worded so a host bump that moves them fails loudly.
+
+It also covers the closure traversal that resolves the host body behind other
+plugins' wrappers: stacked (one / two / three layers) wrappers must resolve, and
+an ambiguous or broken chain must refuse (amended 2026-09-13 after the
+cascade-graph double-wrapper blocker).
 """
 
 from __future__ import annotations
@@ -96,6 +101,37 @@ class Ambiguous:
         attn_output, _ = DeviceOperator.npu_fused_infer_attention_score()
         output[:num_tokens] = attn_output[:num_tokens]
         output[:num_tokens] = attn_output[:num_tokens]
+'''
+
+
+#: a *plugin* stand-in: wrappers defined in a different file than the host, so
+#: their code objects never satisfy the "lives in the host file" criterion and
+#: the closure walk has to descend through them to the host body underneath.
+STACKED_WRAPPER_PLUGIN = '''
+def make_forward_wrapper(orig):
+    def forward_fused_infer_attention(self, output, num_tokens, query):
+        return orig(self, output, num_tokens, query)
+    return forward_fused_infer_attention
+
+
+def make_ambiguous_wrapper(orig, decoy):
+    def forward_fused_infer_attention(self, output, num_tokens, query):
+        decoy()
+        return orig(self, output, num_tokens, query)
+    return forward_fused_infer_attention
+'''
+
+
+#: host stand-in whose file holds *two* functions, so a wrapper that closes over
+#: both of them is ambiguous (the file criterion alone cannot pick one).
+AMBIGUOUS_CHAIN_HOST = '''
+def _decoy_host_helper():
+    return None
+
+
+class FakeImpl:
+    def forward_fused_infer_attention(self, output, num_tokens, query):
+        return output
 '''
 
 
@@ -247,6 +283,90 @@ def test_rewrite_refuses_ambiguous_anchors():
             "forward_fused_infer_attention",
             carrier._transform_fia_method,
         )
+
+
+# ------------------------------------------- closure traversal (any depth)
+
+
+def test_host_func_traverses_stacked_plugin_wrappers():
+    """The host body resolves through one *and* two plugin wrapper layers.
+
+    This is the regression test for the blocker that kept the bundle
+    ``import_only``: with ``VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1`` the class
+    attribute is two plugin wrappers deep, and the old one-hop resolver broke on
+    the first (plugin-file) cell instead of following it down to the host file.
+    """
+    host = _synthetic_module("zc_host_stacked")
+    plugin = _synthetic_module("zc_plugin_stacked", STACKED_WRAPPER_PLUGIN)
+    host_fn = host.FakeImpl.forward_fused_infer_attention
+    once = plugin.make_forward_wrapper(host_fn)
+    twice = plugin.make_forward_wrapper(once)
+    assert once.__code__.co_filename != host.__file__
+    assert twice.__code__.co_filename != host.__file__
+    assert carrier._host_func(once, host.__file__) is host_fn
+    assert carrier._host_func(twice, host.__file__) is host_fn
+
+
+def test_host_func_traverses_three_wrapper_layers():
+    host = _synthetic_module("zc_host_stacked3")
+    plugin = _synthetic_module("zc_plugin_stacked3", STACKED_WRAPPER_PLUGIN)
+    host_fn = host.FakeImpl.forward_fused_infer_attention
+    func = host_fn
+    for _ in range(3):
+        func = plugin.make_forward_wrapper(func)
+    assert carrier._host_func(func, host.__file__) is host_fn
+
+
+def test_rewrite_through_stacked_wrappers_engages_fi_out():
+    """End-to-end: the double-wrapped class attribute still gets ① installed.
+
+    ``_zc_fi_out`` must reach the adaptor and the (now-identity) tail copy must
+    be skipped, exactly as in the single-wrapper leg -- proving the in-place
+    ``host_func.__code__`` replacement is seen through both wrappers.
+    """
+    host = _synthetic_module("zc_host_stacked_rw")
+    plugin = _synthetic_module("zc_plugin_stacked_rw", STACKED_WRAPPER_PLUGIN)
+    host_fn = host.FakeImpl.forward_fused_infer_attention
+    host.FakeImpl.forward_fused_infer_attention = plugin.make_forward_wrapper(
+        plugin.make_forward_wrapper(host_fn)
+    )
+    carrier._rewrite_method(
+        host,
+        host.FakeImpl,
+        "forward_fused_infer_attention",
+        carrier._transform_fia_method,
+    )
+    impl = host.FakeImpl()
+    output = torch.zeros(2, 2, 2)
+    query = torch.randn(2, 2, 2)
+    result = impl.forward_fused_infer_attention(output, 2, query)
+    assert result is output
+    assert host.DeviceOperator.calls, "FIA stand-in was never called"
+    assert "_zc_fi_out" in host.DeviceOperator.calls[-1], "destination not injected"
+    # the .out stand-in wrote into the caller's region -> the copy is identity
+    assert carrier.stats()["selfcopy_identity"] == 1
+    assert carrier.stats()["selfcopy_copied"] == 0
+
+
+def test_host_func_refuses_an_ambiguous_wrapper_chain():
+    """Two host-file functions behind one wrapper -> refuse (fail-open)."""
+    host = _synthetic_module("zc_host_ambiguous", AMBIGUOUS_CHAIN_HOST)
+    plugin = _synthetic_module("zc_plugin_ambiguous", STACKED_WRAPPER_PLUGIN)
+    func = plugin.make_ambiguous_wrapper(
+        host.FakeImpl.forward_fused_infer_attention,
+        host._decoy_host_helper,
+    )
+    with pytest.raises(RuntimeError):
+        carrier._host_func(func, host.__file__)
+
+
+def test_host_func_refuses_a_broken_chain():
+    """A wrapper that delegates to nothing host-defined must raise, not guess."""
+    host = _synthetic_module("zc_host_broken")
+    plugin = _synthetic_module("zc_plugin_broken", STACKED_WRAPPER_PLUGIN)
+    func = plugin.make_forward_wrapper(lambda *args, **kwargs: None)
+    with pytest.raises(RuntimeError):
+        carrier._host_func(func, host.__file__)
 
 
 def test_rewrite_source_is_the_host_body_plus_the_guard():

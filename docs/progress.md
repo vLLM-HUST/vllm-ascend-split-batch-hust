@@ -258,3 +258,25 @@
   已 `disable` 回退；`_host_func` 修复（穿双层 wrapper）与文档纠偏列为未决 B1/B2。
 - CPU：`pytest -q` **272 passed**、`ruff check .` 干净。证据：
   `docs/evidence/zerocost-activation-20260913.md` + `docs/evidence/zerocost-activation-20260913/raw/`。
+
+## 2026-09-13 zerocost-wiring `_host_func` 多 wrapper 修复 → **§3 通过，已翻 active**
+
+- **修法**：`zerocost_wiring._host_func` 的判据从「只跳一层、cell 的 `co_filename == 宿主文件`」改为
+  「遍历整个 `__closure__` 图，要求**恰好一个**可达函数其 code 属于宿主文件」；先经 `_unwrap_callable`
+  归一化 bound method / partial。0 命中（锚点漂移/断链）或 ≥2 命中（歧义）都 raise ⇒ 沿用既有 fail-open
+  契约（一条 warning + 整项回滚）；仍是 `host_func.__code__ = new_code` 原地替换，未 `setattr` 到类上。
+  不动 ②、不动 cascade / cascade_graph 插件。
+- **单测**：`tests/test_zerocost_wiring.py` 新增 6 项——两层/三层叠加 wrapper 仍能溯源（对照旧逻辑
+  在两层即 `RuntimeError`）、双层叠加下端到端 `_zc_fi_out` 到达 adaptor 且恒等拷贝被跳过、
+  同文件双候选（歧义）与断链（0 命中）都要拒。CPU：`pytest -q` **277 passed**、`ruff check .` 干净。
+- **§3 重跑（真模型，卡 7）**：`inspect`/`check`/`status`/`enable`/`run --dry-run` 全绿
+  （`activation_ready=true`、blocker=`null`、states 含 `configured`、enable rc=0）；
+  default-off 腿 `/health` 200 + 2 chat 200 + **日志零 zerocost 痕迹**；
+  **ON 腿（`vllm-hust-ext run`，co-enable cascade graph，`gate=1, graph_gate=1`）**
+  ⇒ **① 与 ② 均 ACTIVE、0 fail-open(refused)、`/health` 200、2 chat 200**。
+  日志唯一 ERROR 是主动 kill 引发的关停竞态（两条 chat `200 OK` 之后 `EngineDeadError`），非 zerocost 缺陷。
+  收尾：三腿子树 `residual children: <none>`、卡 7 HBM 回 5%、manager enable 态 `disable` 回退到任务前。
+- **处置**：三项证据齐备 + §3 门控生效 ⇒ 翻 `implementation[0].status: import_only → active`；
+  `test_zerocost_bundle_is_*` 守卫同步改为断言 `active`。
+- 证据：`docs/evidence/zerocost-activation-20260913.md`（追加「修复后 ON 腿」一节，保留上一程失败记录）
+  + `docs/evidence/zerocost-activation-20260913/raw-fix/`。

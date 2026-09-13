@@ -194,3 +194,85 @@ nohup flock -x -w 7200 /tmp/npu-card7.lock bash $E/raw/zerocost-iso.sh > /tmp/ws
 | B3 | manager 状态 | 翻转期间 `enable` 已把 bundle 写入 enabled 集合；**收尾已 `disable` 回退到任务前状态**（`raw/ext_disable_restore.txt`）。 |
 | B4 | 翻转动作 | 一旦 B1 修复且 §3 ON 腿出现 ①+② ACTIVE，翻 active 就是 `implementation[0].status: import_only → active` 一行 + 还原
 `test_zerocost_bundle_is_*` 守卫（本包已把该守卫的 docstring 更新为如实记录 blocker）。 |
+
+---
+
+# 追加（同日第二次运行）：**修复后 ON 腿通过，已翻 `active`**
+
+> 本节是**最新结论，覆盖 §8 的判定**。§0–§10 的失败记录**原样保留留档**（它准确定位了
+> 根因，也是本次修复的回归基线）。
+
+## 11. 修复：`_host_func` 跨任意层 wrapper 溯源
+
+`zerocost_wiring._host_func(func, host_file)` 的判据从「**只跳一层**：闭包 cell 的
+`co_filename == 宿主文件`」改为「**遍历整个 `__closure__` 图，要求恰好一个可达函数其 code 属于宿主文件**」：
+
+- 先经 `_unwrap_callable()` 归一化 bound method（`__func__`）/ `functools.partial`（`func`）；
+- 以 `seen`（按 `id`）+ 显式栈遍历闭包图，收集所有 `co_filename == host_file` 的候选；
+- 候选按同一性去重后**必须恰好为 1**：0 个（锚点漂移 / 断链）或 ≥2 个（歧义）一律 `raise`
+  ⇒ 沿用既有 fail-open 契约（`install()` 内一条 warning + 整项回滚），**不静默跑偏**；
+- 仍是 `host_func.__code__ = new_code` **原地替换**（未 `setattr` 到类上，理由见
+  `knowledge/operator-advantage-registry.md` 判读规则 12）；② 路径与 cascade / cascade_graph 插件未动。
+
+单测（`tests/test_zerocost_wiring.py`，新增 6 项）：两层 / 三层叠加 wrapper 仍能溯源；
+双层叠加下端到端确认 `_zc_fi_out` 到达 adaptor 且恒等拷贝被跳过；同文件双候选（歧义）与断链（0 命中）
+都拒。**回归有效性已对照验证**：同一合成用例下旧的一层逻辑在两层 wrapper 处即 `RuntimeError`。
+
+CPU：`pytest -q` **277 passed**（新增 6）、`ruff check .` 干净。
+
+## 12. §3 重跑（真模型 `/data/shared_models/Qwen--Qwen2.5-14B-Instruct`，卡 7）
+
+- Bundle：`org.vllm-hust.zerocost-wiring`，本次**已翻 `active`**（`implementation[0].status`）。
+- 原始日志：`docs/evidence/zerocost-activation-20260913/raw-fix/`（阶梯输出、两腿 serve 日志、
+  chat JSON、`evidence_greps.txt`、`meta.txt`、`fix-smoke.sh`）。
+- 设备：卡 7；触卡命令包在 `flock -x -w 7200 /tmp/npu-card7.lock` 内；
+  HBM 起 / OFF 腿后 / ON 腿后 = **5% / 5% / 5%**。
+
+| §3 步骤 | 结果 |
+| --- | --- |
+| `inspect`（翻转后） | `activation_ready=true`、`activation_blocker=null`、`status=active` |
+| `check` | `states=[installed,discovered,compatible,configured]`（`degraded` 消失） |
+| `status` | 同上 |
+| `enable` | **成功**（`rc=0`）；enabled 集合含 zerocost |
+| `run --dry-run` | 正确注入 `VLLM_HUST_FI_PREFILL_OUT=1` + `VLLM_HUST_SKIP_COS_SIN=1`（+ 共存 cascade/demask 键） |
+| default-off 腿（plain `vllm serve`，无 zerocost env） | `/health` 200（41 poll）；2 chat 200（`ok1` / `Ok2 …`）；**日志零 zerocost 痕迹**（`evidence_greps.txt` 为空） |
+| **ON 腿 = §3 正式 serve**（`vllm-hust-ext run -- vllm serve`，co-enable cascade graph） | `/health` 200（37 poll）；2 chat 200（`ok1` / `Ok2 …`）；**① ACTIVE + ② ACTIVE，0 fail-open(refused)** |
+| 收尾 | 两腿子树 `residual children: <none>`；manager `disable` 回退（`raw-fix/ext_list_restored.txt`）；卡 7 HBM 回 5% |
+
+ON 腿引擎日志（`raw-fix/serve_on.log`，逐字）：
+
+```
+14: cascade plugin loaded (gate=1, graph_gate=1, kernel_wheel=ok)          # API server
+47: (EngineCore) cascade plugin loaded (gate=1, graph_gate=1, kernel_wheel=ok)
+48: (EngineCore) FIA decode de-mask is ACTIVE (VLLM_HUST_FIA_DEMASK=1): ...
+49: (EngineCore) zero-cost wiring ① is ACTIVE (VLLM_HUST_FI_PREFILL_OUT=1): the eager prefill
+                  FIA leg now writes into the caller's output buffer through the op's .out
+                  overload and the two redundant TensorMove copies per layer are guarded by an
+                  exact identity predicate.
+50: (EngineCore) zero-cost wiring ② is ACTIVE (VLLM_HUST_SKIP_COS_SIN=1): update_cos_sin now
+                  records positions only and get_cos_and_sin_slice() materialises the rope
+                  buffers on demand.
+```
+
+⇒ **上一程的 `zero-cost wiring ① refused … a host anchor moved` 已消失**；`grep "refused"` 为空。
+
+唯一 ERROR / Traceback（`raw-fix/serve_on.log:165-172`）是**主动 kill 引发的关停竞态**——
+时序 `08:04:25`：两条 chat `200 OK` → `stop` 送 SIGTERM → `EngineCore: trigger received signal=SIGTERM`
+→ 之后 `AsyncLLM output_handler failed … EngineDeadError`。与 default-off 腿历史同型，**非** zerocost 缺陷。
+
+## 13. 判定
+
+**release.md §3 启用验证通过**（`check`/`status`/`inspect`/`enable`/`dry-run` 全绿；default-off 零回归；
+§3 正式 serve 下 ① 与 ② **都 ACTIVE**、0 fail-open、`/health` 200、chat 200）。
+⇒ 三项验收证据齐备 + §3 门控生效 ⇒ **翻 `implementation[0].status: import_only → active`**，
+`test_zerocost_bundle_is_import_only_with_its_own_keys` 守卫同步改为
+`test_zerocost_bundle_is_active_with_its_own_keys`（断言 `active` + `activation_blocker is None`）。
+
+## 14. 复现命令
+
+```bash
+E=docs/evidence/zerocost-activation-20260913
+# 阶梯 + default-off 腿 + §3 正式 ON 腿（内部 flock -x -w 7200 /tmp/npu-card7.lock）
+nohup bash -c "exec 200>>/tmp/npu-card7.lock; flock -x -w 7200 200 && \
+  bash $E/raw-fix/fix-smoke.sh" > /tmp/ws3b-fix-smoke.log 2>&1 &
+```

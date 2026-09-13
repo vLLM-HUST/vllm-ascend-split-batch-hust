@@ -334,49 +334,87 @@ def _transform_fia_method(fn: ast.FunctionDef) -> None:
     _guard_tail_copy(fn)
 
 
-def _host_func(func, host_file: str):
-    """Resolve the *host-defined* function behind any plugin wrappers.
+def _unwrap_callable(obj):
+    """Follow ``__func__`` / ``func`` down to the plain function object.
 
-    Other plugins in this bundle wrap the very same host methods (e.g.
-    ``cascade_plugin._make_forward_wrapper`` wraps
-    ``forward_fused_infer_attention`` with a pass-through that keeps the host
-    method in a closure).  ``inspect.getsource`` on the class attribute would
-    then return *their* wrapper -- so follow the closure chain down to the
-    function that actually lives in the host file and patch that one in place.
+    The wrappers the plugins install are plain functions, but a seam could also
+    be a bound method (``classmethod``) or a ``functools.partial``; normalise so
+    the closure walk always reaches something with ``__code__`` /
+    ``__closure__``.
     """
-    seen = set()
-    for _ in range(8):
-        code = getattr(func, "__code__", None)
-        if code is None:
-            break
+    seen: set = set()
+    while callable(obj) and id(obj) not in seen:
+        seen.add(id(obj))
+        inner = getattr(obj, "__func__", None)
+        if inner is None:
+            inner = getattr(obj, "func", None)
+        if not callable(inner) or id(inner) in seen:
+            return obj
+        obj = inner
+    return obj
+
+
+def _host_func(func, host_file: str):
+    """Resolve the *host-defined* function behind any number of plugins.
+
+    Other plugins in this bundle wrap the very same host methods: the eager
+    ``cascade_plugin._make_forward_wrapper`` puts a pass-through around the host
+    method, and with ``VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1``
+    ``cascade_graph_plugin.install`` stacks a *second* wrapper on top of it, so
+    the class attribute sits two plugin wrappers deep (the outer wrapper's
+    closure points at the inner wrapper, not at the host file).
+    ``inspect.getsource`` on the class attribute would return the outermost
+    wrapper's source.
+
+    The criterion is therefore "the code object's file is the host file", not
+    "one hop": walk the whole ``__closure__`` graph and require **exactly one**
+    reachable function defined in the host file.  Zero candidates (a moved
+    anchor / a broken chain) and several candidates (an ambiguous chain) both
+    raise, which the caller turns into the documented fail-open rollback -- the
+    host body is never patched on a guess.
+    """
+    seen: set = set()
+    stack = [_unwrap_callable(func)]
+    matches: list = []
+    while stack:
+        current = stack.pop()
+        code = getattr(current, "__code__", None)
+        if code is None or id(current) in seen:
+            continue
+        seen.add(id(current))
         if code.co_filename == host_file:
-            return func
-        if id(func) in seen:
-            break
-        seen.add(id(func))
-        inner = None
-        for cell in getattr(func, "__closure__", None) or ():
+            matches.append(current)
+        for cell in getattr(current, "__closure__", None) or ():
             try:
                 candidate = cell.cell_contents
             except ValueError:  # empty cell
                 continue
-            if callable(candidate) and getattr(
-                getattr(candidate, "__code__", None), "co_filename", None
-            ) == host_file:
-                inner = candidate
-                break
-        if inner is None:
-            break
+            if callable(candidate):
+                stack.append(_unwrap_callable(candidate))
+    unique: list = []
+    for match in matches:
+        if not any(match is other for other in unique):
+            unique.append(match)
+    if len(unique) != 1:
+        found = (
+            ", ".join(sorted(getattr(m, "__qualname__", repr(m)) for m in unique))
+            or "<none>"
+        )
+        raise RuntimeError(
+            f"{getattr(func, '__qualname__', func)} does not resolve to exactly "
+            f"one function defined in {host_file} (found {len(unique)}: {found})"
+        )
+    host = unique[0]
+    if host is not _unwrap_callable(func):
         _info_once(
             "zero-cost wiring: %s is wrapped by another plugin (%s); patching "
             "the host body it delegates to.",
             getattr(func, "__qualname__", func),
-            code.co_filename.rsplit("/", 1)[-1],
+            getattr(getattr(func, "__code__", None), "co_filename", "?").rsplit(
+                "/", 1
+            )[-1],
         )
-        func = inner
-    raise RuntimeError(
-        f"{getattr(func, '__qualname__', func)} is not defined in {host_file}"
-    )
+    return host
 
 
 def _rewrite_method(module, cls, name: str, transform) -> None:
