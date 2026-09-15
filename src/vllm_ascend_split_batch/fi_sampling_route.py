@@ -18,8 +18,8 @@ No torch / vllm / triton import: every decision below is CPU-testable plain
 logic (see ``tests/test_fi_sampling_route.py``).
 
 Bench provenance (W2 package, reviewed 2026-09-09, V=152064 fp32, 910B2,
-triton-ascend 3.2.1 -- ``flashinfer-migration/sampling/报告-W2-sampling-
-migration-2026-09-09.md`` §4.8 "when it wins / when it loses"):
+triton-ascend 3.2.1 -- ``knowledge/surveys/sampling/报告-fi_sampling-w2-w3-
+2026-09-09.md`` §4.8 "when it wins / when it loses"):
 
 | workload                              | verdict                          |
 |---------------------------------------|----------------------------------|

@@ -45,7 +45,7 @@ main (`0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`), CANN 9.1.0.
 > (D1–D4 below) — exactly the failure mode `docs/pitfalls.md` §2.1 warns about.
 > Existence is not compatibility: a monkeypatched method must match the host's
 > *parameter list and call convention*. Use the AST audit
-> (`knowledge/evidence/cascade/logs/sig_audit2.py` semantics) before
+> (`knowledge/evidence/cascade/logs/sig-audit/sig_audit2.py` semantics) before
 > any `host.version_range` change.
 
 | Anchor | Host signature (current) | Plugin wrapper | Status |

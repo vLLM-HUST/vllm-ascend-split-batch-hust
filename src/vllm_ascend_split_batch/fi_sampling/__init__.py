@@ -14,7 +14,7 @@
 
 """Vendored ``fi_sampling`` host API (flashinfer sampling port, triton-ascend).
 
-Vendored from the W2 package ``flashinfer-migration/sampling/fi_sampling``
+Vendored from the W2 package ``knowledge/surveys/sampling/fi_sampling``
 (worktree source of truth, reviewed and approved 2026-09-09; file hashes and
 anchors in ``PROVENANCE.md``).  Only the *host* modules are vendored --
 ``api.py`` / ``kernels.py`` / ``npu_env.py`` / ``pure.py``; the reference
