@@ -43,7 +43,21 @@ pip install pytest-xdist
   常驻告警),vllm 的 HAS_TRITON 检测基于 import 不受影响。裸调
   `vllm_ascend.ops.triton` kernel 前需先调 `init_device_properties_triton()`。
 
-### 1.3 模型卷只读
+> **订正(2026-09-16,追加不改上文)**:本条的**根因已定位到行并给出正解**。
+> - 根因:`AscendCompiler.compile` 的 `enable_npugraph_ex=False` 分支
+>   (`fusion_pass_compile` → `compile_fx` → `aot_autograd`,compiler_interface.py:80/:97)
+>   返回普通 `GraphModule`,而 torch 2.13 的 AOTAutograd 缓存写入要求 `OutputCode`。
+>   宿主已有 guard(`compiler_interface.py:40`)但**只**在 npugraph_ex 分支被进入。
+> - 上文"姿势"(`cudagraph_mode=FULL` 走 npugraph_ex)是**绕过**,且**不适用于验收冻结配置**
+>   ——V3.8 表附-2 冻结 `cudagraph mode=piecewise`,正好落在崩的那个分支;`VLLM_DISABLE_COMPILE_CACHE=1`
+>   也被表附-4 末行("其他执行变量｜禁止")排除。
+> - **正解**:插件侧 carrier `aot_cache_guard_plugin.py`(本仓 `src/vllm_ascend_split_batch/`,
+>   默认开、`VLLM_HUST_AOT_CACHE_GUARD=0` 关),只对未加 guard 的分支进入宿主自身 guard;
+>   宿主将来自修则该 carrier 变 no-op(漂移守卫 `tests/test_aot_cache_guard_drift.py`)。
+> - 证据:`bench/runs/20260916-abcert-b1/FINDINGS.md` §阻塞 1(真机:断言计数 0、
+>   `Compiling a graph (1,32768) 13.38s` 成功);跨仓条目已在工作区 `AGENTS.md` 陷阱 9 登记。
+
+### 1.4 模型卷只读
 
 `/data/shared_models`(与 `/data/shared_datasets` 同卷)是只读挂载;拉新模型放
 容器内可写目录。当前主力模型:Qwen2.5-Coder-14B-Instruct(单卡,48 层/hidden
