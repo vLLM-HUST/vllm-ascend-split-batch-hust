@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "scope": "plugin",
+  "artefact": "cascade",
+  "applies_to": "serve",
+  "_why": "cascade 启用态下的服务启动面要求。这里**只用 notes**（作为规则文本注入引擎决策层），不用 locked/forbid：本工作区的 cascade 启用条件是扩展 enable 态 + cascade_gate.py:64 的自适应闸，没有单一环境变量可以精确表达『已启用』；用近似条件（如只认 VLLM_ASCEND_CASCADE_ADAPTIVE_GATE）会在真正启用时静默失效，比不加约束更危险。",
+  "notes": [
+    "若启用 cascade（vllm-hust-ext enable 态）：cudagraph 模式必须为 FULL_AND_PIECEWISE。单值 \"FULL\" 时 separate_routine() 为 False ⇒ batch_desc.uniform 不可达 ⇒ twin 捕获循环静默跳过全部桶（cascade 开着但没接管）。证据：AGENTS.md:133-141 陷阱 8；profiles/qwen14b-instruct-hotspot-20260910/probe-u3-cascade-equiv-20260913/REPORT.md §2。"
+  ]
+}
