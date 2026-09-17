@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MLP token-chunked execution（default-off）——降低激活峰值，逐位等价。
+"""MLP token-chunked execution（default-off）——降低激活峰值。
 
 **动机**（本机实测，见 `bench/runs/20260916-abcert-b1/A1-A3-CHUNK-FIX.md`）：
 MLP 的 `gate_up`（2I·2B = 54 KiB/token）与 `npu_swiglu` 的输出（I·2B = 27 KiB/token）
@@ -21,13 +21,19 @@ MLP 的 `gate_up`（2I·2B = 54 KiB/token）与 `npu_swiglu` 的输出（I·2B =
 按 token 维切块顺序执行，工作集降为 `(n/k)·81`，而每个 token 的数学与其它 token 无关。
 
 **实测收益**（tokens=32768，fp16，H=5120，I=13824）：
-| k | peak | vs k=1 | 逐位相等 | 中位耗时 |
+| k | peak | vs k=1 | 数值 | 中位耗时 |
 |---|---|---|---|---|
-| 1 | 3977 MiB | — | True | 53.26 ms |
-| 2 | 2521 MiB | **−1.42 GiB** | True | 53.59 ms (**+0.6%**) |
-| 4 | 1793 MiB | **−2.13 GiB** | True | 53.26 ms (−0.0%) |
+| 1 | 3977 MiB | — | 参考 | 53.26 ms |
+| 2 | 2521 MiB | **−1.42 GiB** | 逐位相同 | 53.59 ms (**+0.6%**) |
+| 4 | 1793 MiB | **−2.13 GiB** | 逐位相同 | 53.26 ms (−0.0%) |
 
 ⇒ 用于解 A1/A3 的 KV 缺口（−0.48 / −0.62 GiB），余量 2–3×。
+
+⚠️ **上表的"逐位相同"只在该形状（n=32768）成立，不是普适性质**：设备端 GEMM 的
+调度依赖调用方 M，小 M 下 `full(x)[:c]` 与 `full(x[:c])` 可差约 1 个 fp16 最低位
+（实测上界 2**-15）。成立域与量级见 `chunked_mlp_forward` 的 docstring；
+回归证据在 `tests/test_mlp_chunk_plugin.py`（CPU 逻辑）与
+`tests/test_npu_mlp_chunk_precision.py`（设备数值，含该 artifact 的独立钉桩）。
 
 **为什么不做成默认开**：它改变执行粒度（多若干次 kernel launch）。虽然实测无代价，
 但属"改动数值路径之外的行为"，按仓库纪律保持 default-off，由使用者显式开启。
@@ -66,9 +72,16 @@ def chunked_mlp_forward(
     ① ``chunks_k < 2``；② ``x.shape[0] < min_tokens_thr``（decode 的 n 很小，
     分块无收益）；③ ``act_fn`` 不在白名单（非 SwiGLU 结构，分块前提不成立）。
 
-    适用时按 token 维切块顺序执行：每 token 的数学与其它 token **独立**，
-    故切块只改变执行粒度、不改变数值。切分点对齐 ``ceil(n/k)``，
-    末块可能更短（``min()`` 收口），循环覆盖 ``[0, n)`` 全部行、无重叠。
+    适用时按 token 维切块顺序执行：每个 token 的**数学**与其它 token 独立。
+    切分点对齐 ``ceil(n/k)``，末块可能更短（``min()`` 收口），
+    循环覆盖 ``[0, n)`` 全部行、无重叠。
+
+    ⚠️ **数值并非普适逐位相同**（2026-09-17 实测修正）：设备端 GEMM 的调度依赖
+    调用方 M（cube 分瓦 / 归约顺序），故 ``full(x)[:c]`` 与 ``full(x[:c])`` 在
+    **小 M** 下可差约 1 个 fp16 最低位（实测上界 ``max_abs_diff`` = 2**-15，
+    最差形状 n=512 的端到端 ``rel_l2 ≈ 1e-4``）。成立域实测为 ``n ≳ 8192``：
+    **A1/A3 的 n=32768 在 k∈{2,4} 下逐位相同（rel_l2 = 0）**。
+    ⇒ 记忆内存收益与 n 无关，但数值等价性**必须按 M 验证**，不要泛化为普适性质。
     """
     n = x.shape[0]
     if (
