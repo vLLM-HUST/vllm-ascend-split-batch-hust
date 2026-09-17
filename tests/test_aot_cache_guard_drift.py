@@ -31,14 +31,23 @@ import sys
 
 import pytest
 
-_PLUGIN = pathlib.Path(__file__).resolve().parents[1] / "src" / "vllm_ascend_split_batch" / "aot_cache_guard_plugin.py"
+_PLUGIN = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "src"
+    / "vllm_ascend_split_batch"
+    / "aot_cache_guard_plugin.py"
+)
 
 
 def _host_source() -> str:
     """Locate ``vllm_ascend/compilation/compiler_interface.py`` from disk only."""
     import vllm_ascend  # noqa: PLC0415 -- cheap: package dir only
 
-    host = pathlib.Path(vllm_ascend.__file__).resolve().parent / "compilation" / "compiler_interface.py"
+    host = (
+        pathlib.Path(vllm_ascend.__file__).resolve().parent
+        / "compilation"
+        / "compiler_interface.py"
+    )
     if not host.exists():
         pytest.skip(f"host compile interface not found: {host}")
     return host.read_text(encoding="utf-8")
@@ -47,11 +56,16 @@ def _host_source() -> str:
 def test_host_still_exposes_the_guard_the_carrier_wraps() -> None:
     src = _host_source()
     assert "def _disable_pytorch_aot_cache_for_npugraph_ex(" in src, (
-        "host guard `_disable_pytorch_aot_cache_for_npugraph_ex` disappeared or was renamed; "
-        "update aot_cache_guard_plugin.py (or drop the carrier if upstream fixed the branch)"
+        "host guard `_disable_pytorch_aot_cache_for_npugraph_ex` disappeared "
+        "or was renamed; update aot_cache_guard_plugin.py (or drop the "
+        "carrier if upstream fixed the branch)"
     )
-    assert "class AscendCompiler" in src, "AscendCompiler class disappeared; carrier target is gone"
-    assert "def compile(" in src, "AscendCompiler.compile disappeared; carrier target is gone"
+    assert "class AscendCompiler" in src, (
+        "AscendCompiler class disappeared; carrier target is gone"
+    )
+    assert "def compile(" in src, (
+        "AscendCompiler.compile disappeared; carrier target is gone"
+    )
 
 
 def test_fusion_pass_branch_is_still_unguarded() -> None:
@@ -66,21 +80,28 @@ def test_fusion_pass_branch_is_still_unguarded() -> None:
     # check: the guard context is only entered in npugraph_ex_compile.
     occurrences = src.count("with _disable_pytorch_aot_cache_for_npugraph_ex():")
     assert occurrences == 1, (
-        f"expected exactly 1 host-side guard entry (npugraph_ex path), found {occurrences}; "
-        "if upstream added one for the fusion-pass branch, drop aot_cache_guard_plugin.py"
+        "expected exactly 1 host-side guard entry (npugraph_ex path), "
+        f"found {occurrences}; if upstream added one for the fusion-pass "
+        "branch, drop aot_cache_guard_plugin.py"
     )
 
 
 def test_load_is_default_on_with_opt_out() -> None:
     sys.path.insert(0, str(_PLUGIN.parent.parent))
-    from vllm_ascend_split_batch import aot_cache_guard_plugin as plugin  # noqa: PLC0415
+    from vllm_ascend_split_batch import (
+        aot_cache_guard_plugin as plugin,  # noqa: PLC0415
+    )
 
-    assert plugin.is_enabled() is True, "carrier must be default-on (frozen config has no env var to spare)"
+    assert plugin.is_enabled() is True, (
+        "carrier must be default-on (frozen config has no env var to spare)"
+    )
     import os  # noqa: PLC0415
 
     os.environ[plugin.ENV_GUARD] = "0"
     try:
-        assert plugin.is_enabled() is False, "opt-out token `0` must disable the carrier"
+        assert plugin.is_enabled() is False, (
+            "opt-out token `0` must disable the carrier"
+        )
         assert plugin.load() is False, "disabled carrier must not install anything"
     finally:
         os.environ.pop(plugin.ENV_GUARD, None)

@@ -111,11 +111,18 @@ def install() -> bool:
 
         guard = getattr(ci, "_disable_pytorch_aot_cache_for_npugraph_ex", None)
         if guard is None:
-            _record("drift", "compiler_interface._disable_pytorch_aot_cache_for_npugraph_ex missing")
+            _record(
+                "drift",
+                "compiler_interface._disable_pytorch_aot_cache_for_npugraph_ex missing",
+            )
             return False
 
         compiler_cls = getattr(ci, "AscendCompiler", None)
-        orig = getattr(compiler_cls, "compile", None) if compiler_cls is not None else None
+        orig = (
+            getattr(compiler_cls, "compile", None)
+            if compiler_cls is not None
+            else None
+        )
         if not callable(orig):
             _record("drift", "AscendCompiler.compile missing")
             return False
@@ -132,11 +139,15 @@ def install() -> bool:
             with guard():
                 return orig(self, *args, **kwargs)
 
-        setattr(compile_with_aot_cache_guard, _MARKER, True)
+        setattr(compile_with_aot_cache_guard, _MARKER, True)  # noqa: B010 -- 函数标记，供幂等判定
         compile_with_aot_cache_guard.__name__ = getattr(orig, "__name__", "compile")
         compile_with_aot_cache_guard.__doc__ = getattr(orig, "__doc__", None)
-        setattr(compiler_cls, "compile", compile_with_aot_cache_guard)
-        _record("installed", f"npugraph_ex_branch_untouched; wrapped={ci.AscendCompiler.__name__}.compile")
+        compiler_cls.compile = compile_with_aot_cache_guard
+        _record(
+            "installed",
+            "npugraph_ex_branch_untouched; wrapped="
+            f"{ci.AscendCompiler.__name__}.compile",
+        )
         return True
     except Exception as exc:  # noqa: BLE001 -- load() must never break the engine
         _record("failed", f"{type(exc).__name__}: {exc}")

@@ -53,6 +53,45 @@ _LOCAL = threading.local()
 _MARKER = "_vllm_hust_mlp_chunk_wrapped"
 _DEFAULT_MIN_TOKENS = 256
 
+#: 允许分块的 SwiGLU 实现（按类名匹配，避免 import 期依赖设备侧 op）。
+_ACT_WHITELIST = ("SiluAndMul", "AscendSiluAndMul")
+
+
+def chunked_mlp_forward(
+    gate_up_proj, act_fn, down_proj, x, *, chunks_k: int, min_tokens_thr: int
+):
+    """MLP 前向的 token 分块实现（**纯函数，供测试直接调用**）。
+
+    返回 ``None`` 表示"不适用分块"——调用方应回退到原实现。三种不适用：
+    ① ``chunks_k < 2``；② ``x.shape[0] < min_tokens_thr``（decode 的 n 很小，
+    分块无收益）；③ ``act_fn`` 不在白名单（非 SwiGLU 结构，分块前提不成立）。
+
+    适用时按 token 维切块顺序执行：每 token 的数学与其它 token **独立**，
+    故切块只改变执行粒度、不改变数值。切分点对齐 ``ceil(n/k)``，
+    末块可能更短（``min()`` 收口），循环覆盖 ``[0, n)`` 全部行、无重叠。
+    """
+    n = x.shape[0]
+    if (
+        chunks_k < 2
+        or n < min_tokens_thr
+        or act_fn.__class__.__name__ not in _ACT_WHITELIST
+    ):
+        return None
+    import torch  # 局部 import：default-off 时不引入
+
+    out = torch.empty_like(x)
+    c = (n + chunks_k - 1) // chunks_k
+    for i in range(chunks_k):
+        lo, hi = i * c, min((i + 1) * c, n)
+        if lo >= n:
+            break  # n 很小时可能提前越界（理论上被 min_tokens_thr 挡住，此处兜底）
+        g, _ = gate_up_proj(x[lo:hi])
+        s = act_fn(g)
+        o, _ = down_proj(s)
+        out[lo:hi] = o
+        del g, s, o
+    return out
+
 
 def chunks() -> int:
     """返回块数（≥2 才生效；非法值按 1 处理）。"""
@@ -79,8 +118,6 @@ def install() -> bool:
         k = chunks()
         if k < 2:
             return False
-        import torch
-
         from vllm.model_executor.models.qwen2 import Qwen2MLP
 
         orig = getattr(Qwen2MLP, "forward", None)
@@ -91,19 +128,11 @@ def install() -> bool:
         thr = min_tokens()
 
         def forward_chunked(self, x):
-            n = x.shape[0]
-            if n < thr or self.act_fn.__class__.__name__ not in ("SiluAndMul", "AscendSiluAndMul"):
-                return orig(self, x)
-            out = torch.empty_like(x)
-            c = (n + k - 1) // k
-            for i in range(k):
-                lo, hi = i * c, min((i + 1) * c, n)
-                g, _ = self.gate_up_proj(x[lo:hi])
-                s = self.act_fn(g)
-                o, _ = self.down_proj(s)
-                out[lo:hi] = o
-                del g, s, o
-            return out
+            out = chunked_mlp_forward(
+                self.gate_up_proj, self.act_fn, self.down_proj, x,
+                chunks_k=k, min_tokens_thr=thr,
+            )
+            return orig(self, x) if out is None else out
 
         setattr(forward_chunked, _MARKER, True)
         forward_chunked.__name__ = getattr(orig, "__name__", "forward")
@@ -117,5 +146,9 @@ def install() -> bool:
 
 
 def load() -> bool:
-    """``vllm.general_plugins`` 入口（default-off，仅 ``VLLM_HUST_MLP_CHUNKS>=2`` 时启用）。"""
+    """``vllm.general_plugins`` 入口。
+
+    default-off：仅当 ``VLLM_HUST_MLP_CHUNKS>=2`` 时才安装包装，否则不 import
+    任何重模块、不触碰注册表。
+    """
     return install()
