@@ -136,6 +136,19 @@ def _use_ubatching(runner) -> bool:
     return bool(getattr(parallel_config, "use_ubatching", False))
 
 
+def _spec_decode_active(runner) -> bool:
+    """True when speculative decoding is configured (skip the twin capture).
+
+    Cascade admits exactly one query row per request; MTP and the other
+    speculative methods feed ``k + 1`` rows, so the cascade twin must not be
+    captured for them -- the standard FULL graph keeps serving those steps.
+    Mirrors the dispatch-gate guard in ``cascade_plugin._use_cascade_attention``
+    (see README "Speculative decoding boundary").
+    """
+    vllm_config = getattr(runner, "vllm_config", None)
+    return getattr(vllm_config, "speculative_config", None) is not None
+
+
 def _make_determine_batch_wrapper(orig):
     """Wrap the host dispatch so cascade steps keep the FULL graph.
 
@@ -238,6 +251,7 @@ def _capture_cascade_twins(self, args, kwargs) -> None:
         or getattr(self, "use_sparse", False)
         or getattr(self, "use_compress", False)
         or _use_ubatching(self)
+        or _spec_decode_active(self)
     ):
         return
     if not _cascade_wheel_ready():

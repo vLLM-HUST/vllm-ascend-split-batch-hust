@@ -68,11 +68,16 @@ _QUALIFYING_KWARGS = dict(
 
 
 @pytest.fixture(autouse=True)
-def _healthy_state_after_test():
-    """Leave a re-probed (healthy) plugin state behind for later modules."""
+def _healthy_state_after_test(monkeypatch):
+    """Leave a re-probed (healthy) plugin state behind for later modules.
+
+    The re-probe needs the master gate set: disabled discovery returns before
+    the wheel probe (see ``cascade_plugin.load``).
+    """
     cascade_plugin._reset_fail_open_for_tests()
     yield
     cascade_plugin._reset_fail_open_for_tests()
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     cascade_plugin.load()  # re-probes with the real import; restores globals
 
 
@@ -143,6 +148,7 @@ def test_load_with_missing_wheel_warns_once_and_disables(
 ) -> None:
     _reset_env(monkeypatch)
     _poison_import(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     with caplog.at_level(logging.WARNING):
         cascade_plugin.load()
         cascade_plugin.load()  # idempotent load must not stack warnings
@@ -159,6 +165,7 @@ def test_load_reports_registration_failure_reason(monkeypatch, caplog) -> None:
         cascade_plugin, "_import_kernel_module", lambda: fake_module
     )
     monkeypatch.setattr(torch.ops, "npu", types.SimpleNamespace())
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     with caplog.at_level(logging.WARNING):
         cascade_plugin.load()
     assert cascade_plugin._KERNEL_WHEEL_OK is False
@@ -167,14 +174,25 @@ def test_load_reports_registration_failure_reason(monkeypatch, caplog) -> None:
     assert "unregistered" in warnings[0].getMessage()
 
 
+def test_disabled_load_does_not_probe_the_wheel(monkeypatch, caplog) -> None:
+    """Disabled discovery must not import the kernel wheel (no warning)."""
+    _reset_env(monkeypatch)
+    _poison_import(monkeypatch)
+    with caplog.at_level(logging.WARNING):
+        cascade_plugin.load()
+    assert _wheel_warnings(caplog) == []
+    assert cascade_plugin._KERNEL_WHEEL_PROBED is False
+    assert cascade_plugin._KERNEL_WHEEL_OK is False
+
+
 # ----------------------------------------------------------------- gate
 
 
 def test_gate_closed_when_wheel_missing_despite_enable(monkeypatch) -> None:
     _reset_env(monkeypatch)
     _poison_import(monkeypatch)
-    cascade_plugin.load()
     monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
+    cascade_plugin.load()
     gate = _gate()
     # Qualifying batch (prefix/batch above both thresholds) but no wheel:
     # the whole cascade feature must stay disabled.
@@ -186,9 +204,11 @@ def test_gate_default_off_stays_silent_shape_without_wheel(
 ) -> None:
     _reset_env(monkeypatch)
     _poison_import(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     with caplog.at_level(logging.WARNING):
         cascade_plugin.load()
     before = len(_wheel_warnings(caplog))
+    assert before == 1
     monkeypatch.delenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", raising=False)
     gate = _gate()
     assert gate(None, **_QUALIFYING_KWARGS) is False
@@ -209,9 +229,9 @@ def test_gate_still_opens_with_wheel_present(monkeypatch) -> None:
 def test_wheel_warning_logged_once_across_paths(monkeypatch, caplog) -> None:
     _reset_env(monkeypatch)
     _poison_import(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     with caplog.at_level(logging.WARNING):
         cascade_plugin.load()
-        monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
         assert _gate()(None, **_QUALIFYING_KWARGS) is False
         assert _gate()(None, **_QUALIFYING_KWARGS) is False
     # load() + two gate calls -> still exactly one process-level warning.
@@ -236,6 +256,27 @@ def test_runner_wheel_gate_blocks_capture_scheduling(
 
     monkeypatch.setattr(cascade_plugin, "_KERNEL_WHEEL_OK", True)
     assert runner_patch._cascade_wheel_ready() is True
+
+
+def test_spec_decode_skips_the_twin_capture(monkeypatch) -> None:
+    """2026-09-26: MTP / other speculative configs keep the standard graph.
+
+    The cascade twin admits one query row per request only, so capture
+    scheduling must skip those runners (mirrors the dispatch gate guard).
+    """
+    runner_patch = pytest.importorskip(
+        "vllm_ascend_split_batch.cascade_runner_patch"
+    )
+
+    def _runner(spec_config):
+        return types.SimpleNamespace(
+            vllm_config=types.SimpleNamespace(speculative_config=spec_config)
+        )
+
+    assert runner_patch._spec_decode_active(_runner(None)) is False
+    assert runner_patch._spec_decode_active(_runner(object())) is True
+    # Missing config objects must not raise (host seam discipline).
+    assert runner_patch._spec_decode_active(types.SimpleNamespace()) is False
 
 
 # ------------------------------------------------- gate bench child process

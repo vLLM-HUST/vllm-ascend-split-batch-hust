@@ -124,3 +124,35 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
 - [ ] `activation.environment` 值复核(enable=注入 `"1"`)
 - [ ] `run --dry-run` 注入结果正确、服务健康检查通过
 - [ ] 记录已验证的宿主版本/commit 与运行环境(Python、设备、镜像)
+
+## 6. 默认关闭时的宿主隔离契约(2026-09-26)
+
+**判据**:`load()` 在 `VLLM_ASCEND_ENABLE_CASCADE_DECODE` 未置 1 时,除了打一条
+启动标记行,不得对宿主进程做任何改动。逐项禁止:
+
+| 项 | 关闭时 | 依据 |
+|---|---|---|
+| 注入 `vllm_ascend.envs.env_variables` | 不注入 | `cascade_plugin._cascade_gate_env()` 先读环境变量,不依赖注入结果 |
+| import 宿主模块(`vllm_ascend.ops` / `attention_v1`) | 不 import | 同上早退 |
+| 安装 fail-open shim(policy_factory / spec_decode / ngram) | 不安装 | 同上早退 |
+| import kernel wheel(`ascend_kernel`) | 不探测 | 标记行报 `kernel_wheel=not-probed`,不谎报 `unavailable` |
+| 替换 attention / graph 条目(`builder_cls` / `impl_cls` / twin / runner) | 不替换 | 同上早退 |
+
+- **可观测性不受影响**:关闭态仍打印
+  `cascade plugin loaded (gate=0, graph_gate=0, kernel_wheel=not-probed)`——
+  vLLM 会吞掉 `general_plugins` 的加载异常,这行是"插件确实跑过"的唯一判据。
+- **启用态的 fail-open 不变**:内核 wheel 缺失/注册失败时仍是"整体禁用 + 单条
+  warning"(见根 README「Kernel wheel dependency」),只是探测时机从"每次 load"
+  收窄为"仅在启用时"。
+- 测试:`tests/test_cascade_plugin.py::test_disabled_discovery_touches_nothing`
+  (把 env 注入/shim/探测全部替换为 `pytest.fail`,关闭态调用 `load()`)、
+  `::test_disabled_discovery_reports_not_probed_wheel`、
+  `tests/test_cascade_fail_open.py::test_disabled_load_does_not_probe_the_wheel`。
+
+## 7. 未做(登记,勿误读为已具备)
+
+- `ruff format --check .` 当前**不通过**(2026-09-26 实测:25 个文件需重排,含
+  `cascade_plugin.py` / `cascade_runner_patch.py` / `tests/test_cascade_*.py`;
+  同一批文件在 `9951e41` 上同样不通过 ⇒ 存量问题,非本轮引入)。
+  本仓 CI 模板 `.github/extension-ci.yml` 含这一步 ⇒ 原样启用 CI 会红;
+  启用前需先做一次纯格式化提交。

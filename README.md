@@ -44,9 +44,27 @@ Environment gates (all default off):
 
 With every gate unset the patched methods are no-ops and the serving path is
 bit-identical to stock vllm-ascend. On load the plugin emits one INFO line,
-`cascade plugin loaded (gate=0, graph_gate=0, kernel_wheel=ok)`, so a
+`cascade plugin loaded (gate=0, graph_gate=0, kernel_wheel=not-probed)`, so a
 default-off serve log proves `load()` actually ran (vLLM otherwise swallows
-general-plugin load errors).
+general-plugin load errors). **Disabled discovery touches nothing else**: with
+`VLLM_ASCEND_ENABLE_CASCADE_DECODE` unset the plugin injects no env entries,
+imports no host module, installs no fail-open shim, imports no kernel wheel and
+replaces no attention/graph entry (contract: `docs/release.md` §6).
+
+## Speculative decoding boundary
+
+Cascade admits **one query row per request**. The two-stage path flattens the
+shared prefix once and re-derives the per-request suffix from the query-row
+count, so MTP verification and chunked prefill (which feed `k + 1` rows) are
+rejected by the dispatch gate and skip the cascade twin capture; those steps
+keep native attention and the standard FULL graph. `speculative_config` being
+set at all is treated as fail-closed, even when a step happens to carry single
+rows, because the `k > 1` query layout is neither supported nor measured yet.
+This is a guard, **not** MTP support: Split-Batch/dual-pad fails closed the
+same way (`planner.precheck_reason` -> `speculative_decode_conflict`). Enabling
+Cascade with speculative decoding therefore yields no cascade speedup — it is
+a compatibility boundary, not an enabled-Cascade result.
+
 
 Microbatching: the plugin mirrors the official vllm core gate and keeps the
 two-stage path off under ANY microbatching (`use_ubatching`, i.e. DBO or

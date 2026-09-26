@@ -280,3 +280,29 @@
   `test_zerocost_bundle_is_*` 守卫同步改为断言 `active`。
 - 证据：`docs/evidence/zerocost-activation-20260913.md`（追加「修复后 ON 腿」一节，保留上一程失败记录）
   + `docs/evidence/zerocost-activation-20260913/raw-fix/`。
+
+## 2026-09-26 cascade 准入与默认关闭隔离（PR #5 评审落地）
+
+- **来源**：外部评审 PR #5（`codex/qwen35-cascade-qualification` @ `c6066c35`，base 为
+  `224efa2`）。该 PR 的 diff 在本分支不适用（`git apply --check`：5 文件里 3 个 hunk 冲突；
+  `git merge-tree` 3 处内容冲突），故按等价形态在本地实现，不直接合并。
+- **默认关闭时的宿主隔离**（PR 的核心诉求）：`load()` 在
+  `VLLM_ASCEND_ENABLE_CASCADE_DECODE` 未置 1 时只打启动标记行就返回——不注入
+  `envs.env_variables`、不 import 宿主模块、不装 fail-open shim、不探测 kernel wheel、
+  不替换 attention/graph 条目。标记行改为
+  `cascade plugin loaded (gate=0, graph_gate=0, kernel_wheel=not-probed)`：既不谎报
+  `unavailable`（没探测就说没探测），又保留"插件确实跑过"的判据。契约落
+  `docs/release.md` §6。
+- **query 布局准入**（PR 的第二诉求）：`_use_cascade_attention` 新增两条 fail-closed 守卫——
+  ① 任一请求的 query row ≠ 1（MTP 校验、chunked prefill）即拒；② `speculative_config`
+  非空即拒（k>1 布局既未支持也未标定）。`cascade_runner_patch` 同步新增
+  `_spec_decode_active()`，投机配置下跳过 cascade twin 捕获（标准 FULL 图照常服务）。
+  **这是边界，不是 MTP 支持**；split-batch/dual-pad 的 precheck 早已同样 fail-closed
+  （`planner.precheck_reason` → `speculative_decode_conflict`）。边界说明见根 README
+  「Speculative decoding boundary」。
+- **CPU 门槛**：`pytest -q` **440 passed**（新增 6 例：关闭态零改动、关闭态不探测 wheel、
+  标记行 `not-probed`、多 query 拒绝、投机配置拒绝、twin 捕获跳过；另改写 4 例既有用例以
+  对齐"先置 env 再 load"的真实次序）、`ruff check .` 干净。
+- **登记（未做）**：`ruff format --check .` 存量不过（25 文件，含本轮改的 4 个；`9951e41`
+  上同样不过）⇒ CI 模板原样启用会红，启用前需先做一次纯格式化提交。见
+  `docs/release.md` §7。

@@ -54,9 +54,16 @@ def _reset_env(monkeypatch):
 
 
 def _gate(monkeypatch):
-    """Return the patched (gate, builder_cls, impl_cls) triple."""
+    """Return the patched (gate, builder_cls, impl_cls) triple.
+
+    The gate env must be set BEFORE ``load()``: disabled discovery returns
+    without patching anything (see ``test_disabled_discovery_*``), so the
+    env-off state is re-established after load for the tests that assert it.
+    """
     _reset_env(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     cascade_plugin.load()
+    _reset_env(monkeypatch)
     import vllm_ascend.attention.attention_v1 as attn_mod
 
     return (
@@ -75,10 +82,70 @@ def test_load_is_idempotent_and_sets_patch_markers(monkeypatch) -> None:
     # Repeated load() calls must not stack another wrapper layer.
     build_before = builder_cls.build
     forward_before = impl_cls.forward_fused_infer_attention
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     cascade_plugin.load()
     cascade_plugin.load()
     assert builder_cls.build is build_before
     assert impl_cls.forward_fused_infer_attention is forward_before
+
+
+def test_disabled_discovery_touches_nothing(monkeypatch) -> None:
+    """2026-09-26: an installed-but-disabled package must not mutate the host.
+
+    Contract (PR #5 review): with ``VLLM_ASCEND_ENABLE_CASCADE_DECODE`` unset,
+    ``load()`` reports its state and returns -- no env-var injection, no shim
+    installation, no kernel-wheel import and no attention/graph replacement.
+    """
+    _reset_env(monkeypatch)
+    from vllm_ascend import envs as envs_mod
+
+    # Start from a pristine host surface: an earlier test may have loaded the
+    # plugin WITH the gate on, which installs the entries (and is a different
+    # call path than the one under test).
+    injected_before = set(envs_mod.env_variables)
+    for key in ENV_KEYS:
+        monkeypatch.delitem(envs_mod.env_variables, key, raising=False)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("disabled discovery mutated the host")
+
+    for name in (
+        "_inject_env_vars",
+        "_install_policy_factory_stub",
+        "_install_spec_decode_stub",
+        "_install_ngram_proposer_stub",
+        "_probe_kernel_wheel",
+    ):
+        monkeypatch.setattr(cascade_plugin, name, forbidden)
+
+    cascade_plugin._reset_fail_open_for_tests()
+    cascade_plugin.load()
+
+    # No env surface was added (the entries are the plugin's only host-side
+    # declaration), and the marker still proves load() ran.
+    for key in ENV_KEYS:
+        assert key not in envs_mod.env_variables, key
+    assert cascade_plugin._startup_marker_logged is True
+    assert injected_before >= set(ENV_KEYS)
+
+
+def test_disabled_discovery_reports_not_probed_wheel(monkeypatch, caplog) -> None:
+    """The marker must not claim "unavailable" for a wheel it never probed."""
+    import logging
+
+    _reset_env(monkeypatch)
+    cascade_plugin._reset_fail_open_for_tests()
+    with caplog.at_level(logging.INFO):
+        cascade_plugin.load()
+    markers = [
+        r.getMessage()
+        for r in caplog.records
+        if "cascade plugin loaded (" in r.getMessage()
+    ]
+    assert markers, "the disabled load() must still log the startup marker"
+    assert markers[-1].endswith(
+        "gate=0, graph_gate=0, kernel_wheel=not-probed)"
+    ), markers[-1]
 
 
 def _host_module_snapshot():
@@ -269,6 +336,52 @@ def test_gate_stays_closed_below_thresholds(monkeypatch) -> None:
     )
     # prefix 100 < 8192 and 4 reqs < 32 -> gate must stay closed.
     assert gate(None, **kwargs) is False
+
+
+def _qualifying(**overrides):
+    """A batch that clears every threshold (prefix 8192, 64 single-row reqs)."""
+    kwargs = dict(
+        common_prefix_len=8192,
+        query_lens=[1] * 64,
+        num_query_heads=8,
+        num_kv_heads=1,
+        use_alibi=False,
+        use_sliding_window=False,
+        use_local_attention=False,
+        num_sms=0,
+        dcp_world_size=1,
+    )
+    kwargs.update(overrides)
+    return kwargs
+
+
+def test_gate_rejects_multi_query_batches(monkeypatch) -> None:
+    """MTP verification and chunked prefill feed >1 query row per request.
+
+    The two-stage path flattens the shared prefix once and re-derives the
+    per-request suffix from the query-row count, so those batches must stay on
+    native attention (2026-09-26 admission guard).
+    """
+    gate, _, _ = _gate(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
+    for query_lens in ([3] * 32, [1] * 31 + [2], [0] * 32):
+        assert gate(None, **_qualifying(query_lens=query_lens)) is False
+
+
+def test_gate_rejects_speculative_configs(monkeypatch) -> None:
+    """Any speculative decoding config fails closed until MTP is supported."""
+    gate, _, _ = _gate(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
+    builder = types.SimpleNamespace(
+        vllm_config=types.SimpleNamespace(speculative_config=object())
+    )
+    assert gate(builder, **_qualifying()) is False
+    # No speculative config -> the guard is transparent (wheel is installed
+    # on this host, so the qualifying batch is admitted).
+    plain = types.SimpleNamespace(
+        vllm_config=types.SimpleNamespace(speculative_config=None)
+    )
+    assert gate(plain, **_qualifying()) is True
 
 
 def test_strict_overrides_enable(monkeypatch, caplog) -> None:

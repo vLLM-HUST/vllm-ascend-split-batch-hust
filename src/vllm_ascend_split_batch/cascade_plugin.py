@@ -53,6 +53,10 @@ _EXTRA_CTX = None
 # path); it must never raise out of load() or break the host import chain.
 _KERNEL_WHEEL_OK = False
 _KERNEL_WHEEL_REASON = "load() not called yet"
+# True once load() actually probed the wheel.  Disabled discovery does not
+# probe (that would import the kernel wheel into a host process that asked for
+# nothing), so the startup marker reports "not-probed" instead of "unavailable".
+_KERNEL_WHEEL_PROBED = False
 _HAS_LSE_MERGE_OP = False
 _HAS_FA_FP32_STAGE1_OP = False
 _wheel_warning_logged = False
@@ -74,6 +78,8 @@ def _probe_kernel_wheel() -> tuple[bool, str]:
     time; every cascade call site is guarded on this probe (see
     ``_use_cascade_attention`` and the graph runner patch).
     """
+    global _KERNEL_WHEEL_PROBED
+    _KERNEL_WHEEL_PROBED = True
     try:
         _import_kernel_module()
     except Exception as exc:
@@ -86,6 +92,28 @@ def _probe_kernel_wheel() -> tuple[bool, str]:
     if missing:
         return False, "torch.ops.npu unregistered: " + ", ".join(missing)
     return True, ""
+
+
+def _cascade_gate_env() -> bool:
+    """The master gate read straight from the environment.
+
+    ``load()`` consults this BEFORE injecting anything, so an installed but
+    disabled package can report its state and return without touching the host
+    process (contract in ``docs/release.md`` §6).  Values that are not a
+    valid integer read as off, mirroring the injected lambda's domain.
+    """
+    raw = os.getenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "0")
+    try:
+        return bool(int(raw))
+    except ValueError:
+        return raw == "1"
+
+
+def _wheel_state() -> str:
+    """Marker field: never report "unavailable" for a wheel we did not probe."""
+    if not _KERNEL_WHEEL_PROBED:
+        return "not-probed"
+    return "ok" if _KERNEL_WHEEL_OK else "unavailable"
 
 
 def kernel_wheel_available() -> bool:
@@ -114,10 +142,11 @@ def _warn_wheel_missing() -> None:
 
 
 def _reset_fail_open_for_tests() -> None:
-    """Clear the once-only warning state (unit tests only)."""
-    global _wheel_warning_logged, _startup_marker_logged
+    """Clear the once-only warning/probe state (unit tests only)."""
+    global _wheel_warning_logged, _startup_marker_logged, _KERNEL_WHEEL_PROBED
     _wheel_warning_logged = False
     _startup_marker_logged = False
+    _KERNEL_WHEEL_PROBED = False
 
 
 def _startup_logger():
@@ -146,9 +175,9 @@ def _log_startup_marker() -> None:
         return
     _startup_logger().info(
         "cascade plugin loaded (gate=%d, graph_gate=%d, kernel_wheel=%s)",
-        1 if envs_mod.VLLM_ASCEND_ENABLE_CASCADE_DECODE else 0,
+        1 if _cascade_gate_env() else 0,
         1 if _graph_plugin_enabled() else 0,
-        "ok" if _KERNEL_WHEEL_OK else "unavailable",
+        _wheel_state(),
     )
     _startup_marker_logged = True
 
@@ -203,6 +232,24 @@ def _use_cascade_attention(
     # returned False before reaching this check.
     if not _KERNEL_WHEEL_OK:
         _warn_wheel_missing()
+        return False
+    # Query-shape admission (2026-09-26): the two-stage implementation treats
+    # one query row as one request -- stage 1 flattens the shared prefix once
+    # and stage 2 derives the per-request suffix from
+    # ``seq_lens_list[:num_tokens]`` -- so any batch with more than one query
+    # row per request (MTP verification, chunked prefill) would lose the
+    # intra-request causal mask and mis-count the shapes.  Keep those on
+    # native attention; the planner's dual-pad precheck fails closed the same
+    # way (``planner.precheck_reason`` -> "speculative_decode_conflict").
+    if any(int(length) != 1 for length in query_lens):
+        return False
+    # Speculative decoding in general stays fail-closed: the query layout is
+    # unsupported and unmeasured for k > 1 drafts.  See README
+    # "Speculative decoding boundary".
+    spec_config = getattr(
+        getattr(self, "vllm_config", None), "speculative_config", None
+    )
+    if spec_config is not None:
         return False
     # Mirror the official vllm core gate: cascade attention is disabled under
     # ANY microbatching (enable_dbo OR ubatch_size > 1).  vllm-ascend's own
@@ -651,9 +698,21 @@ def load():
     ``VLLM_ASCEND_ENABLE_CASCADE_DECODE=1``, so the patched methods are no-ops
     in the default (off) configuration.  Graph-mode cascade additionally
     requires ``VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1``.
+
+    Disabled discovery is side-effect free (2026-09-26): with the master gate
+    unset this returns right after the startup marker.  It does NOT inject
+    ``vllm_ascend.envs.env_variables`` entries, import host modules, install
+    fail-open shims or replace the attention/graph entries -- an installed but
+    disabled package must change nothing in the host process.  The marker
+    still proves ``load()`` ran, which is the only way to tell "plugin loaded
+    and defaulted off" from "plugin never loaded" in a serve log.
     """
     global attn_mod, _EXTRA_CTX, _HAS_LSE_MERGE_OP, _HAS_FA_FP32_STAGE1_OP
     global _KERNEL_WHEEL_OK, _KERNEL_WHEEL_REASON
+
+    if not _cascade_gate_env():
+        _log_startup_marker()
+        return
 
     ok, reason = _probe_kernel_wheel()
     _KERNEL_WHEEL_OK = ok
