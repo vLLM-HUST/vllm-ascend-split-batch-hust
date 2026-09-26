@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
 
-import tomllib
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover -- Python 3.10 (CI matrix leg)
+    import tomli as tomllib  # type: ignore[no-redef]
+
 from vllm_hust_ext.manifest import activation_blocker, load_manifest
 
 import vllm_ascend_split_batch

@@ -17,6 +17,9 @@ on:
 jobs:
   package:
     strategy:
+      # Report every leg: with fail-fast the first red cancels the others and
+      # hides whether they would have passed (seen on run #2, py3.14 cancelled).
+      fail-fast: false
       matrix:
         python: ["3.10", "3.12", "3.14"]
     runs-on: ubuntu-latest

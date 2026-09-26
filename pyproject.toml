@@ -15,7 +15,14 @@ dependencies = []
 # CCE op wheel (fa_fp32_stage1 / lse_merge), Tier-1 fp32 tier; not on PyPI --
 # install with --find-links pointing at the kernel repo output/ (see README).
 kernels = ["ascend-kernel==2026.3.9"]
-test = ["pytest>=8", "ruff>=0.12", "vllm-hust-ext==0.2.0.dev0"]
+test = [
+    "pytest>=8",
+    "ruff>=0.12",
+    "vllm-hust-ext==0.2.0.dev0",
+    # stdlib tomllib landed in 3.11; the manifest tests read pyproject.toml on
+    # every matrix leg (3.10 included), so pin the backport there.
+    "tomli>=2; python_version < '3.11'",
+]
 
 [project.entry-points."vllm_hust.extension_bundles"]
 "org.vllm-hust.split-batch-full-graph" = "vllm_ascend_split_batch"
