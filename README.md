@@ -80,6 +80,15 @@ Verified evidence (Qwen2.5-Coder-14B-Instruct, 910B2, CANN 9.0.1):
 - no fail-open events during the verified runs;
 - `pytest -q` + `ruff check .` green.
 
+The full evidence set travels with this repository: see
+[docs/evidence/cascade/README.md](docs/evidence/cascade/README.md) for the
+per-section reports (`section2-correctness.md`, `section3-performance.md`,
+`section4-active-enablement.md`), the reproduction scripts, the raw result
+JSONs and the sha256 manifest (including the list of large sweep logs left in
+the development workspace). Read its §1 before quoting any number: the Coder
+model is a **performance stand-in** and must not be compared with the real
+`Qwen2.5-14B-Instruct` on behavior.
+
 ## fi_sampling plugin (default-off, evidence-only)
 
 Entry point: `vllm.general_plugins` ->
