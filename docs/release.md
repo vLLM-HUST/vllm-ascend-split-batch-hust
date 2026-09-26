@@ -36,6 +36,38 @@
 | 验证环境 | Python 3.12.14 / torch 2.13.0+cpu / torch_npu 2.13.0rc1 / CANN 9.1.0 (`/usr/local/ascend91`) / 910B2 |
 | 验证证据 | `extension check` → compatible;§3 启用验证(`knowledge/evidence/cascade/section4-active-enablement.md`);正确性 `section2-correctness.md`(真模型 6/64);历史域(0.23.0rc1 / CANN 9.0.1,已退役)留档于 `EVIDENCE.md` 与 c3-legacy 产物 |
 
+### 0.2 点钉到底是什么,以及它拦住的是哪条路(2026-09-26)
+
+**点钉的字符串是可以解开的**:`==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`
+= git tag `v0.25.1rc1+hust.20260903.4`(→ commit `4e57439e`,2026-09-03)
++ **距该 tag 125 个提交** + commit `74f0c0a27`(2026-09-08)。实测
+`git describe --tags 74f0c0a27` = `v0.25.1rc1+hust.20260903.4-125-g74f0c0a27`。
+⇒ 版本号由 **git 状态**决定,不是机器指纹:**任何人在公开仓里 fetch 到那个 tag、checkout
+`74f0c0a27`、完整(非 shallow)构建,就会得到同一个版本串**。所以它是
+**锁 revision,不是锁机器**;但现实是组织仓 main 已前进到 `fbe4911bb5`(2026-09-25),
+**默认装出来的都不在这个钉子里**。
+
+**它只拦 `vllm-hust-ext run`,不拦安装与 enable**:
+
+| 路径 | 版本判定 | 依据 |
+|---|---|---|
+| `extension enable <id>` | **不看**版本 | `extension-manager/src/vllm_hust_ext/cli.py:150` 只查 `activation_blocker` |
+| `vllm-hust-ext run -- vllm serve …` | **看**;不匹配即拒启 | `cli.py:264`:`INCOMPATIBLE` → `refusing to launch incompatible extension` |
+| 自己给 `vllm serve` 传 env(README 的 env 表) | **不经过管理器**,因此无此判定(属未验证域) | `vllm.general_plugins` 入口与 manifest 无关 |
+
+**管理器有一条"操作者自述"通道**(实测):`configure --file` 里的 `host_version`
+会**替代**自动探测(`providers/base.py:83`)⇒ 声明成钉子的值,`run` 就会放行。
+**但这是自述,不是证据** —— 等于操作者自己认下"我在未验证宿主上跑"。本仓**不会**
+把这种声明写进 manifest 当兼容性结论;要用由使用者自行决定并自负其责。
+
+**要真正扩大受众,只有两条路**:
+
+1. **在目标 build 上重核再放宽**(正路):按 §4 清单在装着目标 vllm-ascend 的机器上逐项验证,
+   然后改 `host.version_range`、发新版本(`AGENTS.md` 禁止写 `>=0`)。该核验属"环境核验",
+   按工作区分工归测试机(本机只有 `74f0c0a27` 一个宿主)。
+2. **让消费方固定到已验证的宿主 revision**:即 checkout `74f0c0a27` 自行构建 ——
+   可复现但代价明显(旧提交 + 完整历史 + CANN 配齐),只适合"就要这一份"的场景。
+
 ## 1. 版本与构建
 
 - 版本在 `pyproject.toml` 与 manifest `extension_version` 两处出现,
