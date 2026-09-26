@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vllm-ascend-split-batch"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "vllm-ascend-split-batch inert vLLM-HUST contract descriptor"
 readme = "README.md"
 requires-python = ">=3.10"

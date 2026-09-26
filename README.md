@@ -154,7 +154,7 @@ default-off semantics are unchanged. Validated pairing:
 
 | plugin | kernel wheel | torch_npu | CANN |
 |---|---|---|---|
-| `0.1.0.dev0` | `ascend-kernel==2026.3.9` | `2.10.0.post2` | `9.0.1` |
+| `0.1.0` | `ascend-kernel==2026.3.9` | `2.10.0.post2` | `9.0.1` |
 
 The wheel is built in the kernel repo (`cascade-merge-op`, git), not
 published to PyPI:
