@@ -679,6 +679,18 @@ build 上重核并留档,该工作属"环境核验",按工作区分工归测试�
   `pip install "vllm-ascend-split-batch==0.1.1[test]"` 仍然失败,别把 README 的新写法套到 0.1.1 上。
 - **判据(发新版时验)**:干净 venv 里 `pip install "vllm-ascend-split-batch[test]"` 直接可解析,
   不需要先装任何别的东西;随后按 README 补 git 安装再跑 `pytest -q`。
+- **判据的提前验证(2026-09-26,正/负对照,不是发布)**:在 `/tmp` 的仓库副本里只把版本号腾到
+  `0.1.2`,构建 wheel 后用**干净 venv** 解析(`--find-links` 指该产物 + 华为云索引):
+
+  | 组 | 构建的元数据 | 干净 venv 的 `pip install --dry-run '...[test]'` |
+  |---|---|---|
+  | 正向 | `test` extra 无该钉(本次改动) | ✅ `Would install … vllm-ascend-split-batch-0.1.2`,exit 0 |
+  | 反向 | 把 `vllm-hust-ext==0.2.0.dev0` 加回去 | ❌ `ERROR: No matching distribution found for vllm-hust-ext==0.2.0.dev0; extra == "test"`,exit 1 |
+
+  ⇒ 判据本身有判别力,且改动方向正确;**但 `0.1.2` 只是为了腾版本号做的本地实验,未构建进仓库、
+  未发布**。真正的判据确认仍需等下一次实际发版(那时 PyPI 上的元数据才变)。
+  ⚠️ 负面控制必须在**见不到 `vllm-hust-ext` 的环境**里跑:在开发环境(已 editable 装该包)里
+  反向组会因 `Requirement already satisfied` 而**假绿**(实测)。
 
 **发布附件的字节口径(2026-09-26 自纠)**:GitHub Release 的附件必须是**PyPI 上那一批字节**
 (由 `publish.yml` 在 runner 上构建,带 PEP 740 attestation),不能在本地用 `python -m hatchling build`
