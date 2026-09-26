@@ -142,8 +142,12 @@ def install() -> bool:
 
         def forward_chunked(self, x):
             out = chunked_mlp_forward(
-                self.gate_up_proj, self.act_fn, self.down_proj, x,
-                chunks_k=k, min_tokens_thr=thr,
+                self.gate_up_proj,
+                self.act_fn,
+                self.down_proj,
+                x,
+                chunks_k=k,
+                min_tokens_thr=thr,
             )
             return orig(self, x) if out is None else out
 

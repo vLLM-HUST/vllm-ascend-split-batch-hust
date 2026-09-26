@@ -104,9 +104,7 @@ def _gate():
 
 
 def _wheel_warnings(caplog):
-    return [
-        r for r in caplog.records if WARNING_FRAGMENT in r.getMessage()
-    ]
+    return [r for r in caplog.records if WARNING_FRAGMENT in r.getMessage()]
 
 
 # ----------------------------------------------------------------- probe()
@@ -122,9 +120,7 @@ def test_probe_reports_missing_wheel(monkeypatch) -> None:
 
 def test_probe_reports_unregistered_ops(monkeypatch) -> None:
     fake_module = types.ModuleType("ascend_kernel")
-    monkeypatch.setattr(
-        cascade_plugin, "_import_kernel_module", lambda: fake_module
-    )
+    monkeypatch.setattr(cascade_plugin, "_import_kernel_module", lambda: fake_module)
     # Wheel "installed" but torch.ops registration failed: no cascade ops.
     monkeypatch.setattr(torch.ops, "npu", types.SimpleNamespace())
     ok, reason = cascade_plugin._probe_kernel_wheel()
@@ -143,9 +139,7 @@ def test_probe_succeeds_on_healthy_host() -> None:
 # ----------------------------------------------------------------- load()
 
 
-def test_load_with_missing_wheel_warns_once_and_disables(
-    monkeypatch, caplog
-) -> None:
+def test_load_with_missing_wheel_warns_once_and_disables(monkeypatch, caplog) -> None:
     _reset_env(monkeypatch)
     _poison_import(monkeypatch)
     monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
@@ -161,9 +155,7 @@ def test_load_with_missing_wheel_warns_once_and_disables(
 def test_load_reports_registration_failure_reason(monkeypatch, caplog) -> None:
     _reset_env(monkeypatch)
     fake_module = types.ModuleType("ascend_kernel")
-    monkeypatch.setattr(
-        cascade_plugin, "_import_kernel_module", lambda: fake_module
-    )
+    monkeypatch.setattr(cascade_plugin, "_import_kernel_module", lambda: fake_module)
     monkeypatch.setattr(torch.ops, "npu", types.SimpleNamespace())
     monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     with caplog.at_level(logging.WARNING):
@@ -199,9 +191,7 @@ def test_gate_closed_when_wheel_missing_despite_enable(monkeypatch) -> None:
     assert gate(None, **_QUALIFYING_KWARGS) is False
 
 
-def test_gate_default_off_stays_silent_shape_without_wheel(
-    monkeypatch, caplog
-) -> None:
+def test_gate_default_off_stays_silent_shape_without_wheel(monkeypatch, caplog) -> None:
     _reset_env(monkeypatch)
     _poison_import(monkeypatch)
     monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
@@ -241,12 +231,8 @@ def test_wheel_warning_logged_once_across_paths(monkeypatch, caplog) -> None:
 # ------------------------------------------------- graph runner patch side
 
 
-def test_runner_wheel_gate_blocks_capture_scheduling(
-    monkeypatch, caplog
-) -> None:
-    runner_patch = pytest.importorskip(
-        "vllm_ascend_split_batch.cascade_runner_patch"
-    )
+def test_runner_wheel_gate_blocks_capture_scheduling(monkeypatch, caplog) -> None:
+    runner_patch = pytest.importorskip("vllm_ascend_split_batch.cascade_runner_patch")
     monkeypatch.setattr(cascade_plugin, "_KERNEL_WHEEL_OK", False)
     cascade_plugin._reset_fail_open_for_tests()
     with caplog.at_level(logging.WARNING):
@@ -264,9 +250,7 @@ def test_spec_decode_skips_the_twin_capture(monkeypatch) -> None:
     The cascade twin admits one query row per request only, so capture
     scheduling must skip those runners (mirrors the dispatch gate guard).
     """
-    runner_patch = pytest.importorskip(
-        "vllm_ascend_split_batch.cascade_runner_patch"
-    )
+    runner_patch = pytest.importorskip("vllm_ascend_split_batch.cascade_runner_patch")
 
     def _runner(spec_config):
         return types.SimpleNamespace(

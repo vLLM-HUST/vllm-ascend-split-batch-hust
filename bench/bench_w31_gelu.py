@@ -121,7 +121,7 @@ def main() -> int:
     native = _native_callable()
     rows: list[dict] = []
 
-    header = (f"{'B':>5} {'op':<38} {'us':>8} {'vs native':>10} {'vs floor':>9}")
+    header = f"{'B':>5} {'op':<38} {'us':>8} {'vs native':>10} {'vs floor':>9}"
     print(header)
     print("-" * len(header))
 
@@ -138,9 +138,7 @@ def main() -> int:
 
         schemes: list[tuple[str, Callable[[], object]]] = []
         if native is not None:
-            schemes.append(
-                ("native_chain(fp32_cast+gelu+mul)", lambda x=x: native(x))
-            )
+            schemes.append(("native_chain(fp32_cast+gelu+mul)", lambda x=x: native(x)))
         schemes.append(
             (
                 "npu_gelu+mul(fp32 two-step)",

@@ -395,9 +395,7 @@ def test_npu_below_threshold_returns_none(n: int, thr: int) -> None:
     gu, dn = _RowLocalLinear(gu_w), _RowLocalLinear(dn_w)
     x = _make_x(n, hidden, torch.float16, seed=0)
 
-    out = chunked_mlp_forward(
-        gu, SiluAndMul(), dn, x, chunks_k=2, min_tokens_thr=thr
-    )
+    out = chunked_mlp_forward(gu, SiluAndMul(), dn, x, chunks_k=2, min_tokens_thr=thr)
     assert out is None, f"n={n} thr={thr}: expected None, got {type(out)}"
     # the fallback must not have touched the device at all
     assert gu.calls == 0 and dn.calls == 0

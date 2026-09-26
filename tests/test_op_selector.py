@@ -190,8 +190,9 @@ def test_raising_predicate_is_treated_as_inapplicable(selector):
     def boom(ctx):
         raise RuntimeError("predicate bug")
 
-    selector.register(os_mod.OpCandidate(name="broken", is_applicable=boom,
-                                         cost_hint=0.0))
+    selector.register(
+        os_mod.OpCandidate(name="broken", is_applicable=boom, cost_hint=0.0)
+    )
     selector.register(_cand("kernel", cost=1.0))
     assert selector.select(CTX) == "kernel"
 

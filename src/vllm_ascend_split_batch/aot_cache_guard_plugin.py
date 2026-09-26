@@ -119,9 +119,7 @@ def install() -> bool:
 
         compiler_cls = getattr(ci, "AscendCompiler", None)
         orig = (
-            getattr(compiler_cls, "compile", None)
-            if compiler_cls is not None
-            else None
+            getattr(compiler_cls, "compile", None) if compiler_cls is not None else None
         )
         if not callable(orig):
             _record("drift", "AscendCompiler.compile missing")

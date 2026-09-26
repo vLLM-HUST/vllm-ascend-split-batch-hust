@@ -336,8 +336,7 @@ def test_enabled_logs_the_demask_evidence_once(monkeypatch, caplog):
         for _ in range(3):
             fake.npu_fused_infer_attention_score.out(**_production_decode_kwargs())
     applied = [
-        r for r in caplog.records
-        if "FIA decode de-mask applied" in r.getMessage()
+        r for r in caplog.records if "FIA decode de-mask applied" in r.getMessage()
     ]
     assert len(applied) == 1
     assert plug.stats()["applied"] == 3
@@ -356,9 +355,7 @@ def test_missing_out_overload_fails_closed(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING):
         assert plug.load() is False
     assert isinstance(fake.npu_fused_infer_attention_score, _NoOut)
-    assert any(
-        "refused" in r.getMessage() for r in caplog.records
-    )
+    assert any("refused" in r.getMessage() for r in caplog.records)
 
 
 def test_missing_symbol_fails_closed(monkeypatch, caplog):
@@ -393,9 +390,10 @@ def test_planner_failure_fails_open(monkeypatch, caplog):
         plug, "_dispatch", lambda kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
     )
     with caplog.at_level(logging.WARNING):
-        assert fake.npu_fused_infer_attention_score.out(
-            **_production_decode_kwargs()
-        ) == "out"
+        assert (
+            fake.npu_fused_infer_attention_score.out(**_production_decode_kwargs())
+            == "out"
+        )
     # the ORIGINAL kwargs reached the op, i.e. stock behaviour
     assert op.out_calls[0]["atten_mask"] is not None
     assert op.out_calls[0]["sparse_mode"] == 3
@@ -414,9 +412,9 @@ def test_raising_planner_is_contained(monkeypatch):
 
     monkeypatch.setattr(plug, "plan_transform", _boom)
     # _dispatch itself is defensive too: no exception may escape the op proxy
-    assert fake.npu_fused_infer_attention_score.out(
-        **_production_decode_kwargs()
-    ) == "out"
+    assert (
+        fake.npu_fused_infer_attention_score.out(**_production_decode_kwargs()) == "out"
+    )
     monkeypatch.setattr(plug, "plan_transform", real_plan)
     assert op.out_calls[0]["atten_mask"] is not None
 

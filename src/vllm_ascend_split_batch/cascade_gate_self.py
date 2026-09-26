@@ -92,32 +92,53 @@ def _run_cell_full(spec, num_tokens, shared, k_pool4, v_pool4, q2d):
     suffix = spec["suffix"]
     total = shared + suffix
     nblk_total = (total + block_size - 1) // block_size
-    q = q2d[:num_tokens].unsqueeze(2)                      # [N,H,1,D]
-    k = k_pool4[:nblk_total * num_tokens].transpose(1, 2).contiguous()
-    v = v_pool4[:nblk_total * num_tokens].transpose(1, 2).contiguous()
-    bt = torch.stack([
-        torch.arange(nblk_total, dtype=torch.int32, device="npu")
-        + r * nblk_total for r in range(num_tokens)])
+    q = q2d[:num_tokens].unsqueeze(2)  # [N,H,1,D]
+    k = k_pool4[: nblk_total * num_tokens].transpose(1, 2).contiguous()
+    v = v_pool4[: nblk_total * num_tokens].transpose(1, 2).contiguous()
+    bt = torch.stack(
+        [
+            torch.arange(nblk_total, dtype=torch.int32, device="npu") + r * nblk_total
+            for r in range(num_tokens)
+        ]
+    )
     ws = torch_npu._npu_fused_infer_attention_score_v2_get_max_workspace(
-        query=q, key=k, value=v, block_table=bt,
-        input_layout="BNSD", block_size=block_size,
+        query=q,
+        key=k,
+        value=v,
+        block_table=bt,
+        input_layout="BNSD",
+        block_size=block_size,
         actual_seq_qlen=[1] * num_tokens,
         actual_seq_kvlen=[total] * num_tokens,
         num_key_value_heads=spec["num_kv_heads"],
-        softmax_scale=spec["scale"], num_query_heads=spec["num_heads"])
-    out = torch.empty(num_tokens, spec["num_heads"], 1, spec["head_size"],
-                      dtype=torch.bfloat16, device="npu")
+        softmax_scale=spec["scale"],
+        num_query_heads=spec["num_heads"],
+    )
+    out = torch.empty(
+        num_tokens,
+        spec["num_heads"],
+        1,
+        spec["head_size"],
+        dtype=torch.bfloat16,
+        device="npu",
+    )
 
     def call():
         torch_npu.npu_fused_infer_attention_score_v2.out(
-            query=q, key=k, value=v, block_table=bt,
-            input_layout="BNSD", block_size=block_size,
+            query=q,
+            key=k,
+            value=v,
+            block_table=bt,
+            input_layout="BNSD",
+            block_size=block_size,
             actual_seq_qlen=[1] * num_tokens,
             actual_seq_kvlen=[total] * num_tokens,
             num_key_value_heads=spec["num_kv_heads"],
-            num_query_heads=spec["num_heads"], softmax_scale=spec["scale"],
-            workspace=ws, out=(out, torch.empty(1, dtype=torch.bfloat16,
-                                                device="npu")))
+            num_query_heads=spec["num_heads"],
+            softmax_scale=spec["scale"],
+            workspace=ws,
+            out=(out, torch.empty(1, dtype=torch.bfloat16, device="npu")),
+        )
         return out
 
     return _time_fn(call)
@@ -136,24 +157,47 @@ def _run_cell_cascade(spec, num_tokens, shared, k_pool4, v_pool4, q2d):
     suffix_blocks = (suffix + block_size - 1) // block_size
     suf_lens = [suffix] * num_tokens
     bt_s1 = torch.arange(sb1, dtype=torch.int32, device="npu").unsqueeze(0)
-    bt_suf = torch.stack([
-        torch.arange(suffix_blocks, dtype=torch.int32, device="npu")
-        + r * suffix_blocks for r in range(num_tokens)])
+    bt_suf = torch.stack(
+        [
+            torch.arange(suffix_blocks, dtype=torch.int32, device="npu")
+            + r * suffix_blocks
+            for r in range(num_tokens)
+        ]
+    )
     suf_off = sb1 * num_tokens
     q = q2d[:num_tokens]
     q3d = q.unsqueeze(2)
-    k_suf = k_pool4[suf_off:suf_off + suffix_blocks * num_tokens] \
-        .transpose(1, 2).contiguous()
-    v_suf = v_pool4[suf_off:suf_off + suffix_blocks * num_tokens] \
-        .transpose(1, 2).contiguous()
-    o2 = torch.empty(num_tokens, spec["num_heads"], 1, spec["head_size"],
-                     dtype=torch.bfloat16, device="npu")
+    k_suf = (
+        k_pool4[suf_off : suf_off + suffix_blocks * num_tokens]
+        .transpose(1, 2)
+        .contiguous()
+    )
+    v_suf = (
+        v_pool4[suf_off : suf_off + suffix_blocks * num_tokens]
+        .transpose(1, 2)
+        .contiguous()
+    )
+    o2 = torch.empty(
+        num_tokens,
+        spec["num_heads"],
+        1,
+        spec["head_size"],
+        dtype=torch.bfloat16,
+        device="npu",
+    )
     ws_s2 = torch_npu._npu_fused_infer_attention_score_v2_get_max_workspace(
-        query=q3d, key=k_suf, value=v_suf, block_table=bt_suf,
-        input_layout="BNSD", block_size=block_size,
-        actual_seq_qlen=[1] * num_tokens, actual_seq_kvlen=suf_lens,
+        query=q3d,
+        key=k_suf,
+        value=v_suf,
+        block_table=bt_suf,
+        input_layout="BNSD",
+        block_size=block_size,
+        actual_seq_qlen=[1] * num_tokens,
+        actual_seq_kvlen=suf_lens,
         num_key_value_heads=spec["num_kv_heads"],
-        softmax_scale=spec["scale"], num_query_heads=spec["num_heads"])
+        softmax_scale=spec["scale"],
+        num_query_heads=spec["num_heads"],
+    )
 
     def call():
         s1_out, s1_lse = torch.ops.npu.fa_fp32_stage1(
@@ -163,20 +207,32 @@ def _run_cell_cascade(spec, num_tokens, shared, k_pool4, v_pool4, q2d):
             bt_s1,
             torch.tensor([num_tokens], dtype=torch.int64, device="npu"),
             torch.tensor([shared], dtype=torch.int64, device="npu"),
-            num_tokens)
+            num_tokens,
+        )
         torch_npu.npu_fused_infer_attention_score_v2.out(
-            query=q3d, key=k_suf, value=v_suf, block_table=bt_suf,
-            input_layout="BNSD", block_size=block_size,
-            actual_seq_qlen=[1] * num_tokens, actual_seq_kvlen=suf_lens,
+            query=q3d,
+            key=k_suf,
+            value=v_suf,
+            block_table=bt_suf,
+            input_layout="BNSD",
+            block_size=block_size,
+            actual_seq_qlen=[1] * num_tokens,
+            actual_seq_kvlen=suf_lens,
             num_key_value_heads=spec["num_kv_heads"],
-            num_query_heads=spec["num_heads"], softmax_scale=spec["scale"],
-            workspace=ws_s2, out=(o2, torch.empty(1, dtype=torch.bfloat16,
-                                                  device="npu")))
+            num_query_heads=spec["num_heads"],
+            softmax_scale=spec["scale"],
+            workspace=ws_s2,
+            out=(o2, torch.empty(1, dtype=torch.bfloat16, device="npu")),
+        )
         torch.ops.npu.lse_merge(
-            s1_out, o2.reshape(num_tokens, spec["num_heads"],
-                               spec["head_size"]),
-            s1_lse, torch.empty(num_tokens * spec["num_heads"],
-                                dtype=torch.float32, device="npu"), 2)
+            s1_out,
+            o2.reshape(num_tokens, spec["num_heads"], spec["head_size"]),
+            s1_lse,
+            torch.empty(
+                num_tokens * spec["num_heads"], dtype=torch.float32, device="npu"
+            ),
+            2,
+        )
 
     return _time_fn(call)
 
@@ -194,22 +250,30 @@ def main() -> int:
 
     # Largest pool first-fit: allocate once for the biggest cell and slice
     # per cell (per-request disjoint rows always index within the pool).
-    max_nblk = max((shared + suffix + block_size - 1) // block_size
-                   for shared in grid)
+    max_nblk = max((shared + suffix + block_size - 1) // block_size for shared in grid)
     max_blocks = max_nblk * max(buckets)
     free, _total = torch.npu.mem_get_info()
     need = 2 * max_blocks * block_size * spec["head_size"] * 2
     if need * 1.25 > free:
         # Not enough HBM next to the serving engine: give up (gate neutral).
         with open(out_path, "w") as fh:
-            json.dump({"error": f"insufficient HBM: need {need / 2**30:.1f}GiB, "
-                                f"free {free / 2**30:.1f}GiB"}, fh)
+            json.dump(
+                {
+                    "error": f"insufficient HBM: need {need / 2**30:.1f}GiB, "
+                    f"free {free / 2**30:.1f}GiB"
+                },
+                fh,
+            )
         return 0
 
     results = {}
     try:
-        q = (torch.randn(max(buckets), spec["num_heads"], spec["head_size"],
-                         device="npu") * 0.5).to(torch.bfloat16)
+        q = (
+            torch.randn(
+                max(buckets), spec["num_heads"], spec["head_size"], device="npu"
+            )
+            * 0.5
+        ).to(torch.bfloat16)
     except Exception as exc:
         with open(out_path, "w") as fh:
             json.dump({"error": f"q allocation failed: {exc!r}"}, fh)
@@ -225,12 +289,26 @@ def main() -> int:
             key = f"{num_tokens}:{shared}"
             try:
                 nblk_total = (shared + suffix + block_size - 1) // block_size
-                k4 = (torch.randn(nblk_total * num_tokens, block_size,
-                                  spec["num_kv_heads"], spec["head_size"],
-                                  device="npu") * 0.5).to(torch.bfloat16)
-                v4 = (torch.randn(nblk_total * num_tokens, block_size,
-                                  spec["num_kv_heads"], spec["head_size"],
-                                  device="npu") * 0.5).to(torch.bfloat16)
+                k4 = (
+                    torch.randn(
+                        nblk_total * num_tokens,
+                        block_size,
+                        spec["num_kv_heads"],
+                        spec["head_size"],
+                        device="npu",
+                    )
+                    * 0.5
+                ).to(torch.bfloat16)
+                v4 = (
+                    torch.randn(
+                        nblk_total * num_tokens,
+                        block_size,
+                        spec["num_kv_heads"],
+                        spec["head_size"],
+                        device="npu",
+                    )
+                    * 0.5
+                ).to(torch.bfloat16)
                 t_full = _run_cell_full(spec, num_tokens, shared, k4, v4, q)
                 t_cas = _run_cell_cascade(spec, num_tokens, shared, k4, v4, q)
                 results[key] = {"full": t_full, "cascade": t_cas}

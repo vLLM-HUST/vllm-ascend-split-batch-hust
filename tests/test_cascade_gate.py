@@ -42,20 +42,22 @@ def test_disabled_env_defaults_to_cascade_on(monkeypatch):
 
 
 def test_bucket_lookup_ceils_to_smallest_geq():
-    gate._decisions.update({
-        (32, 4096): False,   # measured loss corner
-        (32, 8192): True,
-        (64, 4096): True,
-    })
+    gate._decisions.update(
+        {
+            (32, 4096): False,  # measured loss corner
+            (32, 8192): True,
+            (64, 4096): True,
+        }
+    )
     gate._prefix_buckets[:] = [4096, 8192]
     # block-aligned runtime shared lengths sit just below the nominal bucket
     # (e.g. 7936 = 62 blocks for a ~8.2k shared prefix): ceil keeps them in
     # the larger bucket whose measured verdict reflects their true regime.
-    assert gate.decision_for(4096, 32) is False   # exactly the 4096 bucket
-    assert gate.decision_for(4300, 32) is True    # ceils past 4096 -> 8192
-    assert gate.decision_for(7936, 32) is True    # ceils to the 8192 bucket
-    assert gate.decision_for(9500, 32) is True    # 8192 bucket
-    assert gate.decision_for(4300, 64) is True    # benched on
+    assert gate.decision_for(4096, 32) is False  # exactly the 4096 bucket
+    assert gate.decision_for(4300, 32) is True  # ceils past 4096 -> 8192
+    assert gate.decision_for(7936, 32) is True  # ceils to the 8192 bucket
+    assert gate.decision_for(9500, 32) is True  # 8192 bucket
+    assert gate.decision_for(4300, 64) is True  # benched on
     assert gate.decision_for(16384, 128) is True  # unbenched -> default on
 
 
@@ -93,8 +95,8 @@ def test_override_wins_over_table(monkeypatch):
 
 def test_prefix_grid():
     assert gate._prefix_grid(4096, 20480) == [4096, 8192, 16384]
-    assert gate._prefix_grid(8192, 16384) == [8192]   # 2x capped by half len
-    assert gate._prefix_grid(20480, 20480) == []      # min prefix too large
+    assert gate._prefix_grid(8192, 16384) == [8192]  # 2x capped by half len
+    assert gate._prefix_grid(20480, 20480) == []  # min prefix too large
 
 
 class TestBucketedMarginVerdict:
@@ -108,14 +110,14 @@ class TestBucketedMarginVerdict:
     def test_verdict_small_prefix_guard_flips_recorded_loss_cell(self):
         # (64,4096) r1/r2: bench +10.7%/+10.8%, e2e loss -> under the 25%
         # small-prefix margin both recorded cells must read OFF.
-        assert gate._verdict(734, 822, 4096) is False   # r1
-        assert gate._verdict(737, 826, 4096) is False   # r2
+        assert gate._verdict(734, 822, 4096) is False  # r1
+        assert gate._verdict(737, 826, 4096) is False  # r2
 
     def test_verdict_keeps_recorded_8k_win(self):
         # (32,8192) r1/r2: bench +10.9%/+10.1%, e2e win; the fix must not
         # touch the 8k bucket verdicts.
-        assert gate._verdict(688, 772, 8192) is True    # r1
-        assert gate._verdict(698, 776, 8192) is True    # r2
+        assert gate._verdict(688, 772, 8192) is True  # r1
+        assert gate._verdict(698, 776, 8192) is True  # r2
 
     def test_verdict_4k_large_margin_still_on(self):
         # (128,4096) r+: bench +48.2%; a 4k bucket with ample margin stays on.

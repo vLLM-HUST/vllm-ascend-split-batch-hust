@@ -365,9 +365,7 @@ def main() -> int:
     # -- ratios (per batch, per mode) -----------------------------------------
     for batch in (*BATCHES, None):
         for mode in ("eager", "graph"):
-            grp = [
-                r for r in rows if r["batch"] == batch and r["mode"] == mode
-            ]
+            grp = [r for r in rows if r["batch"] == batch and r["mode"] == mode]
             if not grp:
                 continue
             native = next(
@@ -449,9 +447,7 @@ def main() -> int:
         )
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(
-        json.dumps(rows + capture_rows + [triton_record], indent=2)
-    )
+    OUT.write_text(json.dumps(rows + capture_rows + [triton_record], indent=2))
     print(f"\nwrote {OUT}")
     return 0
 

@@ -193,14 +193,10 @@ def test_capture_wrapper_accepts_every_keyword_the_host_call_site_passes():
     assert any("profiler" in names for names in call_keywords), (
         "host no longer passes profiler= ; re-audit D1 and this guard"
     )
-    wrapper = runner_patch._make_capture_cudagraphs_wrapper(
-        _SigRecorder(_CAPTURE_SIG)
-    )
+    wrapper = runner_patch._make_capture_cudagraphs_wrapper(_SigRecorder(_CAPTURE_SIG))
     for names in call_keywords:
         recorder = _SigRecorder(_CAPTURE_SIG)
-        wrapper_under_test = runner_patch._make_capture_cudagraphs_wrapper(
-            recorder
-        )
+        wrapper_under_test = runner_patch._make_capture_cudagraphs_wrapper(recorder)
         assert wrapper_under_test(None, **{name: None for name in names}) is None
         assert recorder.signature_errors == []
         assert len(recorder.calls) == 1
@@ -233,9 +229,7 @@ def test_capture_wrapper_failure_falls_back_to_orig(monkeypatch, caplog):
 def test_model_forward_pre_update_passes_only_accepted_params(monkeypatch):
     """D2: the pre-model update must not pass the dropped ``positions``."""
     monkeypatch.setattr(runner_patch, "_step_is_cascade", lambda: True)
-    monkeypatch.setattr(
-        forward_context_mod, "get_forward_context", _FakeForwardContext
-    )
+    monkeypatch.setattr(forward_context_mod, "get_forward_context", _FakeForwardContext)
     update_recorder = _SigRecorder(_UPDATE_FULL_SIG, prepend_self=True)
     fake_runner = _FakeRunner(update_recorder)
     orig = _SigRecorder(_MODEL_FORWARD_ASCEND_SIG, result="model-output")
@@ -296,12 +290,8 @@ def test_model_forward_wrapper_supports_host_keyword_only_convention(
 def test_model_forward_failure_falls_back_to_orig(monkeypatch, caplog):
     """Fail-open: a failing pre-model update must still run the model."""
     monkeypatch.setattr(runner_patch, "_step_is_cascade", lambda: True)
-    monkeypatch.setattr(
-        forward_context_mod, "get_forward_context", _FakeForwardContext
-    )
-    fake_runner = _FakeRunner(
-        _SigRecorder(_UPDATE_FULL_SIG, prepend_self=True)
-    )
+    monkeypatch.setattr(forward_context_mod, "get_forward_context", _FakeForwardContext)
+    fake_runner = _FakeRunner(_SigRecorder(_UPDATE_FULL_SIG, prepend_self=True))
     fake_runner._update_full_graph_params_if_needed = _boom
     orig = _SigRecorder(_MODEL_FORWARD_ASCEND_SIG, result="model-output")
     wrapper = runner_patch._make_model_forward_wrapper(orig)
@@ -374,9 +364,7 @@ def test_update_graph_params_failure_falls_back_to_orig(monkeypatch, caplog):
         assert wrapper(*args, draft_attn_metadatas=None) == "updated"
     assert recorder.signature_errors == []
     assert recorder.calls == [(args, {"draft_attn_metadatas": None})]
-    assert (
-        len(_warned(caplog, "delegating to the original update pass")) == 1
-    )
+    assert len(_warned(caplog, "delegating to the original update pass")) == 1
 
 
 # ------------------------------------------------------- dispatch re-dispatch
@@ -393,8 +381,7 @@ def test_determine_batch_wrapper_accepts_host_keyword_only_convention():
         recorder = _SigRecorder(_DETERMINE_SIG, result="descriptor")
         wrapper = runner_patch._make_determine_batch_wrapper(recorder)
         kwargs = {
-            name: (False if name == "use_cascade_attn" else None)
-            for name in names
+            name: (False if name == "use_cascade_attn" else None) for name in names
         }
         assert wrapper(object(), **kwargs) == "descriptor"
         assert recorder.signature_errors == []
@@ -476,12 +463,8 @@ def test_wrappers_forward_to_orig_via_star_args():
         for name in names:
             assert name in found, f"{name} wrapper not found in {path}"
             for func in found[name]:
-                assert func.args.vararg is not None, (
-                    f"{name} must accept *args"
-                )
-                assert func.args.kwarg is not None, (
-                    f"{name} must accept **kwargs"
-                )
+                assert func.args.vararg is not None, f"{name} must accept *args"
+                assert func.args.kwarg is not None, f"{name} must accept **kwargs"
                 orig_calls = [
                     node
                     for node in ast.walk(func)
@@ -489,12 +472,12 @@ def test_wrappers_forward_to_orig_via_star_args():
                 ]
                 assert orig_calls, f"{name} never forwards to orig"
                 for call in orig_calls:
-                    assert any(
-                        isinstance(arg, ast.Starred) for arg in call.args
-                    ), f"{name} forwards positional args to orig"
-                    assert any(
-                        kw.arg is None for kw in call.keywords
-                    ), f"{name} does not forward **kwargs to orig"
+                    assert any(isinstance(arg, ast.Starred) for arg in call.args), (
+                        f"{name} forwards positional args to orig"
+                    )
+                    assert any(kw.arg is None for kw in call.keywords), (
+                        f"{name} does not forward **kwargs to orig"
+                    )
 
 
 def test_host_method_forwards_use_keywords_not_positions():
@@ -524,6 +507,5 @@ def test_host_method_forwards_use_keywords_not_positions():
                     f"{func_name} passes host args by position to {callee}"
                 )
                 assert any(kw.arg for kw in call.keywords), (
-                    f"{func_name} does not forward host args by name to "
-                    f"{callee}"
+                    f"{func_name} does not forward host args by name to {callee}"
                 )

@@ -119,12 +119,12 @@ class OpCandidate:
 @dataclass(frozen=True)
 class OpDecision:
     op: str
-    chosen: str        # 选中的实现名
-    source: str        # env/override/bench/static/cost_hint/fallback
-    reason: str        # 机读标签: override / bench_table / static_table / min_cost_hint /
-                       #            override_unknown:<n> / override_inapplicable:<n> /
-                       #            no_applicable_candidate
-    context: OpContext # 当时的载荷快照
+    chosen: str  # 选中的实现名
+    source: str  # env/override/bench/static/cost_hint/fallback
+    reason: str  # 机读标签: override / bench_table / static_table / min_cost_hint /
+    #            override_unknown:<n> / override_inapplicable:<n> /
+    #            no_applicable_candidate
+    context: OpContext  # 当时的载荷快照
 ```
 
 `OpSelector` 内部 `deque(maxlen=audit_capacity)`(默认 `AUDIT_CAPACITY = 256`),
@@ -135,20 +135,28 @@ class OpDecision:
 
 ```python
 class OpSelector:
-    def __init__(self, op: str, default: str = DEFAULT_HOST, *,
-                 key_fn: Callable[[OpContext], Hashable] | None = None,
-                 audit_capacity: int = AUDIT_CAPACITY,
-                 enabled_env: str = ENV_ENABLE,
-                 global_env: str = ENV_OVERRIDE) -> None: ...
+    def __init__(
+        self,
+        op: str,
+        default: str = DEFAULT_HOST,
+        *,
+        key_fn: Callable[[OpContext], Hashable] | None = None,
+        audit_capacity: int = AUDIT_CAPACITY,
+        enabled_env: str = ENV_ENABLE,
+        global_env: str = ENV_OVERRIDE,
+    ) -> None: ...
 
     # 元信息 / 门控
-    op: str                              # property
-    default: str                         # property,fail-open 落点
-    def enabled(self) -> bool: ...       # 读 VLLM_ASCEND_OP_DISPATCH == "1",默认 off
+    op: str  # property
+    default: str  # property,fail-open 落点
+
+    def enabled(self) -> bool: ...  # 读 VLLM_ASCEND_OP_DISPATCH == "1",默认 off
     def override_env_var(self) -> str: ...  # 本 op 的 env 覆盖名
 
     # 注册表
-    def register(self, candidate: OpCandidate, *, replace: bool = False) -> OpCandidate: ...
+    def register(
+        self, candidate: OpCandidate, *, replace: bool = False
+    ) -> OpCandidate: ...
     def unregister(self, name: str) -> None: ...
     def get(self, name: str) -> OpCandidate | None: ...
     def names(self) -> tuple[str, ...]: ...
@@ -162,11 +170,11 @@ class OpSelector:
     def clear_bench_table(self) -> None: ...
     def override(self, name: str) -> None: ...
     def clear_override(self) -> None: ...
-    def active_override(self) -> tuple[str | None, str]: ...   # (name, source)
+    def active_override(self) -> tuple[str | None, str]: ...  # (name, source)
 
     # 选择
-    def select(self, ctx) -> str: ...                # 选名(记审计)
-    def explain(self, ctx) -> OpDecision: ...        # 全记录(记审计)
+    def select(self, ctx) -> str: ...  # 选名(记审计)
+    def explain(self, ctx) -> OpDecision: ...  # 全记录(记审计)
 
     # 审计
     def audit(self) -> tuple[OpDecision, ...]: ...
@@ -175,8 +183,9 @@ class OpSelector:
     def clear_audit(self) -> None: ...
     def reset_for_tests(self) -> None: ...
 
+
 # 进程级注册表(未来接线的扩展点)
-def get_selector(op, default=DEFAULT_HOST, **kwargs) -> OpSelector: ...   # 每 op 单例
+def get_selector(op, default=DEFAULT_HOST, **kwargs) -> OpSelector: ...  # 每 op 单例
 def registered_selectors() -> tuple[str, ...]: ...
 def reset_registry_for_tests() -> None: ...
 ```

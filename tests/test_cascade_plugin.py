@@ -143,9 +143,9 @@ def test_disabled_discovery_reports_not_probed_wheel(monkeypatch, caplog) -> Non
         if "cascade plugin loaded (" in r.getMessage()
     ]
     assert markers, "the disabled load() must still log the startup marker"
-    assert markers[-1].endswith(
-        "gate=0, graph_gate=0, kernel_wheel=not-probed)"
-    ), markers[-1]
+    assert markers[-1].endswith("gate=0, graph_gate=0, kernel_wheel=not-probed)"), (
+        markers[-1]
+    )
 
 
 def _host_module_snapshot():
@@ -258,9 +258,7 @@ def test_startup_marker_logged_once_per_process(monkeypatch) -> None:
         cascade_plugin.load()
         cascade_plugin.load()
         markers = [
-            rec
-            for rec in records
-            if "cascade plugin loaded (" in rec.getMessage()
+            rec for rec in records if "cascade plugin loaded (" in rec.getMessage()
         ]
         assert len(markers) == 1
         assert "gate=0" in markers[0].getMessage()
@@ -273,9 +271,7 @@ def test_startup_marker_logged_once_per_process(monkeypatch) -> None:
         monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_GRAPH", "1")
         cascade_plugin.load()
         markers = [
-            rec
-            for rec in records
-            if "cascade plugin loaded (" in rec.getMessage()
+            rec for rec in records if "cascade plugin loaded (" in rec.getMessage()
         ]
         assert "gate=1, graph_gate=1" in markers[-1].getMessage()
     finally:
@@ -528,25 +524,27 @@ def _fake_graph_params(block_tables, seq_lens, shared_len):
     """One-layer stand-in for the graph-pool param tables."""
     log = []
     entry = (
-        "cascade",          # 0 kind
-        "q", "k", "v",      # 1-3 tensors (opaque)
-        "out",              # 4
-        "o1", "l1",         # 5-6 stage-1 outs
-        "o2", "l2",         # 7-8 stage-2 outs
-        128,                # 9 block_size
-        1,                  # 10 num_kv_heads
-        8,                  # 11 num_heads
-        0.1,                # 12 scale
-        64,                 # 13 num_tokens_cap
-        "L0",               # 14 layer_name
+        "cascade",  # 0 kind
+        "q",
+        "k",
+        "v",  # 1-3 tensors (opaque)
+        "out",  # 4
+        "o1",
+        "l1",  # 5-6 stage-1 outs
+        "o2",
+        "l2",  # 7-8 stage-2 outs
+        128,  # 9 block_size
+        1,  # 10 num_kv_heads
+        8,  # 11 num_heads
+        0.1,  # 12 scale
+        64,  # 13 num_tokens_cap
+        "L0",  # 14 layer_name
     )
 
     class GP:
         attn_params = {("cascade", 64): [entry]}
         handles = {("cascade", 64): [object(), object()]}
-        events = {
-            ("cascade", 64): [_FakeEvent(log), _FakeEvent(log)]
-        }
+        events = {("cascade", 64): [_FakeEvent(log), _FakeEvent(log)]}
         workspaces = {("cascade", 64): ("ws1", "ws2")}
 
     meta = types.SimpleNamespace(
@@ -628,9 +626,7 @@ def test_update_skips_stage1_rebind_when_stable(
     gp = _stage1_update_env(monkeypatch)
     calls = _patch_npu_graph_apis
     bt = torch.zeros((4, 8), dtype=torch.int32)
-    graph_params, fwd_ctx, log = _fake_graph_params(
-        bt, [300, 260, 260, 260], 256
-    )
+    graph_params, fwd_ctx, log = _fake_graph_params(bt, [300, 260, 260, 260], 256)
 
     # Step 1: cold cache -> full re-bind (1 stage-1 + 1 stage-2 per layer),
     # both in-graph events recorded.
@@ -656,18 +652,14 @@ def test_update_skips_stage1_rebind_when_stable(
     assert calls == {"stage1": 3, "stage2": 4}
 
 
-def test_update_never_skips_when_knob_off(
-    monkeypatch, _patch_npu_graph_apis
-) -> None:
+def test_update_never_skips_when_knob_off(monkeypatch, _patch_npu_graph_apis) -> None:
     import torch
 
     gp = _stage1_update_env(monkeypatch)
     monkeypatch.setenv("VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE", "0")
     calls = _patch_npu_graph_apis
     bt = torch.zeros((4, 8), dtype=torch.int32)
-    graph_params, fwd_ctx, log = _fake_graph_params(
-        bt, [300, 260, 260, 260], 256
-    )
+    graph_params, fwd_ctx, log = _fake_graph_params(bt, [300, 260, 260, 260], 256)
 
     gp._update_cascade_graph_params(None, fwd_ctx, graph_params, 64)
     gp._update_cascade_graph_params(None, fwd_ctx, graph_params, 64)

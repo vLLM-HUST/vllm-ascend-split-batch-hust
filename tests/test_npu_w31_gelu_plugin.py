@@ -130,9 +130,7 @@ def test_kernel_eligible_guards() -> None:
     assert not plugin._kernel_eligible(cpu_bf16, bf16)
     assert plugin._kernel_eligible(cpu_bf16, bf16, "cpu")
     # a realistic GeGLU row is eligible
-    assert plugin._kernel_eligible(
-        torch.empty(4, 2 * 13824, dtype=bf16), bf16, "cpu"
-    )
+    assert plugin._kernel_eligible(torch.empty(4, 2 * 13824, dtype=bf16), bf16, "cpu")
 
 
 class _FakeGeluAndMul:
@@ -158,6 +156,7 @@ def test_make_forward_delegates_on_ineligible_inputs() -> None:
     assert fwd(op, torch.empty(8, dtype=torch.bfloat16)) == "orig"
     # odd last dim -> not eligible
     assert fwd(op, torch.empty(4, 7, dtype=torch.bfloat16)) == "orig"
+
     # npu tensor on a host-only fake -> device gate fails
     class _Dev:
         type = "npu"
@@ -191,9 +190,7 @@ def test_make_forward_kernel_failure_is_fail_open(caplog) -> None:
     def boom(x):
         raise RuntimeError("kernel boom")
 
-    fwd = plugin._make_forward(
-        lambda self, x: "orig", boom, torch.bfloat16, "cpu"
-    )
+    fwd = plugin._make_forward(lambda self, x: "orig", boom, torch.bfloat16, "cpu")
     with caplog.at_level("WARNING"):
         out = fwd(_FakeGeluAndMul("none"), torch.empty(4, 8, dtype=torch.bfloat16))
     assert out == "orig"
@@ -230,9 +227,7 @@ def _activation_module():
 def _rand_input(tokens: int, inter: int, seed: int = 0):
     torch = pytest.importorskip("torch")
     g = torch.Generator().manual_seed(seed)
-    return torch.randn(
-        tokens, 2 * inter, generator=g, dtype=torch.float32
-    ).bfloat16()
+    return torch.randn(tokens, 2 * inter, generator=g, dtype=torch.float32).bfloat16()
 
 
 def _bf16_check(actual, golden, note: str = "") -> dict:

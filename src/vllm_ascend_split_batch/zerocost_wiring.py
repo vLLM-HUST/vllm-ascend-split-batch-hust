@@ -253,9 +253,7 @@ def _tally_tokens(query) -> None:
 def _tally_state(attn_metadata) -> None:
     """Count one ① call by its attention state (diagnostics, never raises)."""
     state = getattr(attn_metadata, "attn_state", None)
-    name = getattr(state, "name", None) or (
-        "none" if state is None else repr(state)
-    )
+    name = getattr(state, "name", None) or ("none" if state is None else repr(state))
     _state_hist[name] = _state_hist.get(name, 0) + 1
 
 
@@ -323,8 +321,9 @@ def snapshot() -> str | None:
     except Exception:  # noqa: BLE001 -- diagnostics only
         logger.exception("zero-cost wiring: stats snapshot failed")
         return None
-    logger.warning("zero-cost wiring: stats snapshot #%d written to %s",
-                   _snapshot_seq, target)
+    logger.warning(
+        "zero-cost wiring: stats snapshot #%d written to %s", _snapshot_seq, target
+    )
     return target
 
 
@@ -584,9 +583,9 @@ def _host_func(func, host_file: str):
             "zero-cost wiring: %s is wrapped by another plugin (%s); patching "
             "the host body it delegates to.",
             getattr(func, "__qualname__", func),
-            getattr(getattr(func, "__code__", None), "co_filename", "?").rsplit(
-                "/", 1
-            )[-1],
+            getattr(getattr(func, "__code__", None), "co_filename", "?").rsplit("/", 1)[
+                -1
+            ],
         )
     return host
 

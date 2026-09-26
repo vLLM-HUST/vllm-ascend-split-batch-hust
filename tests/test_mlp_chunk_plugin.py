@@ -100,9 +100,7 @@ class _Linear:
         gen: torch.Generator,
         dtype: torch.dtype = torch.float32,
     ):
-        self.weight = torch.randn(
-            in_features, out_features, generator=gen, dtype=dtype
-        )
+        self.weight = torch.randn(in_features, out_features, generator=gen, dtype=dtype)
 
     def __call__(self, x: torch.Tensor):
         return x @ self.weight, None
@@ -209,9 +207,7 @@ def test_below_threshold_returns_none(n: int, thr: int) -> None:
     gate_up, act, down = _mlp()
     x = torch.randn(n, 8)
     assert (
-        chunked_mlp_forward(
-            gate_up, act, down, x, chunks_k=2, min_tokens_thr=thr
-        )
+        chunked_mlp_forward(gate_up, act, down, x, chunks_k=2, min_tokens_thr=thr)
         is None
     )
 
@@ -232,15 +228,11 @@ def test_just_below_threshold_is_none_but_at_threshold_chunks() -> None:
     below = torch.randn(255, 8)
     at = torch.randn(256, 8)
     assert (
-        chunked_mlp_forward(
-            gate_up, act, down, below, chunks_k=2, min_tokens_thr=256
-        )
+        chunked_mlp_forward(gate_up, act, down, below, chunks_k=2, min_tokens_thr=256)
         is None
     )
     assert (
-        chunked_mlp_forward(
-            gate_up, act, down, at, chunks_k=2, min_tokens_thr=256
-        )
+        chunked_mlp_forward(gate_up, act, down, at, chunks_k=2, min_tokens_thr=256)
         is not None
     )
 
@@ -254,10 +246,7 @@ def test_chunks_k_below_two_returns_none(k: int) -> None:
     gate_up, act, down = _mlp()
     x = torch.randn(16, 8)
     assert (
-        chunked_mlp_forward(
-            gate_up, act, down, x, chunks_k=k, min_tokens_thr=0
-        )
-        is None
+        chunked_mlp_forward(gate_up, act, down, x, chunks_k=k, min_tokens_thr=0) is None
     )
 
 
@@ -325,9 +314,7 @@ def test_chunked_matches_unchunked_bitwise(n: int, k: int) -> None:
     """Splitting along tokens must be numerically transparent (incl. n%k != 0)."""
     gate_up, act, down = _mlp()
     x = torch.randn(n, 8)
-    out = chunked_mlp_forward(
-        gate_up, act, down, x, chunks_k=k, min_tokens_thr=0
-    )
+    out = chunked_mlp_forward(gate_up, act, down, x, chunks_k=k, min_tokens_thr=0)
     assert out is not None
     assert torch.equal(out, _reference(gate_up, act, down, x))
 
