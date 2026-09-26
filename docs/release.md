@@ -153,7 +153,7 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
   `::test_disabled_discovery_reports_not_probed_wheel`、
   `tests/test_cascade_fail_open.py::test_disabled_load_does_not_probe_the_wheel`。
 
-## 8. CI(包级检查)与两套运行面
+## 7. CI(包级检查)与两套运行面
 
 **工作流**:`.github/workflows/ci.yml`(2026-09-26 由 `.github/extension-ci.yml` 迁入——
 GitHub 只执行 `workflows/` 下的文件,原模板位置从未生效,API 侧
@@ -185,7 +185,7 @@ CI runner 是**干净 ubuntu**(只装 `.[test]`),没有 torch / torch_npu / vllm
   `pytest -q -m "not host_tree"`(2026-09-26 实测:97 passed / 11 skipped /
   14 deselected / 0 failed)。
 
-## 9. 未做(登记,勿误读为已具备)
+## 8. 未做(登记,勿误读为已具备)
 
 - ~~`ruff format --check .` 不通过~~ **已修**:`59e8dfa` 做了纯格式化提交,
   格式与两套运行面自那以后全绿。
@@ -193,7 +193,7 @@ CI runner 是**干净 ubuntu**(只装 `.[test]`),没有 torch / torch_npu / vllm
   vendor 件**,ruff 通过 `extend-exclude` 排除(重排会破坏 `MANIFEST.sha256`)。
 - 发布渠道未启用:证据齐后走 `uv publish` 到 pypi 或内部索引(见 §1)。
 
-## 10. 停止与卸载(可执行命令)
+## 9. 停止与卸载(可执行命令)
 
 **能力维度**(只关某一项,不动其它):
 
@@ -231,12 +231,11 @@ vllm-hust-ext extension list                      # 该 bundle 应不再出现
 
 - `uninstall()` 语义在 carrier 级已有测试覆盖(`fia_demask` / `rope_fix` 的
   `test_uninstall_*`:注销注册表项、还原被替换的方法),但**服务级**的
-  "卸载后启动服务仍正常"尚未作为验收项跑过 → 见 §9 类未做项。
+  "卸载后启动服务仍正常"尚未作为验收项跑过 → 见 §8 类未做项。
 - 回退到旧版本:重装对应 wheel 即可;本仓不做数据库/权重迁移,卸载无残留状态
   (唯一状态是 `~/.config/vllm-hust-ext/config.json` 里的 enable 位)。
 
-## 11. 安装/配置/启动(最小可用路径)
-
+## 10. 安装/配置/启动(最小可用路径)
 ```bash
 python -m pip install -e ".[test]"                                  # 开发安装
 pip install ".[kernels]" --find-links /path/to/ascend-kernel/output  # 可选:kernel wheel(cascade 必需)
@@ -249,3 +248,38 @@ vllm-hust-ext run -- vllm serve <model> --max-model-len 4096 --port 8000 \
 - cascade 生效还需:共享前缀 ≥ 8192、并发 ≥ 32、无投机解码(见
   [support-matrix.md](support-matrix.md) §2);否则服务正常但 cascade 不接管。
 - 停止/卸载见 §10。
+
+## 11. 发布到 PyPI 的就绪度(2026-09-26 调研)
+
+**路径是什么**:公共 **pypi.org**(TestPyPI 为强制前置门禁)。依据组织文档
+`vLLM-HUST/vllm-hust-docs` 的 `operations/extension-author-guide.md` §16(先
+`twine upload --repository testpypi`,在 TestPyPI 上跑完
+discovery/enable/dry-run/disable/forget/uninstall 门禁后才 `twine upload` 正式 PyPI)与
+`operations/bidkv-packaging-and-release-guide.md` §9/§10(`uv publish --check-url
+https://pypi.org/simple`;用户按项目名 `uv pip install bidkv` 安装)。
+本机 `pip.conf` 里的华为云地址是**下载镜像**(读),**不能**作为上传目标。
+
+**两个包的准备度不同**:
+
+| 项 | 插件包 `vllm-ascend-split-batch` | 算子包 `ascend-kernel` |
+|---|---|---|
+| 项目名占用 | 未占用(PyPI/TestPyPI 均 404) | 未占用(404) |
+| 产物 | `py3-none-any`、125 KB、含 4 个 manifest + 12 个 entry point | `cp312-cp312-linux_aarch64`、211–285 KB、含 2 个自研 `.so` |
+| 可转发性 | 纯 Python,无顾虑 | 轮内只有自研 so + 纯 py;**CANN/torch 一律运行时链接、未打包**(kernel README 链接纪律) |
+| 验证面 | CI 三腿全绿(ruff/format + pytest + build + `extension inspect`) | 有 S1/精度/图冒烟套件与四元组纪律 |
+| **阻塞** | ① §16 的 TestPyPI 往返门禁未跑;② 无 PyPI token | ① **仓在个人账号** `Raing5Days/vllm-hust-cascade-kernel`,不在 org;② **仓内无任何 LICENSE**(GitHub `license=None`,find 全盘无 LICENSE/NOTICE),而轮内 METADATA 却写 `License: BSD 3 License` —— 二者矛盾,公开分发缺许可依据;③ 平台轮子强绑定 CANN 9.1.0 + torch_npu 2.13.0rc1 + cp312 + aarch64 + soc 910B2(`CATLASS_ARCH=2201`);④ 版本号与内容错位(装机 lib = `2026.9.16` 构建的 `ca8de2d7…`,而 `pip show` 仍报 `2026.3.9`),PyPI **不可覆盖**同版本文件 ⇒ 发布前必须按 md5 定版 |
+
+**发布前的最小检查单**(两包通用,补 §5):
+
+- [ ] 版本号三处一致(`pyproject.toml` / manifest `extension_version` / changelog),且**不复用**已发布的版本号
+- [ ] `twine check dist/*` 通过;wheel 内容审计(算子包按链接纪律只允许自研 so + 纯 py)
+- [ ] 算子包:先补 LICENSE 并修 METADATA 的 license 字段;确认仓归属(个人 → org)与兼容域声明
+- [ ] 插件包:TestPyPI 上跑完整生命周期门禁(§16),再发正式 PyPI
+- [ ] 仓库/命令历史/CI YAML 中无 token;README 写明兼容范围、实验状态、启停与回滚
+- [ ] 发布 commit 已 tag,工作树干净
+
+**它为什么能解掉"管理器仍拒绝启用"**:管理器的判定只取决于**已安装包里的那份 manifest**
+(facts.txt §J 的对照实验);公开发布后,"重装到当前状态"对任何人都是一条 `pip install`,
+不需要我们手工给轮子。
+
+**现状**:两包均**未发布**;本仓默认不发布(对外且不可逆),需要时按上面的检查单执行。
