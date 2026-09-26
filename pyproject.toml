@@ -46,7 +46,16 @@ line-length = 88
 # PROVENANCE.md): byte-identical copies are required for provenance diffing, so
 # they keep the source package's formatting (its own repo lints with ruff's
 # default line length, not 88).
-extend-exclude = ["src/vllm_ascend_split_batch/fi_sampling"]
+#
+# docs/evidence/** is the same kind of material: the cascade evidence snapshot
+# (reports, reproduction scripts, raw logs) is archived verbatim from the
+# development workspace, with only the private-address masking noted in its
+# README. Reformatting it would break the sha256 manifest that ties each file
+# to the original run.
+extend-exclude = [
+    "src/vllm_ascend_split_batch/fi_sampling",
+    "docs/evidence",
+]
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "SIM", "UP"]
