@@ -328,6 +328,19 @@
   **重建等价性实测**：重跑 `./build.sh` 后 `_C.so` / `libascend_kernel.so` 与 `2026.9.16` 轮
   md5 逐字节相同（`add6e6951d253328` / `ca8de2d70fe0504d`）⇒ 只改打包元数据与许可，目标码未变。
 
+## 2026-09-26 0.1.2 已发布（让 `test` extra 摘钉生效）
+
+- **动机**：0.1.1 及以前的 `test` extra 钉着不在任何索引上的 `vllm-hust-ext==0.2.0.dev0`
+  ⇒ 第三方 `pip install "vllm-ascend-split-batch[test]"` 必然失败；PyPI 不可覆盖 ⇒ 只能发新版。
+- **动作**：版本 0.1.1 → 0.1.2（7 处：pyproject / 4 个 manifest / 2 个 `__version__`）→ 合入 `main` →
+  `workflow_dispatch`（`target=pypi`，OIDC Trusted Publishing）→ run `36255715877` 16 步全 success。
+- **判据（本次真的验到了）**：干净 venv 打 `pypi.org/simple`，`pip install "...[test]"` 解析到
+  `vllm-ascend-split-batch-0.1.2`；反向对照 `[test]==0.1.1` 仍报
+  `No matching distribution found for vllm-hust-ext==0.2.0.dev0`。回执见 `docs/release.md` §11.8。
+- **tag/Release**：`v0.1.2`（annotated）；Release 附件 = 从 PyPI 下载的权威字节 + `dist.sha256`。
+- **两条环境事实**：① 华为云镜像**滞后**（发布后 simple 页仍只有 0.1.0/0.1.1），判据必须打 pypi.org；
+  ② 本容器 `github.com:443` 直连仍超时，Release 附件的浏览器下载路径**未实测**（回环走 API 资产端点）。
+
 ## 2026-09-26 续做：把"本机可直接做"的后续项清空（issue #2 §7）
 
 来源：`knowledge/handoffs/HANDOFF-2026-09-26-issue2-open-items.md` §7 的分组清单。本轮做了

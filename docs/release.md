@@ -358,7 +358,7 @@ https://pypi.org/simple`;用户按项目名 `uv pip install bidkv` 安装)。
 | 产物 | `py3-none-any`、125 KB、含 4 个 manifest + 12 个 entry point | `cp312-cp312-linux_aarch64`、211–285 KB、含 2 个自研 `.so` |
 | 可转发性 | 纯 Python,无顾虑 | 轮内只有自研 so + 纯 py;**CANN/torch 一律运行时链接、未打包**(kernel README 链接纪律) |
 | 验证面 | CI 三腿全绿(ruff/format + pytest + build + `extension inspect`) | 有 S1/精度/图冒烟套件与四元组纪律 |
-| **阻塞** | ① §16 的 TestPyPI 往返门禁未跑;② 无 PyPI token | ① **仓在个人账号** `Raing5Days/vllm-hust-cascade-kernel`,不在 org;② **仓内无任何 LICENSE**(GitHub `license=None`,find 全盘无 LICENSE/NOTICE),而轮内 METADATA 却写 `License: BSD 3 License` —— 二者矛盾,公开分发缺许可依据;③ 平台轮子强绑定 CANN 9.1.0 + torch_npu 2.13.0rc1 + cp312 + aarch64 + soc 910B2(`CATLASS_ARCH=2201`);④ 版本号与内容错位(装机 lib = `2026.9.16` 构建的 `ca8de2d7…`,而 `pip show` 仍报 `2026.3.9`),PyPI **不可覆盖**同版本文件 ⇒ 发布前必须按 md5 定版 |
+| **阻塞** | ~~① §16 的 TestPyPI 往返门禁未跑;② 无 PyPI token~~ **已解**(2026-09-26:走 OIDC Trusted Publishing,门禁以正向/反向 + 干净 venv 判据替代,见 §11.8) | ① **仓在个人账号** `Raing5Days/vllm-hust-cascade-kernel`,不在 org;② **仓内无任何 LICENSE**(GitHub `license=None`,find 全盘无 LICENSE/NOTICE),而轮内 METADATA 却写 `License: BSD 3 License` —— 二者矛盾,公开分发缺许可依据;③ 平台轮子强绑定 CANN 9.1.0 + torch_npu 2.13.0rc1 + cp312 + aarch64 + soc 910B2(`CATLASS_ARCH=2201`);④ 版本号与内容错位(装机 lib = `2026.9.16` 构建的 `ca8de2d7…`,而 `pip show` 仍报 `2026.3.9`),PyPI **不可覆盖**同版本文件 ⇒ 发布前必须按 md5 定版 |
 
 **发布前的最小检查单**(两包通用,补 §5):
 
@@ -373,7 +373,11 @@ https://pypi.org/simple`;用户按项目名 `uv pip install bidkv` 安装)。
 (facts.txt §J 的对照实验);公开发布后,"重装到当前状态"对任何人都是一条 `pip install`,
 不需要我们手工给轮子。
 
-**现状**:两包均**未发布**;本仓默认不发布(对外且不可逆),需要时按上面的检查单执行。
+**现状(2026-09-26 更新)**:插件包**已发布** 0.1.0 / 0.1.1 / **0.1.2**(回执见 §11.6–§11.8),
+其"阻塞"两项均已解除(TestPyPI 往返门禁按 §11.7 的实测口径走
+**正向/反向 + 安装判据**替代;token 改用 **Trusted Publishing/OIDC**,无需长期 token)。
+算子包仍**未发布**(改走 GitHub Release 附件,§11.7),其四条阻塞里许可证已补
+(算子仓 `ca5bd9d`),**仓归属仍在个人账号**(handoff 归属-1,未转仓)。
 
 ### 11.1 分发渠道的推荐形态(2026-09-26)
 
@@ -727,3 +731,37 @@ build 上重核并留档,该工作属"环境核验",按工作区分工归测试�
 `ascend-kernel-2026.9.26`(算子轮走 find-links、插件走 PyPI)。
 `expanded_assets` 是 HTML 页,pip 会解析其中的 `<a href>` 指到 `/releases/download/...`,
 机制上等价;边界是"本机网络不允许实测"。
+
+### 11.8 0.1.2 已发布:让 `test` extra 摘钉生效(2026-09-26T16:31Z)
+
+0.1.1 及以前把 `vllm-hust-ext==0.2.0.dev0`(不在任何索引上)钉进 `test` extra ⇒ 第三方
+`pip install "vllm-ascend-split-batch[test]"` 必然失败。PyPI 文件不可覆盖 ⇒ 只能发新版把
+代码侧修复(`f9d6b15`)送出去;本版**只改版本号 + 该钉子**(外加本轮文档/测试改动),无行为变更。
+
+**回执**(全部可复核):
+
+| 项 | 值 |
+|---|---|
+| PyPI | `https://pypi.org/project/vllm-ascend-split-batch/0.1.2/` |
+| 发布 commit | `a703a181846795f2518122ef26c8980e86089cfb`(`main`) |
+| workflow run | `36255715877`(`workflow_dispatch`,`target=pypi`),16 步全 success;含 `twine check`、manifest 校验、**PEP 740 attestations** |
+| wheel | `vllm_ascend_split_batch-0.1.2-py3-none-any.whl` 130047 B<br>`70384d1464b4dfe737055be088577961f33066ceaaabf28f30226b12a37dacc2` |
+| sdist | `vllm_ascend_split_batch-0.1.2.tar.gz` 1303626 B<br>`418c84cc8419f6ea0261295b208fdbb350f06211c07724d7864f14cec735fd6e` |
+| GitHub Release | `v0.1.2`(annotated tag,tag object `a4235fda…` → commit `a703a181…`),附件 = 从 PyPI 下载的权威字节 + `dist.sha256`(`4de64309…`) |
+
+**判据验收(本次真的验到了,不再是"等发版时确认")**:
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 正向 | 干净 venv:`pip install "vllm-ascend-split-batch[test]"`(`--index-url https://pypi.org/simple`) | ✅ `Would install … vllm-ascend-split-batch-0.1.2`;实装后 `version=0.1.2`、8 个 `vllm.general_plugins` + 4 个 `vllm_hust.extension_bundles`、`test` 无 requires |
+| 反向对照 | 同 venv,`…[test]==0.1.1` | ❌ `ERROR: No matching distribution found for vllm-hust-ext==0.2.0.dev0; extra == "test"` ⇒ 判据有判别力 |
+| 附件回环 | 从 Release 逐件下载再核 sha256(走 API 资产端点) | ✅ 三件全一致 |
+
+**过程中发现的两条环境事实(都已实测,不是推断)**:
+
+1. **华为云镜像滞后**:`mirrors.huaweicloud.com/repository/pypi/simple/vllm-ascend-split-batch/`
+   在本版发布后仍**只有 0.1.0/0.1.1**;用该索引装 `[test]` 会得 `ResolutionImpossible`
+   (两个旧版都带坏钉) ⇒ **不能**用镜像结果判断"新版有没有生效",判据必须打 `pypi.org/simple`。
+2. **`github.com:443` 直连在本容器超时**(与 §11.7 记录同根因):Release 附件的浏览器下载路径
+   **仍未实测**;本次回环走 API 资产端点(`/releases/assets/{id}` + `Accept: application/octet-stream`,
+   重定向到 `objects.githubusercontent.com`)完成,字节与 PyPI 一致。
