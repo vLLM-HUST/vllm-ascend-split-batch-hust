@@ -108,6 +108,27 @@ environment/additional_config → 正式 `vllm-hust-ext run -- vllm serve ...`�
 
 ## 4. 宿主升级核对清单
 
+**先跑机械前半程**（2026-09-26 起）：`tools/seam_diff.py` 把下面这份清单的**静态部分**
+（签名 + 调用点 + 结构面）变成可执行判定，而且是纯 AST、**不需要安装宿主**，
+因此可以在只有一份已安装宿主的环境里对拍两棵树：
+
+```bash
+git worktree add --detach /tmp/new-ascend  <待升 vllm-ascend commit>
+git worktree add --detach /tmp/new-core    <待升 vllm-hust commit>
+python3 tools/seam_diff.py <已钉 vllm-ascend 树> /tmp/new-ascend --repo ascend
+python3 tools/seam_diff.py <已钉 vllm-hust 树>   /tmp/new-core   --repo core
+python3 tools/seam_diff.py --selftest      # 判别力自证（tools 没在空跑）
+```
+
+- 退出码 0 = 静态面一致；1 = 有签名/调用点/结构面差异，需逐条处理。
+- 它**只证明静态面**：方法体语义（对象如何被构造、`BatchDescriptor` 如何被填充、
+  aclgraph 变体表在运行时怎么组织）必须靠下面的真机冒烟。
+- 首次对拍的实测结论与原始输出：`docs/evidence/host-drift-2026-09-26.md`
+  （已钉版本 vs 2026-09-25 的 main：vllm-ascend +480 提交、core +991 提交，
+  12 个接缝符号签名全一致；rope-fix 反向守卫对新树 11/11 通过）。
+
+**再逐项核对（人眼 + 真机）**：
+
 `host.version_range` 升级前,逐项核对 monkeypatch/公开面签名(细节见
 HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
 
