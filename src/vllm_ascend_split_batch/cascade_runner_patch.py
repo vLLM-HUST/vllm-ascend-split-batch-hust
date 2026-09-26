@@ -163,6 +163,7 @@ def _patch_capture_scheduling() -> None:
             not getattr(envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", False)
             or not getattr(envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_GRAPH", False)
             or cudagraph_runtime_mode != CUDAGraphMode.FULL
+            or self.vllm_config.speculative_config is not None
             or getattr(self, "use_sparse", False)
             or getattr(self, "use_compress", False)
             or bool(

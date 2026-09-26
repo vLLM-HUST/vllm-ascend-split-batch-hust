@@ -107,6 +107,14 @@ def _use_cascade_attention(
         use_ubatching = False
     if use_ubatching:
         return False
+    # The two-stage implementation treats each query as one request. MTP
+    # verification and prefill have multiple query rows per request; using
+    # this path would lose the suffix causal mask and corrupt shape accounting.
+    if any(int(length) != 1 for length in query_lens):
+        return False
+    config = getattr(self, "vllm_config", None)
+    if getattr(config, "speculative_config", None) is not None:
+        return False
     precision = envs_mod.VLLM_ASCEND_CASCADE_PRECISION
     if precision not in ("bf16", "fp32"):
         logger.error(
@@ -512,6 +520,11 @@ def load():
     requires ``VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1``.
     """
     global attn_mod, _EXTRA_CTX, _HAS_LSE_MERGE_OP, _HAS_FA_FP32_STAGE1_OP
+
+    # Discovery of an installed, disabled package must not replace host
+    # policies, proposers, attention methods or graph dispatch.
+    if os.getenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "0") != "1":
+        return
 
     try:
         import ascend_kernel  # noqa: F401  registers torch.ops.npu.*

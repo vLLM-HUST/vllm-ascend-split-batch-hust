@@ -93,3 +93,12 @@ python -c "import ascend_kernel, torch; assert hasattr(torch.ops.npu, 'fa_fp32_s
 Compat tuple & red lines for the kernel side live in the kernel repo README
 §4-§5. After bumping the kernel wheel: reinstall, then rerun the plugin
 smoke (see [docs/release.md](docs/release.md) §2).
+
+### Speculative decoding boundary
+
+Cascade currently supports one query token per request only. MTP and other
+speculative-decoding configurations retain native attention and skip cascade
+twin capture; multi-query batches are also rejected by the dispatch gate.
+This fallback is not an enabled Cascade performance result. In particular,
+Qwen3.5 Frontier with MTP2 is not yet qualified. Installed but disabled plugin
+discovery does not install host patches.

@@ -65,3 +65,12 @@
    release.md 第 2 节的隔离安装冒烟自动化。
 
 每条动手前:更新本文件状态,证据落到 PR 描述或 `docs/evidence/`(新建)。
+
+## 2026-09-26: Frontier compatibility audit
+
+The Qwen3.5-35B Frontier container imports the plugin with its pinned runtime.
+Audit identified unconditional host mutation on disabled discovery and unsafe
+multi-query/speculative admission. Disabled load now returns before installing
+patches; the dispatch gate and twin-capture gate preserve native execution for
+speculative decoding. This repairs isolation and admission, not MTP support.
+No new Frontier curve is claimed from a native fallback.

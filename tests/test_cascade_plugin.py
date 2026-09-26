@@ -46,7 +46,9 @@ def _reset_env(monkeypatch):
 def _gate(monkeypatch):
     """Return the patched (gate, builder_cls, impl_cls) triple."""
     _reset_env(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     cascade_plugin.load()
+    _reset_env(monkeypatch)
     import vllm_ascend.attention.attention_v1 as attn_mod
 
     return (
@@ -416,3 +418,55 @@ def test_update_never_skips_when_knob_off(
     gp._update_cascade_graph_params(None, fwd_ctx, graph_params, 64)
     assert calls == {"stage1": 2, "stage2": 2}
     assert log.count("record") == 4
+
+
+@pytest.mark.parametrize("query_lens", [[3] * 32, [1] * 31 + [2], [0] * 32])
+def test_multi_query_batches_keep_native_attention(monkeypatch, query_lens):
+    gate, _, _ = _gate(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
+    assert not gate(
+        None,
+        common_prefix_len=8192,
+        query_lens=query_lens,
+        num_query_heads=8,
+        num_kv_heads=1,
+        use_alibi=False,
+        use_sliding_window=False,
+        use_local_attention=False,
+        num_sms=0,
+        dcp_world_size=1,
+    )
+
+
+def test_disabled_discovery_does_not_install_host_patches(monkeypatch):
+    _reset_env(monkeypatch)
+
+    def forbidden():
+        pytest.fail("disabled plugin attempted host mutation")
+
+    monkeypatch.setattr(cascade_plugin, "_inject_env_vars", forbidden)
+    monkeypatch.setattr(cascade_plugin, "_install_policy_factory_stub", forbidden)
+    cascade_plugin.load()
+
+
+def test_mtp_single_query_step_keeps_native_attention(monkeypatch):
+    gate, _, _ = _gate(monkeypatch)
+    monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
+    builder = types.SimpleNamespace(
+        vllm_config=types.SimpleNamespace(
+            parallel_config=types.SimpleNamespace(use_ubatching=False),
+            speculative_config=object(),
+        )
+    )
+    assert not gate(
+        builder,
+        common_prefix_len=8192,
+        query_lens=[1] * 32,
+        num_query_heads=8,
+        num_kv_heads=1,
+        use_alibi=False,
+        use_sliding_window=False,
+        use_local_attention=False,
+        num_sms=0,
+        dcp_world_size=1,
+    )
