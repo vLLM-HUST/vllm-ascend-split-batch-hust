@@ -177,18 +177,23 @@ pytest -q && ruff check .
 vllm-hust-ext PyPI alpha exists yet; install the current source"*). It is the
 org's extension-manager package, maintained in
 [`vLLM-HUST/extension-manager`](https://github.com/vLLM-HUST/extension-manager) —
-this repository only consumes it. Because the released `test` extra pins it,
-install the manager from git **first**, which is exactly what CI and
-`publish.yml` do:
+this repository only consumes it.
+
+- **Installing this repository's extras never needs it.** Since 2026-09-26 the
+  `test` extra no longer pins it, so `pip install "vllm-ascend-split-batch[test]"`
+  resolves on its own. (Released 0.1.0/0.1.1 metadata still carries the pin —
+  `pip install ...==0.1.1[test]` fails with `Could not find a version that
+  satisfies the requirement vllm-hust-ext==0.2.0.dev0`; use the git step below
+  for those versions. PyPI files are immutable, hence the next release.)
+- **Running the manifest tests does need it** (`tests/test_manifest.py` imports
+  `vllm_hust_ext.manifest`). Install the manager from git first, which is exactly
+  what CI and `publish.yml` do:
 
 ```bash
 python -m pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extension-manager.git@main"
-python -m pip install -e ".[test]"   # now resolves
 ```
 
-Without that step `pip install "vllm-ascend-split-batch[test]"` fails with
-`Could not find a version that satisfies the requirement vllm-hust-ext==0.2.0.dev0`
-(measured 2026-09-26). The `kernels` extra is the one end users need, and it is
+The `kernels` extra is the one end users need, and it is
 resolvable (`--find-links` to the kernel release, see "Install" above).
 
 ## Kernel wheel dependency (soft, fail-open)

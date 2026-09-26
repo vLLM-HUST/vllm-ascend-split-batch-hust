@@ -27,7 +27,15 @@ kernels = ["ascend-kernel==2026.9.26"]
 test = [
     "pytest>=8",
     "ruff>=0.12",
-    "vllm-hust-ext==0.2.0.dev0",
+    # NOTE: `vllm-hust-ext` is deliberately NOT pinned here (removed 2026-09-26).
+    # It is the org's extension-manager package and is not on any index, so a
+    # pin in this extra made `pip install "vllm-ascend-split-batch[test]"`
+    # unresolvable (measured: "Could not find a version that satisfies the
+    # requirement vllm-hust-ext==0.2.0.dev0 (from versions: none)"). Install it
+    # from git first, as CI and publish.yml do:
+    #   pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extension-manager.git@main"
+    # Only tests/test_manifest.py consumes it (load_manifest / activation_blocker).
+    #
     # stdlib tomllib landed in 3.11; the manifest tests read pyproject.toml on
     # every matrix leg (3.10 included), so pin the backport there.
     "tomli>=2; python_version < '3.11'",
