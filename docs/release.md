@@ -248,15 +248,30 @@ CI runner 是**干净 ubuntu**(只装 `.[test]`),没有 torch / torch_npu / vllm
   (`test_rope_fix_drift.py` 的模块级 fixture、`test_aot_cache_guard_drift.py` 的
   源文件断言)。CI 里的 `-m "not host_tree"` 是有意的、写在 workflow 里的排除,
   而不是静默跳过。
-- 复现 CI 判定(本机,不装/不卸任何东西):把 `torch`/`torch_npu`/`vllm`/`vllm_ascend`
-  用 meta-path 拦截器屏蔽后重跑
-  `pytest -q -m "not host_tree"`(2026-09-26 实测:97 passed / 11 skipped /
-  14 deselected / 0 failed;**2026-09-26 续做后复测 112 passed / 11 skipped /
-  14 deselected / 0 failed** —— 差值来自本轮新增的 6 例)。
-  拦截器要能覆盖**子进程**,否则只遮住父进程:用 `sitecustomize.py`(Python 启动即
-  import,父子进程同效),不要用 `-p` 插件(不会传给 `subprocess`)。
-  **为什么要测这一遍**:新增的配置面边界测试会起子进程调管理器 CLI,而 CI 上没有
-  `vllm` —— 不在 CI 身份下跑一次,这类测试可能在 CI 首跑时才红。
+- 复现 CI 判定(本机,不装/不卸任何东西):**两种办法,第二种更忠实,建议优先** ——
+  1. meta-path 拦截器:把 `torch`/`torch_npu`/`vllm`/`vllm_ascend` 屏蔽后重跑
+     `pytest -q -m "not host_tree"`。拦截器要能覆盖**子进程**,否则只遮住父进程:
+     用 `sitecustomize.py`(Python 启动即 import,父子进程同效),不要用 `-p` 插件。
+  2. **干净 venv(与 CI 逐步一致)**:`python -m venv /tmp/ci-venv` → 装管理器
+     (本地 clone 或 git)→ `pip install -e ".[test]"` → `pytest -q -m "not host_tree"`。
+     注意拦截器法**不等于**真 CI:宿主包"被屏蔽"与"压根没装"在管理器眼里是**不同 state**
+     (见下),只有 venv 法能重现后者。
+- **`degraded` 是第三种宿主形态(2026-09-26 实测,由 CI 红发现)**:管理器对
+  "**宿主包不存在**"给的是 `['installed','discovered','configured','degraded']`
+  (evidence 逐字 "host version is unavailable; compatibility is unverified"),
+  **不是** `incompatible`;`configured` 仍在。三种形态对照:
+
+  | 宿主 | states |
+  |---|---|
+  | 不存在(CI runner) | `installed, discovered, configured, degraded` |
+  | 存在且命中点钉(`hust`) | `installed, discovered, compatible, configured` |
+  | 存在但不命中点钉(隔离重编的目标 revision) | `installed, discovered, incompatible` |
+
+  教训:`tests/test_extension_config_boundary.py` 首版只写了后两支 ⇒ CI 三腿全红
+  (run `36255078500`,main@`084f299`),补 `degraded` 支后 run `36255434671`(main@`57238b1`)三腿全绿。
+- 复现 CI 判定(2026-09-26 早前口径,同上第 1 法):**2026-09-26 实测 97 passed / 11 skipped /
+  14 deselected / 0 failed;2026-09-26 续做后复测 112 passed / 11 skipped / 14 deselected /
+  0 failed**(差值来自新增的 6 例)。
 - **发布检查单侧已固化**(2026-09-26):`host_tree` 守卫是 CI **唯一不覆盖**的一类,
   故 §5「构建前」把它列为固定步骤(本机跑全量 `pytest -q`),并写明判据与两套运行面的差异。
   自托管 NPU runner job 仍属基础设施决策,本轮不动(登记于 §8)。
