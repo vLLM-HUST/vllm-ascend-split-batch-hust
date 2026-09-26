@@ -412,3 +412,43 @@ publisher 配置逐字匹配)。因此:
 
 **建议的保护**:给仓库的 `pypi` 环境加 required reviewers(Settings → Environments)。环境会在首次引用时
 自动创建,但**批准门**要手动加;正式发布不可覆盖,留一个批准门是廉价的保险。
+
+### 11.4 点 "Add" 之后发生什么(2026-09-26 由 warehouse 源码定案)
+
+**它不会"把仓库加进 PyPI",也不会在 GitHub 侧建立任何连接** —— 没有 webhook、没有 App 安装。
+PyPI 只在 Add 时做**一次只读校验**,然后在你名下存一条 "pending publisher" 记录。
+
+**Add 时的校验(逐条,`warehouse/oidc/forms/github.py`)**:
+
+| 字段 | 校验 | 失败提示 |
+|---|---|---|
+| Owner | 先过正则,再调 GitHub API `GET /users/{owner}`(只读,取规范化的 `login` 与 `id`) | `Unknown GitHub user or organization.` / rate-limited / 连接或超时错误 |
+| Workflow name | 必须以 `.yml`/`.yaml` 结尾,**且不能含 `/`** | `Workflow name must end with .yml or .yaml` / `Workflow filename must be a filename only` |
+| Environment name | 可空;≤255 字符;首尾不能有空白;不能含 `"` `'` `,` `;` `\` 或不可打印字符;**存储时转小写**(大小写不敏感) | 对应三条提示 |
+| 项目名 | 只校验**合法名格式**(`PROJECT_NAME_PATTERN`) | — |
+
+- **仓库名不在校验范围**:源码注释写明 "We can't do this for the repository, since it might be private" ⇒ 仓名/工作流是否真存在,要到**首次发布**才被验证。
+- **项目名只在首次发布时才被占用** ⇒ Add **不预留名字**。
+- **Add 页面要求重新认证**:组织视图 `permission=Permissions.OrganizationsManage` + `require_reauth=True` ⇒ 提交前 PyPI 会让你重输密码(2FA)。
+- 重复提交同一条(同仓 + 同 owner + 同 workflow + 同 environment)会被拒:`This publisher has already been registered in your organization.`
+
+**Add 之后的状态**:组织页 `Pending publishers` 列表里出现一条,并 flash
+`Registered a new pending publisher to create the project 'X' owned by the '<org>' organization.`
+(同时写组织审计事件 `PendingOIDCPublisherAdded`)。**此时 PyPI 上还没有项目。**
+
+**⏳ pending publisher 有 30 天 TTL**(`warehouse/oidc/tasks.py`):
+`PENDING_PUBLISHER_EXPIRY_DAYS = 30`,到期前 5 天(`PENDING_PUBLISHER_REMINDER_DAYS = 5`)发提醒邮件,
+到期后由定时任务**删除记录**并通知。⇒ **别加了不发布**。
+
+**首次发布时怎么匹配并"转正"(`warehouse/oidc/models/github.py` 的 `PendingGitHubPublisher.reify`)**:
+
+| OIDC claim | 要求 |
+|---|---|
+| `repository` | 与 `owner/repo` **大小写不敏感相等** |
+| `job_workflow_ref` | 必须等于 `OWNER/REPO/.github/workflows/<文件名>@<ref 或 sha>` ⇒ **工作流文件必须在 `.github/workflows/` 顶层**(不能放子目录),且文件名逐字一致 |
+| `environment` | 若 publisher 填了环境名,则 token **必须**带同名环境(大小写不敏感);留空则不校验 |
+| `event_name` | **除 `pull_request_target` 外全部允许** ⇒ `workflow_dispatch` 可用 |
+
+匹配成功后:`reify()` **找到或新建**一条普通 `GitHubPublisher`(同仓+owner+workflow+environment),
+**删除 pending 记录**,项目由该组织创建并归属该组织。此后就是普通 publisher,**不需要再注册**;
+要改配置则在项目页的 Publishing 里增删。
