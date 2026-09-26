@@ -38,10 +38,8 @@ looser of "1e-0 or 32*ULP").  The elementwise pass rule is
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
-import triton
-from _device_stack import torch, torch_npu  # noqa: F401
+from _kernel_stack import np, torch, torch_npu, triton  # noqa: F401
 
 from vllm_ascend_split_batch.fi_gelu import api, reference
 from vllm_ascend_split_batch.fi_gelu.kernels import _erf_probe_kernel
