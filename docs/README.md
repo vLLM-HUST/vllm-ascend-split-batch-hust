@@ -11,9 +11,10 @@
 | 1 | [../README.md](../README.md) | 这个仓库是什么、装完怎么验证 |
 | 2 | [architecture.md](architecture.md) | 插件壳/kernel 库/宿主三者什么关系,manifest 各字段什么语义 |
 | 3 | [agent-guide.md](agent-guide.md) | 在这个仓库写代码必须遵守什么(人机通用) |
-| 4 | [release.md](release.md) | 怎么构建、检查、发布,翻 `active` 前要过哪些门槛 |
-| 5 | [pitfalls.md](pitfalls.md) | 前人踩过哪些坑,怎么避免重踩 |
-| 6 | [progress.md](progress.md) | 项目走到哪了,接下来计划做什么 |
+| 4 | [support-matrix.md](support-matrix.md) | 某个能力在我的配置下会不会生效、不生效是哪一条 |
+| 5 | [release.md](release.md) | 怎么构建、检查、发布、停止/卸载,翻 `active` 前要过哪些门槛 |
+| 6 | [pitfalls.md](pitfalls.md) | 前人踩过哪些坑,怎么避免重踩 |
+| 7 | [progress.md](progress.md) | 项目走到哪了,接下来计划做什么 |
 
 ## 单一事实源分工
 
@@ -22,6 +23,7 @@
 | 主题 | 权威位置 |
 |---|---|
 | 使用方法、env 开关、验证证据 | [../README.md](../README.md) |
+| 能力 × 准入条件 × 代码位置 | [support-matrix.md](support-matrix.md) |
 | 宿主 seam 与 monkeypatch 面清单 | [../HOST_CONTRACT.md](../HOST_CONTRACT.md) |
 | 历史实现溯源 | [../PROVENANCE.md](../PROVENANCE.md) / [../provenance/](../provenance/)(只读) |
 | kernel 算子(fa_fp32_stage1 / lse_merge) | `ops/kernels/ascend-kernel/README.md`(工作区,仓库外) |

@@ -192,3 +192,60 @@ CI runner 是**干净 ubuntu**(只装 `.[test]`),没有 torch / torch_npu / vllm
 - `docs/evidence/cascade/` 与 `src/vllm_ascend_split_batch/fi_sampling/` 是**存档/
   vendor 件**,ruff 通过 `extend-exclude` 排除(重排会破坏 `MANIFEST.sha256`)。
 - 发布渠道未启用:证据齐后走 `uv publish` 到 pypi 或内部索引(见 §1)。
+
+## 10. 停止与卸载(可执行命令)
+
+**能力维度**(只关某一项,不动其它):
+
+```bash
+# 关 cascade(含图孪生):不注入这两项即等价于关闭
+unset VLLM_ASCEND_ENABLE_CASCADE_DECODE VLLM_ASCEND_ENABLE_CASCADE_GRAPH
+# 或走管理器(它会重写本地 enable 态,不注入该 bundle 的 environment)
+vllm-hust-ext extension disable org.vllm-hust.split-batch-full-graph
+vllm-hust-ext extension list          # 期望该 bundle 显示 disabled
+```
+
+- **判据**:重启服务后日志应只有
+  `cascade plugin loaded (gate=0, graph_gate=0, kernel_wheel=not-probed)`,
+  且无 `capture body` 行。默认关闭态**不注入任何 env**、不 import 宿主模块(见 §6)。
+
+**服务维度**(停掉正在跑的服务并等显存释放):
+
+```bash
+pkill -f '[V]LLM::'                  # 方括号防自匹配;不要用 pkill -f "VLLM::"
+sleep 10                             # 等 HBM 回落到基线,否则下一腿报 Free memory ... is less than desired
+npu-smi info -t usages -i <card> | grep 'HBM Usage Rate'   # 期望回到 5% 量级
+```
+
+- 若服务由 `vllm-hust-ext run -- vllm serve ...` 启动,杀进程前先记下它注入的 env
+  (管理器 enable 态仍会保存,下次 `run` 会重新注入)。
+
+**插件维度**(从环境里移除):
+
+```bash
+pip uninstall -y vllm-ascend-split-batch          # entry point 随之消失
+pip uninstall -y ascend-kernel                    # 可选:kernel wheel 是软依赖
+python -c "import importlib.metadata as m; print(m.version('vllm-ascend-split-batch'))"  # 期望 ModuleNotFoundError
+vllm-hust-ext extension list                      # 该 bundle 应不再出现
+```
+
+- `uninstall()` 语义在 carrier 级已有测试覆盖(`fia_demask` / `rope_fix` 的
+  `test_uninstall_*`:注销注册表项、还原被替换的方法),但**服务级**的
+  "卸载后启动服务仍正常"尚未作为验收项跑过 → 见 §9 类未做项。
+- 回退到旧版本:重装对应 wheel 即可;本仓不做数据库/权重迁移,卸载无残留状态
+  (唯一状态是 `~/.config/vllm-hust-ext/config.json` 里的 enable 位)。
+
+## 11. 安装/配置/启动(最小可用路径)
+
+```bash
+python -m pip install -e ".[test]"                                  # 开发安装
+pip install ".[kernels]" --find-links /path/to/ascend-kernel/output  # 可选:kernel wheel(cascade 必需)
+vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph # 期望 activation_ready=true
+vllm-hust-ext extension enable  org.vllm-hust.split-batch-full-graph # 写入 enable 态
+vllm-hust-ext run -- vllm serve <model> --max-model-len 4096 --port 8000 \
+  --compilation-config '{"cudagraph_capture_sizes":[32,64,128]}'
+```
+
+- cascade 生效还需:共享前缀 ≥ 8192、并发 ≥ 32、无投机解码(见
+  [support-matrix.md](support-matrix.md) §2);否则服务正常但 cascade 不接管。
+- 停止/卸载见 §10。
