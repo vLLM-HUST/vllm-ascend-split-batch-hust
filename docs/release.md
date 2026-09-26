@@ -488,3 +488,59 @@ PyPI 只在 Add 时做**一次只读校验**,然后在你名下存一条 "pendin
 **不做 TestPyPI 的含义**:`.github/workflows/publish.yml` 的下拉默认值是 `testpypi`(**安全默认**:
 误点时最多在 TestPyPI 认证失败,不会污染正式索引)。只发 PyPI 时**必须在下拉里选 `pypi`**;
 `testpypi` 那个 GitHub 环境不会被创建,不影响任何东西。
+
+### 11.6 首发回执:0.1.0 已发布(2026-09-26T11:12Z)
+
+**结论:插件包已上公共 PyPI。** 过程与产物如下(全部可核对)。
+
+| 项 | 值 |
+|---|---|
+| 索引 | `https://pypi.org/project/vllm-ascend-split-batch/`(正式 PyPI,非 TestPyPI) |
+| 版本 | `0.1.0` |
+| 发布 commit | `ceebea15355c0830619c0564a39a10eef599f085`(`main`) |
+| 触发方式 | `workflow_dispatch` → `target: pypi`(`gh-action-pypi-publish` + OIDC,无 token) |
+| 工作流运行 | run #1 <https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/actions/runs/36238065982>(全步骤 success) |
+| 上传目标 | `https://upload.pypi.org/legacy/` |
+
+| 制品 | 大小 | sha256 |
+|---|---|---|
+| `vllm_ascend_split_batch-0.1.0-py3-none-any.whl` | 129 128 B | `b45aff34dd2d3c2cb5cafdda0a72b49f8b7e5f5e7eb9a6063a6921e8910df511` |
+| `vllm_ascend_split_batch-0.1.0.tar.gz` | 1 262 939 B | `4d309887cac9b0b99da72bcf13f833504f86d99201c9c499a21ae030738ab9b3` |
+
+- 两个哈希与 PyPI JSON API(`/pypi/vllm-ascend-split-batch/json`)报告的值**逐位一致**。
+- 发布同时生成 **PEP 740 attestations**(工作流日志里有 `predicateType:
+  https://docs.pypi.org/attestations/publish/v1` 与 DSSE PAE 载荷),即 PyPI 页面可核验"这个文件由该仓库该 commit 的该工作流构建"。
+
+**从 PyPI 装的实测(干净 venv,无 `--find-links`)**:
+
+```
+installed version = 0.1.0
+entry points = 12   (8 × vllm.general_plugins + 4 × vllm_hust.extension_bundles)
+manifests    = 4    (org.vllm-hust.split-batch-full-graph / .fia-demask / .rope-fix / .zerocost-wiring)
+```
+
+**管理器侧的关键结果**(用非 editable 的 `site-packages` 做发现,即"别人装完之后的状态"):
+
+```
+manifest_path    = .../site-packages/vllm_ascend_split_batch/vllm-hust-extension-v0.2.json
+activation_ready = True
+blocker          = None
+implementation   = [plan_dual_pad: import_only, load: active, install: active]
+check states     = [discovered, compatible, configured, enabled]
+host.version_range = ==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27
+```
+
+⇒ **"管理器仍按 import_only 拒绝启用"这一条到此闭环**:任何人 `pip install
+vllm-ascend-split-batch` 之后,`vllm-hust-ext extension enable org.vllm-hust.split-batch-full-graph`
+不再被拒(此前他装的是只有一个 `import_only` 描述符的旧副本)。
+
+**仍未随包解决的边界(诚实登记)**:
+
+1. `host.version_range` 是**点钉**(§0.1):在其它 `vllm-ascend` build 上 `check` 会判
+   `incompatible`,`vllm-hust-ext run` 拒启(env 直接注入的路由不受影响)。放宽需按 §4
+   在目标 build 上重核并留档。
+2. `kernels` extra 钉 `ascend-kernel==2026.3.9`,该版本**任何索引上都没有** ⇒
+   `pip install "vllm-ascend-split-batch[kernels]"` 必须带 `--find-links`(README Install 段已写明)。
+   算子轮的公共分发位(选项 A:GitHub Release 附件)还差两件前置:给它补 CANN OSL 2.0 协议文本
+   (catlass 衍生,见 §12.2/facts §M)与修正轮内 METADATA 的 license 字段(现误写 BSD-3)。
+3. cascade 在缺算子轮时是**整体禁用**(fail-open),所以只装插件包不会启用 cascade。

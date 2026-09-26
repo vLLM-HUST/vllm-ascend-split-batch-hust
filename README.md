@@ -23,6 +23,10 @@ See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
 pip install vllm-ascend-split-batch
 ```
 
+Published on PyPI (`0.1.0`, 2026-09-26; wheel + sdist, sha256 and PEP 740
+attestations on the project page). Release receipt:
+[docs/release.md](docs/release.md) §11.6.
+
 **What you get:** 8 `vllm.general_plugins` carriers and 4 extension bundles,
 all **default-off** — installing changes nothing until you enable a capability
 via its env var (see the table below). Cascade attention additionally needs the
