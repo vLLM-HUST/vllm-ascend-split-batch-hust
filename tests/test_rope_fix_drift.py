@@ -111,7 +111,7 @@ HOST_ROOT = _host_root()
 #: This module cannot say anything useful without the host source tree.  It is
 #: marked (not skipped) so the guard keeps failing loudly on the full run, while
 #: the dependency-free CI job deselects it explicitly with
-#: ``pytest -m "not host_tree"``.  See ``docs/release.md`` §8.
+#: ``pytest -m "not host_tree"``.  See ``docs/release.md`` §7.
 pytestmark = pytest.mark.host_tree
 
 
