@@ -52,3 +52,7 @@ file whose import lines changed, and the change is known and reversible — rewr
 its two relative imports back to absolute ones reproduces the recorded source-side
 sha256 exactly (2026-09-26 measurement; enforced by
 `tests/test_provenance_hashes.py::test_api_py_source_hash_is_recoverable`).
+
+If you want the W2 source bytes themselves (no transform needed), they are committed as
+a frozen snapshot: `docs/evidence/fi-sampling-frozen-20260909/` — `cd` there and run
+`sha256sum -c FROZEN.sha256` (4 files, one per row above).
