@@ -283,3 +283,41 @@ https://pypi.org/simple`;用户按项目名 `uv pip install bidkv` 安装)。
 不需要我们手工给轮子。
 
 **现状**:两包均**未发布**;本仓默认不发布(对外且不可逆),需要时按上面的检查单执行。
+
+## 12. 两道决策题的事实底稿(2026-09-26 实测)
+
+### 12.1 要不要把算子库并进插件包
+
+**体积不是理由**:插件轮 `122 KB(py3-none-any)` + 算子轮 `278 KB(cp312-cp312-linux_aarch64)`,
+把算子载荷塞进插件轮后实测 **≈398 KB**。真正的代价在别处:
+
+| 代价 | 后果 |
+|---|---|
+| 发行物 tag 变成"平台+ABI" | x86_64 与其它 Python 版本 `pip` 无匹配发行物 ⇒ **装不上**;今天的 CI(ubuntu x64 × 3.10/3.12/3.14)既建不了也装不上 |
+| 构建环境 | 算子侧要 CANN toolkit + bisheng/ccec + catlass(约 2 min);GitHub 托管 runner 建不出来 |
+| 设计语义 | README 与 §6 的"软依赖 + fail-open(缺算子 ⇒ 整体禁用 + 单条 warning)"**作废** |
+| 许可混合 | 插件 Apache-2.0 vs 算子轮 METADATA 声称 BSD-3 却**仓内无 LICENSE 文件** ⇒ 先解决 |
+| 仓侧体积 | 算子仓 tracked = 67.6 MB / 317 文件,其中 `catlass-example-data/{k,v}.bin` 占 **64 MB**(S1 锚点数据) |
+| 既存硬伤(与是否合并无关) | `kernels` extra 钉 `ascend-kernel==2026.3.9`,而该包**任何索引上都没有** ⇒ 第三方 `pip install ".[kernels]"` 必然失败 |
+
+**建议**:两个 wheel 分开发布(插件保持 `py3-none-any`);若想少一个仓,可"同仓 monorepo、两个发行物",
+但**不要把设备算子并进纯 Python 的那个包**。
+
+### 12.2 fork 一个 CANN 官方算子仓把算子放进去,有没有用
+
+实况(`gitcode.com/cann/*`,2026-09-26 实测):`ops-nn` 24731 文件、`ops-transformer` 14269 文件;
+两仓 LICENSE = **CANN Open Software License Agreement 2.0**(非 Apache:2.1 只允许为**华为 AI 处理器**系统
+使用/修改/分发;3.3 分发须随附协议副本并保留声明);有 `CONTRIBUTING.md` + SIG + `experimental/` 自定义算子入口
++ `.gitcode/workflows/`;两仓都有**官方 torch 扩展机制**(`cann_ops_nn`, `bash build.sh --torch_extension`
+→ `build_out/*.whl`),但其形态是"JIT 编薄 C++ wrapper 桥接 **aclnn**",设备 kernel 由 CANN 算子库提供。
+
+| 判断 | 内容 |
+|---|---|
+| 买得到 | 官方构建/测试/评审规范;自定义算子入口;**若被上游接受**,算子进 CANN 算子库 ⇒ 插件可丢掉自编 `.so`、走官方桥,同时解掉"算子轮无人发布/四元组轮子" |
+| 买不到 | **fork 本身不发布任何东西**(个人副本,PyPI 仍需自己上传);且 **CANN 没有算子轮子的 pip 渠道**——华为云 ascend 索引实测只有 `nightly/ test/ torch-npu/ triton-ascend/ variant/`,公共 PyPI 无 `cann-ops*`(404),算子随 CANN toolkit 分发 ⇒ "放进 fork 就能被装到"不成立 |
+| 隐含成本 | 不是搬家而是**重写**(op_host tiling/infershape + op_kernel + aclnn API + 其测试套件);我们当前是 catlass + `NpuExtension` 自编设备 kernel、注册 `torch.ops.npu.*`,**不在 aclnn 层**;另需长期同步 2.4 万文件量级的仓,并接受 CANN OSL 2.0 的处理器范围限制与随附协议要求 |
+| 纪律 | 工作区 `AGENTS.md`:不做上游 PR、改动只在本地落地(文义限定 vllm/vllm-ascend)。CANN 方向的上游化需单独裁定 |
+
+**建议**:只有当目标是"算子最终进 CANN 官方库、由官方维护"时才值得做,且应作为**上游贡献项目**
+(重写 + 评审 + 许可)立项;若目标只是"让第三方能装到",它的收益为零 —— org 自建仓 + PyPI 轮子是等价且
+便宜得多的路径。
