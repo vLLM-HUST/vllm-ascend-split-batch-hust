@@ -379,3 +379,36 @@ PyPI / TestPyPI 上**都未被占用**(2026-09-26 实测 404)。若要带 org �
 
 **若你仍想用 API token 而不是 OIDC**:上传用户名固定 `__token__`,token 只在当次 shell 导出、
 不写进仓库/命令历史/CI YAML(组织文档 §16 原话)。两种认证方式可并存,OIDC 只是免去保管长期凭据。
+
+### 11.3 表单怎么填(逐栏 + 两处易错点,2026-09-26 由 warehouse 源码确认)
+
+**先判断你在哪一页**:环境名输入框里的**灰色占位文字就是站点指纹** ——
+warehouse 模板的取值是 `placeholder="testpypi" if testPyPI else "pypi"`
+(`templates/manage/account/publishing.html` 与 `.../organization/publishing.html` 同逻辑)。
+占位显示 `pypi` ⇒ 你在 **pypi.org**;显示 `testpypi` ⇒ 你在 **test.pypi.org**。
+
+| 栏位 | 填 | 依据 |
+|---|---|---|
+| PyPI Project Name | `vllm-ascend-split-batch` | `pyproject.toml` 的 `name`(**不是**仓名) |
+| Owner | `vLLM-HUST` | GitHub 侧仓归属;与 PyPI 组织无关 |
+| Repository name | `vllm-ascend-split-batch-hust` | 仓名带 `-hust` |
+| Workflow name | `publish.yml` | 写**文件名**(该文件已在 `main`) |
+| Environment name | **你在 pypi.org ⇒ `pypi`;在 test.pypi.org ⇒ `testpypi`** | 必须与工作流实际使用的环境逐字一致(本仓工作流按 `target` 取值) |
+
+**易错点 1:组织页与账户页的字段文案不同,据此可判定归属。**
+`warehouse/templates/manage/organization/publishing.html` 的 GitHub 表单:
+- 标签是 **`PyPI Project Name`**(账户页是 `Project Name`);
+- 帮助文字明确写 **"created and owned by the '<org>' organization when this publisher is used"**;
+- 页内 Tip:**"Trusted publishers created here will be owned by this organization when the project is created."**
+
+⇒ 在**组织**的 publishing 页填表,**首次发布时项目直接归属该组织,无需再 Transfer**。
+
+**易错点 2:环境名与目标索引耦合。**
+本仓工作流 `target: testpypi` 用环境 `testpypi`、`target: pypi` 用环境 `pypi`(OIDC 交换要与对应索引上的
+publisher 配置逐字匹配)。因此:
+- 只建了 PyPI 侧 publisher ⇒ 跑 `target: testpypi` 会在 TestPyPI 侧认证失败(那里没有对应 publisher);
+- 要做 §16 的 TestPyPI 往返,需在 **test.pypi.org** 上另建一个(TestPyPI 是独立站点与独立账号,组织不一定在那边存在)——
+  用账户级 `pending publisher`、环境名 `testpypi` 即可。
+
+**建议的保护**:给仓库的 `pypi` 环境加 required reviewers(Settings → Environments)。环境会在首次引用时
+自动创建,但**批准门**要手动加;正式发布不可覆盖,留一个批准门是廉价的保险。
