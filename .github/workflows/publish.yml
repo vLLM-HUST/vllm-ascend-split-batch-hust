@@ -1,0 +1,56 @@
+# Publish to TestPyPI / PyPI with a Trusted Publisher (OIDC) -- no long-lived
+# token in the repo, no token in the command history.
+#
+# Why OIDC instead of an API token: PyPI matches a short-lived OIDC token minted
+# by GitHub Actions against the publisher configured on the PyPI side; nothing
+# secret is stored here. See docs/release.md §11.2 for the PyPI-side steps.
+#
+# Safe by default: this workflow only runs when a human dispatches it, and the
+# default target is TestPyPI. Publishing to the real index requires an explicit
+# `target: pypi` plus the protected-environment approval configured on PyPI's
+# side (the `pypi` environment below).
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Index to upload to"
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Must match the environment named in the PyPI trusted publisher config.
+    environment: ${{ inputs.target == 'pypi' && 'pypi' || 'testpypi' }}
+    permissions:
+      id-token: write # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      # Gate: the same checks CI runs, so a red tree never reaches the index.
+      - run: python -m pip install -e ".[test]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q -m "not host_tree"
+      - run: python -m build
+      - run: python -m twine check dist/*
+      # Release receipt: which commit and which artifact hashes were uploaded.
+      - name: Release receipt
+        run: |
+          echo "commit: $(git rev-parse HEAD)"
+          sha256sum dist/* | tee /tmp/dist.sha256
+      - name: Publish to TestPyPI
+        if: inputs.target == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+      - name: Publish to PyPI
+        if: inputs.target == 'pypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
