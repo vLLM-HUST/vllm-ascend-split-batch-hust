@@ -579,3 +579,24 @@ vllm-ascend-split-batch` 之后,`vllm-hust-ext extension enable org.vllm-hust.sp
 **仍未解决(与 0.1.0 相同)**:`host.version_range` 仍是点钉 ⇒ 在其它 `vllm-ascend` build 上
 管理器判 `incompatible`、`vllm-hust-ext run` 拒启(env 注入路由不受影响)。放宽须按 §4 在目标
 build 上重核并留档,该工作属"环境核验",按工作区分工归测试机。
+
+**发布附件的字节口径(2026-09-26 自纠)**:GitHub Release 的附件必须是**PyPI 上那一批字节**
+(由 `publish.yml` 在 runner 上构建,带 PEP 740 attestation),不能在本地用 `python -m hatchling build`
+重造的等价物 —— 两次构建的 sha256 不同(实测 `a7480733…` vs `e7c2dc4f…`),同时挂两份不同字节
+却都叫 `0.1.1` 会造成"到底哪个是发布件"的二义。本次做法:先把本地构建误传的三份附件删掉,
+改为**从 PyPI 下载权威字节再上传**(下载后逐件核对 sha256 = PyPI 报告值,一致),
+附件含 `dist.sha256` 供消费方自校验。当前状态:
+
+| Release | 附件 |
+|---|---|
+| `v0.1.0` | `vllm_ascend_split_batch-0.1.0-py3-none-any.whl`(`b45aff34…`)、`.tar.gz`(`4d309887…`)、`dist.sha256` |
+| `v0.1.1` | `vllm_ascend_split_batch-0.1.1-py3-none-any.whl`(`e7c2dc4f…`)、`.tar.gz`(`7e364f13…`)、`dist.sha256` |
+
+**一条未能在本机验证的路径(如实记录)**:消费方用
+`--find-links https://github.com/Raing5Days/vllm-hust-cascade-kernel/releases/expanded_assets/v2026.9.26`
+取算子轮这一步,本机**测不了** —— 容器到 `github.com:443` 的直连超时(实测;`api.github.com`
+与 `uploads.github.com` 可用,一直在用)。已验证的是等价能力:把**同一份**算子轮字节放在本地目录,
+`pip install "vllm-ascend-split-batch[kernels]==0.1.1" --find-links <该目录>` 解析得到
+`ascend-kernel-2026.9.26`(算子轮走 find-links、插件走 PyPI)。
+`expanded_assets` 是 HTML 页,pip 会解析其中的 `<a href>` 指到 `/releases/download/...`,
+机制上等价;边界是"本机网络不允许实测"。
