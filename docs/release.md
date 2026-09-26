@@ -346,3 +346,36 @@ https://pypi.org/simple`;用户按项目名 `uv pip install bidkv` 安装)。
 **建议**:只有当目标是"算子最终进 CANN 官方库、由官方维护"时才值得做,且应作为**上游贡献项目**
 (重写 + 评审 + 许可)立项;若目标只是"让第三方能装到",它的收益为零 —— org 自建仓 + PyPI 轮子是等价且
 便宜得多的路径。
+
+### 11.2 传到 PyPI 组织:机制与步骤(2026-09-26 核实)
+
+**先纠一个直觉**:PyPI 的"组织"**不改变上传目标**,也不给独立的索引地址。
+
+| 问题 | 事实 | 出处 |
+|---|---|---|
+| 上传到哪 | 仍是 `pypi.org`(TestPyPI 是 `test.pypi.org`);`twine upload` / `uv publish` 的目标由"仓库 URL"决定,与组织无关 | PyPI Upload API |
+| 组织给什么 | **所有权 + 权限管理**:Organization / Team / Member;组织角色 Owner·Manager·Member·Billing manager;项目角色 Maintainer(可上传发行物)·Owner(可管理项目与协作者) | `docs/user/organization-accounts/roles-entities.md` |
+| 有没有命名空间 | **没有**。组织账户**不支持 namespace** ⇒ 项目名在全 PyPI 仍是**全局唯一**、无前缀保护 | `org-acc-faq.md` |
+| 有没有私有包 | **没有**。组织账户不支持私有包,项目一律公开 | `org-acc-faq.md` |
+| 怎么把项目放进组织 | 两条:(a) 组织成员在 **Your organizations → Manage → Projects → Create** 直接创建;(b) 先传到个人账户,再由 Owner **Transfer project** 转入。删除组织前必须先转走全部项目 | `actions/project-actions.md` |
+| 有没有 CLI 管组织 | **没有**(仅 Web UI:`https://pypi.org/manage/organizations/`);个人项目上传仍是 CLI | `org-acc-faq.md` |
+| 要花时间/钱吗 | 商业组织按月订阅、社区项目免费;组织申请由 PyPI admin 人工审核,**无时限承诺**;重名冲突也由 admin 仲裁 | `org-acc-faq.md` |
+
+**推荐做法:用 Trusted Publishing(OIDC),不要 token**(仓库已备好 `.github/workflows/publish.yml`):
+
+1. **PyPI 侧**(只有你能做):登录 → 若还没有项目,用 **Your account → Publishing → 新建 pending publisher**;
+   填 GitHub 仓库 `vLLM-HUST/vllm-ascend-split-batch-hust` + workflow 文件名 `publish.yml` +
+   environment `testpypi`(先在 TestPyPI 建)/ `pypi`(正式)。
+   ⚠️ **pending publisher 不预留名字** —— 别人先注册同名项目则它作废;确定名字后尽快完成首次发布。
+2. **TestPyPI 先行**:`Actions → Publish → Run workflow → target: testpypi`;
+   然后在干净环境从 TestPyPI 装该版本并跑完整生命周期门禁(discovery / enable / dry-run / disable / forget / uninstall)。
+3. **正式 PyPI**:`target: pypi`。工作流已内置与 CI 相同的门槛(ruff / pytest / build / `twine check`)与
+   **发布回执**(commit + `sha256sum dist/*`),所以在索引上出现的任何文件都可追溯到 commit。
+4. **项目归属**:首次发布若落在个人账户,再用组织的 **Transfer existing project** 转进组织(需 Owner)。
+
+**名字现在就要定**(发布后改名不可逆):`vllm-ascend-split-batch` 与 `vllm-hust-split-batch` 在
+PyPI / TestPyPI 上**都未被占用**(2026-09-26 实测 404)。若要带 org 前缀,趁现在改 `pyproject.toml`
+的 `name` 与 `tests/test_manifest.py` 里的项目名断言。
+
+**若你仍想用 API token 而不是 OIDC**:上传用户名固定 `__token__`,token 只在当次 shell 导出、
+不写进仓库/命令历史/CI YAML(组织文档 §16 原话)。两种认证方式可并存,OIDC 只是免去保管长期凭据。
