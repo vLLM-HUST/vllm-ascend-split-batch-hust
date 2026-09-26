@@ -185,3 +185,29 @@ def test_activation_environment_values_are_injectable_flags() -> None:
             "activation.environment holds values injected on enable, "
             "not documentation strings"
         )
+
+
+def test_test_extra_does_not_pin_an_unresolvable_extension_manager() -> None:
+    """``[test]`` must stay resolvable for third parties.
+
+    ``vllm-hust-ext`` is the org's extension-manager package: it is **not on any
+    index** (PyPI 404; the org's own website says "install the current source").
+    Pinning it in an extra therefore made
+    ``pip install "vllm-ascend-split-batch[test]"`` fail with
+    ``Could not find a version that satisfies the requirement
+    vllm-hust-ext==0.2.0.dev0 (from versions: none)`` (measured 2026-09-26 on the
+    released 0.1.0/0.1.1 metadata).  The pin was removed; the manager is installed
+    from git first (CI and publish.yml already did that).  Re-adding the pin
+    silently re-breaks every third-party ``[test]`` install, so guard it here.
+    """
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    extra = pyproject["project"]["optional-dependencies"]["test"]
+    offenders = [
+        entry
+        for entry in extra
+        if entry.split("[")[0].strip().startswith("vllm-hust-ext")
+    ]
+    assert not offenders, (
+        "the `test` extra pins vllm-hust-ext again, which is not on any index: "
+        f"{offenders}. Install it from git in the docs/CI instead of pinning it."
+    )

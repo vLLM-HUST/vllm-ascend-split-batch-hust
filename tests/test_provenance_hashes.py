@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -134,3 +136,44 @@ def test_vendored_attribution_notes_the_source_drift() -> None:
     assert "订正记录" in provenance, (
         "PROVENANCE.md must keep the correction trail for the api.py verdict"
     )
+
+
+#: W2 源侧冻结快照（`docs/evidence/fi-sampling-frozen-20260909/`）里记的源侧 hash。
+#: 与 `PROVENANCE.md` §4.1 的表同值：快照就是"让别人不必自己推逆变换"的那份字节。
+FROZEN_DIR = REPO_ROOT / "docs" / "evidence" / "fi-sampling-frozen-20260909"
+FROZEN_SOURCE_SHA256 = {
+    "api.py": API_PY_SOURCE_SHA256,
+    "kernels.py": "8d0b20cca2559a2c4d893a96bc6c2398569eb2805258848f54ccde114b17d27e",
+    "npu_env.py": "04a3a122f66a74b7176cfaf7f3b1b701871bfe0e55e252fcf58f8a85b352a77a",
+    "pure.py": "923d7db26a704e778dfafb4bd74a2742364e6a5b8de250518bc08dfd6954ab08",
+}
+
+
+def test_frozen_w2_snapshot_carries_the_recorded_source_bytes() -> None:
+    """入仓的源侧快照必须逐件命中 §4.1 记录值（改一个字节 ⇒ 红）。"""
+    manifest = (FROZEN_DIR / "FROZEN.sha256").read_text(encoding="utf-8")
+    recorded = dict(re.findall(r"^([0-9a-f]{64})  snapshot/(\S+)$", manifest, re.M))
+    recorded = {name: digest for digest, name in recorded.items()}
+    assert recorded == FROZEN_SOURCE_SHA256, (
+        "FROZEN.sha256 must list exactly the four recorded W2 source hashes; "
+        f"got {recorded}"
+    )
+    for name, expected in FROZEN_SOURCE_SHA256.items():
+        path = FROZEN_DIR / "snapshot" / name
+        assert path.is_file(), f"frozen snapshot file missing: {path}"
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        assert actual == expected, (
+            f"frozen snapshot {name} drifted: recorded {expected}, actual {actual}"
+        )
+
+
+def test_frozen_snapshot_is_reproducible_from_the_vendored_bytes() -> None:
+    """重建规则（逆变换）仍能从 vendored 字节产出这份快照（端到端自证）。"""
+    result = subprocess.run(
+        [sys.executable, str(FROZEN_DIR / "make_snapshot.py"), "--check"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "snapshot OK" in result.stdout

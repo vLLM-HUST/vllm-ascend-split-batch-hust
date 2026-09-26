@@ -23,8 +23,8 @@ See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
 pip install vllm-ascend-split-batch
 ```
 
-Published on PyPI (`0.1.1`; wheel + sdist, sha256 and PEP 740 attestations on
-the project page). Release receipt: [docs/release.md](docs/release.md) §11.7.
+Published on PyPI (`0.1.2`; wheel + sdist, sha256 and PEP 740 attestations on
+the project page). Release receipt: [docs/release.md](docs/release.md) §11.8.
 
 **What you get:** 8 `vllm.general_plugins` carriers and 4 extension bundles,
 all **default-off** — installing changes nothing until you enable a capability
@@ -177,18 +177,23 @@ pytest -q && ruff check .
 vllm-hust-ext PyPI alpha exists yet; install the current source"*). It is the
 org's extension-manager package, maintained in
 [`vLLM-HUST/extension-manager`](https://github.com/vLLM-HUST/extension-manager) —
-this repository only consumes it. Because the released `test` extra pins it,
-install the manager from git **first**, which is exactly what CI and
-`publish.yml` do:
+this repository only consumes it.
+
+- **Installing this repository's extras never needs it.** Since 2026-09-26 the
+  `test` extra no longer pins it, so `pip install "vllm-ascend-split-batch[test]"`
+  resolves on its own. (Released 0.1.0/0.1.1 metadata still carries the pin —
+  `pip install ...==0.1.1[test]` fails with `Could not find a version that
+  satisfies the requirement vllm-hust-ext==0.2.0.dev0`; use the git step below
+  for those versions. PyPI files are immutable, hence the next release.)
+- **Running the manifest tests does need it** (`tests/test_manifest.py` imports
+  `vllm_hust_ext.manifest`). Install the manager from git first, which is exactly
+  what CI and `publish.yml` do:
 
 ```bash
 python -m pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extension-manager.git@main"
-python -m pip install -e ".[test]"   # now resolves
 ```
 
-Without that step `pip install "vllm-ascend-split-batch[test]"` fails with
-`Could not find a version that satisfies the requirement vllm-hust-ext==0.2.0.dev0`
-(measured 2026-09-26). The `kernels` extra is the one end users need, and it is
+The `kernels` extra is the one end users need, and it is
 resolvable (`--find-links` to the kernel release, see "Install" above).
 
 ## Kernel wheel dependency (soft, fail-open)
@@ -202,6 +207,7 @@ default-off semantics are unchanged. Validated pairing:
 
 | plugin | kernel wheel | torch_npu | CANN |
 |---|---|---|---|
+| `0.1.2` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
 | `0.1.1` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
 
 The kernel wheel is not on any package index (it is platform-tagged and must be

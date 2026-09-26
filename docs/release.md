@@ -162,8 +162,23 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
 **构建前**
 
 - [ ] `pytest -q` 全绿、`ruff check .` 通过
+- [ ] **`host_tree` 类守卫在本机跑过**(发布检查的固定步骤,零成本 —— 见下方"为什么单列")
 - [ ] 版本两处一致(测试守护)
 - [ ] 发布 commit 已记录、工作树干净
+
+**为什么 `host_tree` 单列**:CI 跑的是 `pytest -q -m "not host_tree"`(依赖无关的 runner 上
+没有 `vllm-ascend` 源码树),所以两个**源码级漂移守卫**
+(`tests/test_rope_fix_drift.py` / `tests/test_aot_cache_guard_drift.py`)在 CI 里是
+**显式 deselect**,不会替你发现宿主源码漂移。发布前必须在本机(有宿主树的环境)跑一次**全量**:
+
+```bash
+cd /vllm-workspace/vllm-ascend-split-batch-hust
+python -m pytest -q            # 不带 -m:含 host_tree;缺宿主树即红(这是设计意图)
+python -m pytest -q -m "not host_tree"   # 复现 CI 判定(两套运行面的对照)
+```
+
+判据:全量里 `host_tree` 两例既不是 skip 也不是 deselect;若报"缺宿主树",说明本机不是
+验证环境,换到有 `vllm-ascend` 源码树的机器跑完再发(见 §7 的两套运行面分工)。
 
 **构建后**
 
@@ -236,7 +251,15 @@ CI runner 是**干净 ubuntu**(只装 `.[test]`),没有 torch / torch_npu / vllm
 - 复现 CI 判定(本机,不装/不卸任何东西):把 `torch`/`torch_npu`/`vllm`/`vllm_ascend`
   用 meta-path 拦截器屏蔽后重跑
   `pytest -q -m "not host_tree"`(2026-09-26 实测:97 passed / 11 skipped /
-  14 deselected / 0 failed)。
+  14 deselected / 0 failed;**2026-09-26 续做后复测 112 passed / 11 skipped /
+  14 deselected / 0 failed** —— 差值来自本轮新增的 6 例)。
+  拦截器要能覆盖**子进程**,否则只遮住父进程:用 `sitecustomize.py`(Python 启动即
+  import,父子进程同效),不要用 `-p` 插件(不会传给 `subprocess`)。
+  **为什么要测这一遍**:新增的配置面边界测试会起子进程调管理器 CLI,而 CI 上没有
+  `vllm` —— 不在 CI 身份下跑一次,这类测试可能在 CI 首跑时才红。
+- **发布检查单侧已固化**(2026-09-26):`host_tree` 守卫是 CI **唯一不覆盖**的一类,
+  故 §5「构建前」把它列为固定步骤(本机跑全量 `pytest -q`),并写明判据与两套运行面的差异。
+  自托管 NPU runner job 仍属基础设施决策,本轮不动(登记于 §8)。
 
 ## 8. 未做(登记,勿误读为已具备)
 
@@ -633,19 +656,41 @@ vllm-ascend-split-batch` 之后,`vllm-hust-ext extension enable org.vllm-hust.sp
 管理器判 `incompatible`、`vllm-hust-ext run` 拒启(env 注入路由不受影响)。放宽须按 §4 在目标
 build 上重核并留档,该工作属"环境核验",按工作区分工归测试机。
 
-**两个 extra 的可解析性(2026-09-26 实测)**:发布出去的元数据里有两个 extra,处境不同 ——
+**两个 extra 的可解析性(2026-09-26 实测;同日已修 `test` 侧)**:发布出去的元数据里有两个 extra,处境不同 ——
 
 | extra | 钉的东西 | 第三方能否解析 |
 |---|---|---|
 | `kernels` | `ascend-kernel==2026.9.26`(GitHub Release 附件) | ✅ 带 `--find-links <该目录>` 即可(§11.7) |
-| `test` | `vllm-hust-ext==0.2.0.dev0`(**不在任何索引上**) | ❌ 实测报 `Could not find a version that satisfies the requirement vllm-hust-ext==0.2.0.dev0 (from versions: none)` |
+| `test`(**0.1.1 及以前**) | `vllm-hust-ext==0.2.0.dev0`(**不在任何索引上**) | ❌ 实测报 `Could not find a version that satisfies the requirement vllm-hust-ext==0.2.0.dev0 (from versions: none)` |
+| `test`(**本次改动后,随下一个版本生效**) | 无该钉(`pytest` + `ruff` + `tomli` 回退) | ✅ 单独可解析(判据见下) |
 
 `vllm-hust-ext` 是**组织的框架包**,维护在 `vLLM-HUST/extension-manager`,**不由本仓管理/发布**
 (官网自己写着"No public vllm-hust-ext PyPI alpha exists yet; install the current source")。
-本仓只是它的消费方:`test` extra 需要它才能跑 `tests/test_manifest.py`,CI 与 `publish.yml`
-都先 `pip install "vllm-hust-ext @ git+..."` 再装 `.[test]`(README「Extension framework」
-一节已写明这个前置)。0.1.1 的元数据已发布且不可覆盖,故该 extra 的第三方可用性问题
-只能靠文档说明;后续发版可考虑把它从 extra 里摘出去、让开发者显式安装。
+本仓只是它的消费方:**只有 `tests/test_manifest.py` 需要它**(`load_manifest` /
+`activation_blocker`),CI 与 `publish.yml` 都先 `pip install "vllm-hust-ext @ git+..."` 再装 `.[test]`。
+
+- **已做的改动(2026-09-26,`pyproject.toml`)**:从 `test` extra 删掉该钉,并加注释说明为什么不能钉;
+  README「Extension framework」一节改成"装 extra 不需要它 / 跑 manifest 测试需要它(从 git 装)"。
+- **机械守卫**:`tests/test_manifest.py::test_test_extra_does_not_pin_an_unresolvable_extension_manager`
+  —— 谁再把它钉回去,测试即红(避免静默恢复"第三方装 `[test]` 必失败")。
+- **可解析≠可跑**:摘钉后 `pip install ".[test]"` 能解析,但 `tests/test_manifest.py` 仍会因缺
+  `vllm_hust_ext` 而 ImportError ⇒ 开发者仍需那一步 git 安装(这是**测试依赖**,不是发行依赖)。
+- **时点纪律**:0.1.1 的元数据已发布且**不可覆盖** ⇒ 该改动只对**下一个版本**生效;在此之前
+  `pip install "vllm-ascend-split-batch==0.1.1[test]"` 仍然失败,别把 README 的新写法套到 0.1.1 上。
+- **判据(发新版时验)**:干净 venv 里 `pip install "vllm-ascend-split-batch[test]"` 直接可解析,
+  不需要先装任何别的东西;随后按 README 补 git 安装再跑 `pytest -q`。
+- **判据的提前验证(2026-09-26,正/负对照,不是发布)**:在 `/tmp` 的仓库副本里只把版本号腾到
+  `0.1.2`,构建 wheel 后用**干净 venv** 解析(`--find-links` 指该产物 + 华为云索引):
+
+  | 组 | 构建的元数据 | 干净 venv 的 `pip install --dry-run '...[test]'` |
+  |---|---|---|
+  | 正向 | `test` extra 无该钉(本次改动) | ✅ `Would install … vllm-ascend-split-batch-0.1.2`,exit 0 |
+  | 反向 | 把 `vllm-hust-ext==0.2.0.dev0` 加回去 | ❌ `ERROR: No matching distribution found for vllm-hust-ext==0.2.0.dev0; extra == "test"`,exit 1 |
+
+  ⇒ 判据本身有判别力,且改动方向正确;**但 `0.1.2` 只是为了腾版本号做的本地实验,未构建进仓库、
+  未发布**。真正的判据确认仍需等下一次实际发版(那时 PyPI 上的元数据才变)。
+  ⚠️ 负面控制必须在**见不到 `vllm-hust-ext` 的环境**里跑:在开发环境(已 editable 装该包)里
+  反向组会因 `Requirement already satisfied` 而**假绿**(实测)。
 
 **发布附件的字节口径(2026-09-26 自纠)**:GitHub Release 的附件必须是**PyPI 上那一批字节**
 (由 `publish.yml` 在 runner 上构建,带 PEP 740 attestation),不能在本地用 `python -m hatchling build`

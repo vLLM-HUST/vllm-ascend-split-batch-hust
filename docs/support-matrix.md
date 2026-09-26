@@ -79,3 +79,22 @@ contract（见 [release.md](release.md) §0）。这是"能力预览"而非可�
 | MLA / M-RoPE / LoRA | 拒 | 未显式判（cascade 只判 alibi/滑窗/local/dcp）→ **未验证域**，不要据本表推断可用 |
 | 多 query row（MTP 校验、prefill） | 拒（非 uniform decode） | 拒（条件 7） |
 | microbatching（DBO / ubatch>1） | 未判 | 拒（条件 4） |
+
+## 6. 扩展 `configuration` 字段：本仓**不消费**（边界声明）
+
+`vllm-hust-ext configure <id> --file <json>` 会把 JSON 原样存进该扩展的
+`ExtensionConfig.configuration`：上游只校验"文件顶层是 object"
+（`extension-manager/src/vllm_hust_ext/cli.py:185-187` 的 `isinstance(..., dict)`），
+**没有** per-bundle schema，未知键既不拒绝也不解释。
+
+本仓的准入开关**全部是 env**（上表第 4 列；`src/**` 里 35 处 `os.getenv`/`os.environ`，
+无任何 `.configuration` 访问）⇒
+
+- 放什么进 `configuration` **不改变任何判定**（含 `extension check` 的 states）；
+- 因此本仓**没有**"未知配置拒绝"要加 —— schema 属上游框架，本仓不是它的消费方；
+- 若将来某个载体真要读 `configuration`，必须同时改
+  `tests/test_extension_config_boundary.py`（它会红）并在本表登记该键。
+
+机械判据：`tests/test_extension_config_boundary.py`（3 例：env-only 门控面、
+未知键下 check 输出逐字相同、configure→enable→disable→forget 只写元数据且不 import 实现）。
+服务级 disable/uninstall→重启的验收仍未做（需占卡，登记见 `release.md` §8）。

@@ -327,3 +327,38 @@
   METADATA 的 license 从误写的 `BSD 3 License` 改为实际协议名、`config.ini` bump 至 `2026.09.26`。
   **重建等价性实测**：重跑 `./build.sh` 后 `_C.so` / `libascend_kernel.so` 与 `2026.9.16` 轮
   md5 逐字节相同（`add6e6951d253328` / `ca8de2d70fe0504d`）⇒ 只改打包元数据与许可，目标码未变。
+
+## 2026-09-26 续做：把"本机可直接做"的后续项清空（issue #2 §7）
+
+来源：`knowledge/handoffs/HANDOFF-2026-09-26-issue2-open-items.md` §7 的分组清单。本轮做了
+四件**纯本机、不占卡、不对外**的事；其余各项的默认动作是"不做/先在测试机做"，仍挂在那儿。
+
+- **测试 extra 摘掉不可解析的钉**（`pyproject.toml`）：0.1.0/0.1.1 的 `test` extra 钉
+  `vllm-hust-ext==0.2.0.dev0`，而该包**不在任何索引上** ⇒ 第三方
+  `pip install "vllm-ascend-split-batch[test]"` 必然失败（实测原文见 `docs/release.md` §11.7）。
+  已删该行 + 落注释说明原因，README「Extension framework」改成"装 extra 不需要它 / 跑
+  `tests/test_manifest.py` 需要它（从 git 装）"。守卫
+  `tests/test_manifest.py::test_test_extra_does_not_pin_an_unresolvable_extension_manager`
+  防回钉。**发版才生效**（0.1.1 元数据不可覆盖）⇒ 未 bump 版本、未发布。
+- **配置面边界机械化**（新 `tests/test_extension_config_boundary.py`，3 例）：核实到的两侧事实是
+  上游 `configure` 只校验顶层是 object（无 per-bundle schema），而**本仓没有任何载体读
+  `configuration`**（`src/**` 无 `.configuration`、无 `VLLM_HUST_EXT_CONFIG`，门控全走 env）。
+  所以"配置 schema / 未知配置拒绝"在本仓是**边界声明**而非可加校验。测试固定三件事：
+  ① 门控面只有 env（源码级扫描）；② 未知 `configuration` 键下 `extension check` 的输出**逐字
+  相同**（对照实验）；③ configure→enable→disable→forget 只写元数据、未知键往返原样保留、
+  **从不 import 实现载体**（`sys.modules` 审计）。服务级"卸载后重启仍正常"仍需占卡，未做。
+- **发布检查单固化 `host_tree` 全量**（`docs/release.md` §5/§7）：CI 跑
+  `-m "not host_tree"`，两个源码级漂移守卫在 CI 是**显式 deselect** ⇒ 发布前必须在本机跑一次
+  全量。已把"本机跑全量 `pytest -q`（含 `host_tree`）"写成 §5「构建前」的固定步骤并给出判据；
+  自托管 NPU runner job 仍属基础设施决策，未动。
+- **W2 `fi_sampling` 源侧冻结快照**（新 `docs/evidence/fi-sampling-frozen-20260909/`）：任务是让
+  "源侧 hash 可直接比对"。实测排除了打 tag：源包是活工作区（`api.py` 已漂移为 `4e3ce156…`），
+  且工作区仓历史里**只有**漂移后那一版（`9e98559`）⇒ 快照只能由 §4.1 的逆变换重建。
+  已产出 `snapshot/{api,kernels,npu_env,pure}.py`（4 件源侧字节，`sha256sum -c FROZEN.sha256`
+  → 4 行 OK）+ 幂等的 `make_snapshot.py`（`--check` 校验；重建命中不了记录值就**拒绝写入**）。
+  `PROVENANCE.md` §5 与 `ATTRIBUTION.md` 已改指快照；守卫
+  `tests/test_provenance_hashes.py` 新增 2 例（入仓字节命中记录值、重建可复现）。
+- **门槛**：`pytest -q` **455 passed**（449 → +6）、`ruff check .` / `ruff format --check .` 干净；
+  **CI 身份复测**（`sitecustomize` 屏蔽 torch/torch_npu/vllm/vllm_ascend，父子进程同效）
+  `pytest -q -m "not host_tree"` = **112 passed / 11 skipped / 14 deselected / 0 failed**。
+  全程未用 NPU、未起服务、未占卡；未 push。
