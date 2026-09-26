@@ -1,0 +1,167 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""MLP token-chunked execution（default-off）——降低激活峰值。
+
+**动机**（本机实测，见 `bench/runs/20260916-abcert-b1/A1-A3-CHUNK-FIX.md`）：
+MLP 的 `gate_up`（2I·2B = 54 KiB/token）与 `npu_swiglu` 的输出（I·2B = 27 KiB/token）
+**同时存活**——因为 `torch_npu.npu_swiglu` 无 `out=` 参数、总是新分配
+（`AscendSiluAndMul.forward_oot` 调它）。于是 MLP 工作集 = 81 KiB/token。
+按 token 维切块顺序执行，工作集降为 `(n/k)·81`，而每个 token 的数学与其它 token 无关。
+
+**实测收益**（tokens=32768，fp16，H=5120，I=13824）：
+| k | peak | vs k=1 | 数值 | 中位耗时 |
+|---|---|---|---|---|
+| 1 | 3977 MiB | — | 参考 | 53.26 ms |
+| 2 | 2521 MiB | **−1.42 GiB** | 逐位相同 | 53.59 ms (**+0.6%**) |
+| 4 | 1793 MiB | **−2.13 GiB** | 逐位相同 | 53.26 ms (−0.0%) |
+
+⇒ 用于解 A1/A3 的 KV 缺口（−0.48 / −0.62 GiB），余量 2–3×。
+
+⚠️ **上表的"逐位相同"只在该形状（n=32768）成立，不是普适性质**：设备端 GEMM 的
+调度依赖调用方 M，小 M 下 `full(x)[:c]` 与 `full(x[:c])` 可差约 1 个 fp16 最低位
+（实测上界 2**-15）。成立域与量级见 `chunked_mlp_forward` 的 docstring；
+回归证据在 `tests/test_mlp_chunk_plugin.py`（CPU 逻辑）与
+`tests/test_npu_mlp_chunk_precision.py`（设备数值，含该 artifact 的独立钉桩）。
+
+**为什么不做成默认开**：它改变执行粒度（多若干次 kernel launch）。虽然实测无代价，
+但属"改动数值路径之外的行为"，按仓库纪律保持 default-off，由使用者显式开启。
+
+**为什么不改宿主**：`AGENTS.md` 硬性约束禁改 `vllm-hust/`；本载体用
+`vllm.general_plugins` 入口包装 `Qwen2MLP.forward`，宿主可随时被替换而不影响本文件。
+
+**合规**：不改任何冻结 CLI 参数/环境变量/`cudagraph_mode`/`splitting_ops`/`gmu`/
+`max_model_len`/`max_num_batched_tokens` ⇒ 表附-8 的"生效值一致"不受影响。
+"""
+
+from __future__ import annotations
+
+import os
+import threading
+
+#: 块数；``"1"`` 或未设 = 不启用。建议 2（收益/代价最优）或 4。
+ENV_CHUNKS = "VLLM_HUST_MLP_CHUNKS"
+#: 仅当本批 token 数 ≥ 该阈值才分块（decode 的 n 很小，分块无意义且徒增 launch）
+ENV_MIN_TOKENS = "VLLM_HUST_MLP_CHUNK_MIN_TOKENS"
+
+_LOCAL = threading.local()
+_MARKER = "_vllm_hust_mlp_chunk_wrapped"
+_DEFAULT_MIN_TOKENS = 256
+
+#: 允许分块的 SwiGLU 实现（按类名匹配，避免 import 期依赖设备侧 op）。
+_ACT_WHITELIST = ("SiluAndMul", "AscendSiluAndMul")
+
+
+def chunked_mlp_forward(
+    gate_up_proj, act_fn, down_proj, x, *, chunks_k: int, min_tokens_thr: int
+):
+    """MLP 前向的 token 分块实现（**纯函数，供测试直接调用**）。
+
+    返回 ``None`` 表示"不适用分块"——调用方应回退到原实现。三种不适用：
+    ① ``chunks_k < 2``；② ``x.shape[0] < min_tokens_thr``（decode 的 n 很小，
+    分块无收益）；③ ``act_fn`` 不在白名单（非 SwiGLU 结构，分块前提不成立）。
+
+    适用时按 token 维切块顺序执行：每个 token 的**数学**与其它 token 独立。
+    切分点对齐 ``ceil(n/k)``，末块可能更短（``min()`` 收口），
+    循环覆盖 ``[0, n)`` 全部行、无重叠。
+
+    ⚠️ **数值并非普适逐位相同**（2026-09-17 实测修正）：设备端 GEMM 的调度依赖
+    调用方 M（cube 分瓦 / 归约顺序），故 ``full(x)[:c]`` 与 ``full(x[:c])`` 在
+    **小 M** 下可差约 1 个 fp16 最低位（实测上界 ``max_abs_diff`` = 2**-15，
+    最差形状 n=512 的端到端 ``rel_l2 ≈ 1e-4``）。成立域实测为 ``n ≳ 8192``：
+    **A1/A3 的 n=32768 在 k∈{2,4} 下逐位相同（rel_l2 = 0）**。
+    ⇒ 记忆内存收益与 n 无关，但数值等价性**必须按 M 验证**，不要泛化为普适性质。
+    """
+    n = x.shape[0]
+    if (
+        chunks_k < 2
+        or n < min_tokens_thr
+        or act_fn.__class__.__name__ not in _ACT_WHITELIST
+    ):
+        return None
+    import torch  # 局部 import：default-off 时不引入
+
+    out = torch.empty_like(x)
+    c = (n + chunks_k - 1) // chunks_k
+    for i in range(chunks_k):
+        lo, hi = i * c, min((i + 1) * c, n)
+        if lo >= n:
+            break  # n 很小时可能提前越界（理论上被 min_tokens_thr 挡住，此处兜底）
+        g, _ = gate_up_proj(x[lo:hi])
+        s = act_fn(g)
+        o, _ = down_proj(s)
+        out[lo:hi] = o
+        del g, s, o
+    return out
+
+
+def chunks() -> int:
+    """返回块数（≥2 才生效；非法值按 1 处理）。"""
+    try:
+        k = int(os.getenv(ENV_CHUNKS, "1"))
+    except ValueError:
+        return 1
+    return k if k >= 2 else 1
+
+
+def min_tokens() -> int:
+    try:
+        return int(os.getenv(ENV_MIN_TOKENS, str(_DEFAULT_MIN_TOKENS)))
+    except ValueError:
+        return _DEFAULT_MIN_TOKENS
+
+
+def install() -> bool:
+    """包装 ``Qwen2MLP.forward``。幂等；任何失败都返回 False 且不改变宿主行为。"""
+    if getattr(_LOCAL, "installing", False):
+        return False
+    _LOCAL.installing = True
+    try:
+        k = chunks()
+        if k < 2:
+            return False
+        from vllm.model_executor.models.qwen2 import Qwen2MLP
+
+        orig = getattr(Qwen2MLP, "forward", None)
+        if not callable(orig):
+            return False
+        if getattr(orig, _MARKER, False):
+            return True
+        thr = min_tokens()
+
+        def forward_chunked(self, x):
+            out = chunked_mlp_forward(
+                self.gate_up_proj, self.act_fn, self.down_proj, x,
+                chunks_k=k, min_tokens_thr=thr,
+            )
+            return orig(self, x) if out is None else out
+
+        setattr(forward_chunked, _MARKER, True)
+        forward_chunked.__name__ = getattr(orig, "__name__", "forward")
+        forward_chunked.__doc__ = getattr(orig, "__doc__", None)
+        Qwen2MLP.forward = forward_chunked
+        return True
+    except Exception:  # noqa: BLE001 -- load() 绝不能破坏引擎
+        return False
+    finally:
+        _LOCAL.installing = False
+
+
+def load() -> bool:
+    """``vllm.general_plugins`` 入口。
+
+    default-off：仅当 ``VLLM_HUST_MLP_CHUNKS>=2`` 时才安装包装，否则不 import
+    任何重模块、不触碰注册表。
+    """
+    return install()

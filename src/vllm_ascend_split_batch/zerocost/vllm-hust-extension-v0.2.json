@@ -1,0 +1,52 @@
+{
+  "schema_version": "0.2-experimental",
+  "extension_id": "org.vllm-hust.zerocost-wiring",
+  "extension_version": "0.1.0.dev0",
+  "kind": "in_process_plugin",
+  "host": {
+    "provider": "vllm",
+    "name": "vllm-ascend",
+    "version_range": "==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27"
+  },
+  "runtime": {
+    "type": "python",
+    "process_scope": "vllm-processes",
+    "isolation": "trusted_in_process"
+  },
+  "lifecycle_owner": "vllm",
+  "protocols": [],
+  "components": [
+    {
+      "component_id": "zerocost-host-wiring",
+      "implementation_ref": "vllm_ascend_split_batch.zerocost_wiring:load",
+      "contracts": [
+        "vllm.general_plugins"
+      ],
+      "execution_planes": [
+        "worker",
+        "device"
+      ],
+      "isolation": "trusted_in_process",
+      "permissions": [
+        "device_access"
+      ]
+    }
+  ],
+  "implementation": [
+    {
+      "type": "python_module",
+      "module": "vllm_ascend_split_batch.zerocost_wiring",
+      "object": "load",
+      "status": "active"
+    }
+  ],
+  "requires_services": [],
+  "activation": {
+    "entry_points": [],
+    "environment": {
+      "VLLM_HUST_FI_PREFILL_OUT": "1",
+      "VLLM_HUST_SKIP_COS_SIN": "1"
+    },
+    "additional_config": {}
+  }
+}

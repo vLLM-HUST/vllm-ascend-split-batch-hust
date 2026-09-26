@@ -12,10 +12,26 @@ license = "Apache-2.0"
 dependencies = []
 
 [project.optional-dependencies]
+# CCE op wheel (fa_fp32_stage1 / lse_merge), Tier-1 fp32 tier; not on PyPI --
+# install with --find-links pointing at the kernel repo output/ (see README).
+kernels = ["ascend-kernel==2026.3.9"]
 test = ["pytest>=8", "ruff>=0.12", "vllm-hust-ext==0.2.0.dev0"]
 
 [project.entry-points."vllm_hust.extension_bundles"]
 "org.vllm-hust.split-batch-full-graph" = "vllm_ascend_split_batch"
+"org.vllm-hust.fia-demask" = "vllm_ascend_split_batch.fia_demask"
+"org.vllm-hust.rope-fix" = "vllm_ascend_split_batch.rope_fix"
+"org.vllm-hust.zerocost-wiring" = "vllm_ascend_split_batch.zerocost"
+
+[project.entry-points."vllm.general_plugins"]
+"cascade-attention" = "vllm_ascend_split_batch.cascade_plugin:load"
+"fi-sampling" = "vllm_ascend_split_batch.fi_sampling_plugin:load"
+"fi-gelu" = "vllm_ascend_split_batch.fi_gelu_plugin:load"
+"fia-demask" = "vllm_ascend_split_batch.fia_demask_plugin:load"
+"aot-cache-guard" = "vllm_ascend_split_batch.aot_cache_guard_plugin:load"
+"mlp-chunk" = "vllm_ascend_split_batch.mlp_chunk_plugin:load"
+"rope-fix" = "vllm_ascend_split_batch.rope_fix_plugin:load"
+"zerocost-wiring" = "vllm_ascend_split_batch.zerocost_wiring:load"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vllm_ascend_split_batch"]
@@ -26,6 +42,11 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py310"
 line-length = 88
+# Vendored verbatim from flashinfer-migration/sampling/fi_sampling (see
+# PROVENANCE.md): byte-identical copies are required for provenance diffing, so
+# they keep the source package's formatting (its own repo lints with ruff's
+# default line length, not 88).
+extend-exclude = ["src/vllm_ascend_split_batch/fi_sampling"]
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "SIM", "UP"]
