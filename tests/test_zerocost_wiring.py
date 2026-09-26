@@ -47,7 +47,7 @@ import textwrap
 import types
 
 import pytest
-import torch
+from _device_stack import torch  # noqa: F401  -- torch present, or skip
 
 from vllm_ascend_split_batch import zerocost_wiring as carrier
 
@@ -86,7 +86,7 @@ class FakeImpl:
 '''
 
 
-AMBIGUOUS_HOST = '''
+AMBIGUOUS_HOST = """
 class DeviceOperator:
     @classmethod
     def npu_fused_infer_attention_score(cls, **kwargs):
@@ -102,13 +102,13 @@ class Ambiguous:
         attn_output, _ = DeviceOperator.npu_fused_infer_attention_score()
         output[:num_tokens] = attn_output[:num_tokens]
         output[:num_tokens] = attn_output[:num_tokens]
-'''
+"""
 
 
 #: a *plugin* stand-in: wrappers defined in a different file than the host, so
 #: their code objects never satisfy the "lives in the host file" criterion and
 #: the closure walk has to descend through them to the host body underneath.
-STACKED_WRAPPER_PLUGIN = '''
+STACKED_WRAPPER_PLUGIN = """
 def make_forward_wrapper(orig):
     def forward_fused_infer_attention(self, output, num_tokens, query):
         return orig(self, output, num_tokens, query)
@@ -120,12 +120,12 @@ def make_ambiguous_wrapper(orig, decoy):
         decoy()
         return orig(self, output, num_tokens, query)
     return forward_fused_infer_attention
-'''
+"""
 
 
 #: host stand-in whose file holds *two* functions, so a wrapper that closes over
 #: both of them is ambiguous (the file criterion alone cannot pick one).
-AMBIGUOUS_CHAIN_HOST = '''
+AMBIGUOUS_CHAIN_HOST = """
 def _decoy_host_helper():
     return None
 
@@ -133,7 +133,7 @@ def _decoy_host_helper():
 class FakeImpl:
     def forward_fused_infer_attention(self, output, num_tokens, query):
         return output
-'''
+"""
 
 
 def _synthetic_module(name: str = "zc_synthetic_host", source: str = SYNTHETIC_HOST):
@@ -466,11 +466,7 @@ def test_rope_anchors_still_present():
         pytest.skip(f"{path} not present")
     with open(path, encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
-    names = {
-        node.name
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-    }
+    names = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
     assert carrier.ROTARY_UPDATE in names
     assert carrier.ROTARY_READ in names
     body = next(

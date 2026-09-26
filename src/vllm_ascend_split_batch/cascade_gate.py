@@ -89,8 +89,8 @@ ENV_SMALLP_MAXPREFIX = "VLLM_ASCEND_CASCADE_GATE_SMALLP_MAXPREFIX"
 SUFFIX = 256
 
 _lock = threading.Lock()
-_decisions: dict = {}          # (num_tokens, prefix_bucket) -> bool
-_prefix_buckets: list = []      # ascending shared-prefix bucket edges
+_decisions: dict = {}  # (num_tokens, prefix_bucket) -> bool
+_prefix_buckets: list = []  # ascending shared-prefix bucket edges
 _bench_duration_s = 0.0
 
 
@@ -217,14 +217,17 @@ def bench_all(runner, batch_descriptors, block_size: int) -> float:
     max_model_len = getattr(runner, "max_model_len", 0) or 1
     min_prefix = int(os.getenv("VLLM_ASCEND_CASCADE_MIN_PREFIX", "8192"))
     grid = _prefix_grid(min_prefix, max_model_len)
-    buckets = sorted({
-        getattr(d, "num_tokens", 0)
-        for d in batch_descriptors
-        if getattr(d, "uniform", False) and getattr(d, "num_tokens", 0) > 0
-    })
+    buckets = sorted(
+        {
+            getattr(d, "num_tokens", 0)
+            for d in batch_descriptors
+            if getattr(d, "uniform", False) and getattr(d, "num_tokens", 0) > 0
+        }
+    )
     if not grid or not buckets or block_size <= 0:
-        print(f"[cas-gate] nothing to bench (grid={grid} buckets={buckets})",
-              flush=True)
+        print(
+            f"[cas-gate] nothing to bench (grid={grid} buckets={buckets})", flush=True
+        )
         return 0.0
 
     spec = {
@@ -244,45 +247,61 @@ def bench_all(runner, batch_descriptors, block_size: int) -> float:
         json.dump(spec, fh)
 
     proc = subprocess.run(
-        [sys.executable, "-m",
-         "vllm_ascend_split_batch.cascade_gate_self", spec_path, out_path],
-        capture_output=True, text=True, timeout=300,
-        env=os.environ.copy())
+        [
+            sys.executable,
+            "-m",
+            "vllm_ascend_split_batch.cascade_gate_self",
+            spec_path,
+            out_path,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=os.environ.copy(),
+    )
     duration = _time.perf_counter() - start
 
     results = {}
     if proc.returncode != 0:
-        print(f"[cas-gate] bench subprocess failed rc={proc.returncode}; "
-              "gate neutral", flush=True)
+        print(
+            f"[cas-gate] bench subprocess failed rc={proc.returncode}; gate neutral",
+            flush=True,
+        )
         if proc.stderr:
-            print("[cas-gate] child stderr tail: "
-                  f"{proc.stderr.strip()[-400:]}", flush=True)
+            print(
+                f"[cas-gate] child stderr tail: {proc.stderr.strip()[-400:]}",
+                flush=True,
+            )
         return duration
     try:
         with open(out_path) as fh:
             results = json.load(fh)
     except Exception as exc:  # noqa: BLE001
-        print(f"[cas-gate] bench results unreadable ({exc}); gate neutral",
-              flush=True)
+        print(f"[cas-gate] bench results unreadable ({exc}); gate neutral", flush=True)
         return duration
 
     for num_tokens in buckets:
         for shared in grid:
             cell = results.get(f"{num_tokens}:{shared}")
-            if not isinstance(cell, dict) or "cascade" not in cell \
-                    or "full" not in cell:
+            if (
+                not isinstance(cell, dict)
+                or "cascade" not in cell
+                or "full" not in cell
+            ):
                 continue
             margin = _margin_for(shared)
             verdict = cell["cascade"] <= cell["full"] * (1.0 - margin)
             _decisions[(num_tokens, shared)] = verdict
-            print(f"[cas-gate] N={num_tokens} P={shared} "
-                  f"cascade={cell['cascade']:.0f}us full={cell['full']:.0f}us "
-                  f"margin={margin:.0%} "
-                  f"-> {'on' if verdict else 'OFF'}", flush=True)
+            print(
+                f"[cas-gate] N={num_tokens} P={shared} "
+                f"cascade={cell['cascade']:.0f}us full={cell['full']:.0f}us "
+                f"margin={margin:.0%} "
+                f"-> {'on' if verdict else 'OFF'}",
+                flush=True,
+            )
 
     with _lock:
         _prefix_buckets[:] = sorted(grid)
         _bench_duration_s = duration
-    print(f"[cas-gate] {len(_decisions)} cells benched in {duration:.2f}s",
-          flush=True)
+    print(f"[cas-gate] {len(_decisions)} cells benched in {duration:.2f}s", flush=True)
     return duration

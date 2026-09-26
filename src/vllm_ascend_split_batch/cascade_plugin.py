@@ -85,9 +85,7 @@ def _probe_kernel_wheel() -> tuple[bool, str]:
     except Exception as exc:
         return False, f"import failed ({exc!r})"
     missing = [
-        op
-        for op in ("fa_fp32_stage1", "lse_merge")
-        if not hasattr(torch.ops.npu, op)
+        op for op in ("fa_fp32_stage1", "lse_merge") if not hasattr(torch.ops.npu, op)
     ]
     if missing:
         return False, "torch.ops.npu unregistered: " + ", ".join(missing)
@@ -258,8 +256,9 @@ def _use_cascade_attention(
     # batch (the BS>=threshold loss observed in graph-mode testing).
     try:
         use_ubatching = bool(
-            getattr(getattr(self, "vllm_config", None), "parallel_config", None)
-            .use_ubatching
+            getattr(
+                getattr(self, "vllm_config", None), "parallel_config", None
+            ).use_ubatching
         )
     except AttributeError:
         use_ubatching = False
@@ -372,9 +371,7 @@ def _forward_cascade_decode_inner(
     if fp32_stage1:
         dev = query.device
         stage1_q_seqlens = torch.full((1,), num_tokens, dtype=torch.int64, device=dev)
-        stage1_kv_seqlens = torch.full(
-            (1,), shared_len, dtype=torch.int64, device=dev
-        )
+        stage1_kv_seqlens = torch.full((1,), shared_len, dtype=torch.int64, device=dev)
         o1_fp32, l1_fp32 = torch.ops.npu.fa_fp32_stage1(
             query,
             self.key_cache,
@@ -424,14 +421,10 @@ def _forward_cascade_decode_inner(
     merged = None
     if _HAS_LSE_MERGE_OP:
         try:
-            merged = torch.ops.npu.lse_merge(
-                o1, o2, l1, l2, 1 if fp32_stage1 else 0
-            )
+            merged = torch.ops.npu.lse_merge(o1, o2, l1, l2, 1 if fp32_stage1 else 0)
         except Exception:
             if not getattr(self, "_lse_merge_fallback_logged", False):
-                logger.exception(
-                    "lse_merge kernel failed, falling back to torch merge"
-                )
+                logger.exception("lse_merge kernel failed, falling back to torch merge")
                 self._lse_merge_fallback_logged = True
             merged = None
     if merged is None:
@@ -576,8 +569,7 @@ def _install_policy_factory_stub():
             if policy_class is None:
                 policy_class = RandomLoadBalance
                 logger.warning(
-                    "[eplb/policy] Unrecognized policy_type=%s, "
-                    "falling back to %s",
+                    "[eplb/policy] Unrecognized policy_type=%s, falling back to %s",
                     policy_type,
                     policy_class.__name__,
                 )

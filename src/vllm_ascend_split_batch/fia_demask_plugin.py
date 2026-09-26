@@ -291,9 +291,7 @@ class _OpProxy:
         return getattr(object.__getattribute__(self, "_wrapped_op"), name)
 
     def __call__(self, *args, **kwargs):
-        return _forward_op(
-            object.__getattribute__(self, "_wrapped_op"), args, kwargs
-        )
+        return _forward_op(object.__getattribute__(self, "_wrapped_op"), args, kwargs)
 
     def out(self, *args, **kwargs):
         target = object.__getattribute__(self, "_wrapped_op").out

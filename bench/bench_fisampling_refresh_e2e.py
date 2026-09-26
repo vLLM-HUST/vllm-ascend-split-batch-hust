@@ -92,23 +92,35 @@ GPU_MEM_UTIL = "0.85"
 #: api1 (untruncated) -- W2b REPORT §3.1/§3.2 + run_e2e_matrix.sh.
 API1_SERVER_ARGS = ["--max-model-len", "4096", "--max-num-seqs", "512"]
 API1_CLIENT_ARGS = [
-    "--dataset-name", "random",
-    "--random-input-len", "1024",
-    "--random-output-len", "256",
-    "--num-prompts", "256",
-    "--max-concurrency", "64",
+    "--dataset-name",
+    "random",
+    "--random-input-len",
+    "1024",
+    "--random-output-len",
+    "256",
+    "--num-prompts",
+    "256",
+    "--max-concurrency",
+    "64",
 ]
 
 #: joint -- W2b REPORT §3.3/§3.4 + run_e2e_matrix.sh (reachability only).
 JOINT_SERVER_ARGS = ["--max-model-len", "512", "--max-num-seqs", "512"]
 JOINT_CLIENT_ARGS = [
-    "--dataset-name", "random",
-    "--random-input-len", "128",
-    "--random-output-len", "64",
-    "--num-prompts", "512",
-    "--max-concurrency", "512",
-    "--top-k", "50",
-    "--top-p", "0.95",
+    "--dataset-name",
+    "random",
+    "--random-input-len",
+    "128",
+    "--random-output-len",
+    "64",
+    "--num-prompts",
+    "512",
+    "--max-concurrency",
+    "512",
+    "--top-k",
+    "50",
+    "--top-p",
+    "0.95",
 ]
 
 #: api1 arms: alternating order (absorbs slow machine drift).
@@ -159,7 +171,7 @@ PREREGISTRATION = {
         "port slot free before and after every leg",
     ],
     "no_retuning": "no re-tuning / re-running to chase significance; extra "
-                   "repeats require a new pre-registration",
+    "repeats require a new pre-registration",
 }
 
 
@@ -214,7 +226,9 @@ def git_probe(repo: Path) -> dict:
         try:
             proc = subprocess.run(
                 ["git", "-C", str(repo), *args],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
         except Exception:  # noqa: BLE001
             return ""
@@ -345,22 +359,49 @@ def run_leg(kind: str, mode: str, leg_tag: str, port: int) -> int:
 
     vllm = _vllm_exe()
     server_cmd = [
-        vllm, "serve", MODEL,
-        "--served-model-name", SERVED_NAME,
-        "--generation-config", "vllm",
-        "--gpu-memory-utilization", GPU_MEM_UTIL,
-        "--compilation-config", COMPILATION_CONFIG,
-        "--port", str(port),
+        vllm,
+        "serve",
+        MODEL,
+        "--served-model-name",
+        SERVED_NAME,
+        "--generation-config",
+        "vllm",
+        "--gpu-memory-utilization",
+        GPU_MEM_UTIL,
+        "--compilation-config",
+        COMPILATION_CONFIG,
+        "--port",
+        str(port),
         *server_args,
     ]
     client_cmd = [
-        vllm, "bench", "serve",
-        "--backend", "openai-chat", "--model", SERVED_NAME, "--tokenizer", MODEL,
-        "--host", "127.0.0.1", "--port", str(port),
-        "--endpoint", "/v1/chat/completions",
-        "--ignore-eos", "--num-warmups", "8",
-        "--percentile-metrics", "ttft,tpot,itl", "--metric-percentiles", "50,95,99",
-        "--save-result", "--result-dir", str(LOG_DIR), "--result-filename", result_name,
+        vllm,
+        "bench",
+        "serve",
+        "--backend",
+        "openai-chat",
+        "--model",
+        SERVED_NAME,
+        "--tokenizer",
+        MODEL,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--endpoint",
+        "/v1/chat/completions",
+        "--ignore-eos",
+        "--num-warmups",
+        "8",
+        "--percentile-metrics",
+        "ttft,tpot,itl",
+        "--metric-percentiles",
+        "50,95,99",
+        "--save-result",
+        "--result-dir",
+        str(LOG_DIR),
+        "--result-filename",
+        result_name,
         *client_args,
     ]
 
@@ -375,7 +416,11 @@ def run_leg(kind: str, mode: str, leg_tag: str, port: int) -> int:
             server_cmd, stdout=fh, stderr=subprocess.STDOUT, cwd="/tmp"
         )
     row: dict = {
-        "kind": kind, "leg": leg_tag, "mode": mode, "port": port, "ok": False,
+        "kind": kind,
+        "leg": leg_tag,
+        "mode": mode,
+        "port": port,
+        "ok": False,
         "server_log": str(server_log.relative_to(REPO)),
         "client_log": str(client_log.relative_to(REPO)),
         "result_json": str((LOG_DIR / result_name).relative_to(REPO)),
@@ -395,8 +440,11 @@ def run_leg(kind: str, mode: str, leg_tag: str, port: int) -> int:
         t_client = time.monotonic()
         with open(client_log, "w") as fh:
             client = subprocess.run(
-                client_cmd, stdout=fh, stderr=subprocess.STDOUT,
-                cwd="/tmp", timeout=CLIENT_TIMEOUT_S,
+                client_cmd,
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+                cwd="/tmp",
+                timeout=CLIENT_TIMEOUT_S,
             )
         row["client_wall_s"] = round(time.monotonic() - t_client, 1)
         row["client_rc"] = client.returncode
@@ -407,9 +455,17 @@ def run_leg(kind: str, mode: str, leg_tag: str, port: int) -> int:
             row["metrics"] = {
                 key: data.get(key)
                 for key in (
-                    "median_tpot_ms", "mean_tpot_ms", "p95_tpot_ms", "p99_tpot_ms",
-                    "median_ttft_ms", "output_throughput", "completed", "failed",
-                    "num_prompts", "max_concurrency", "duration",
+                    "median_tpot_ms",
+                    "mean_tpot_ms",
+                    "p95_tpot_ms",
+                    "p99_tpot_ms",
+                    "median_ttft_ms",
+                    "output_throughput",
+                    "completed",
+                    "failed",
+                    "num_prompts",
+                    "max_concurrency",
+                    "duration",
                 )
             }
             row["ok"] = client.returncode == 0 and bool(data.get("completed"))
@@ -446,15 +502,15 @@ def summarize(rows: list[dict]) -> dict:
             ),
             "off_legs_active_lines": [
                 r.get("traces", {}).get("active_lines", 0)
-                for r in rows if r["mode"] == "off"
+                for r in rows
+                if r["mode"] == "off"
             ],
             "on_legs_active_lines": [
                 r.get("traces", {}).get("active_lines", 0)
-                for r in rows if r["mode"] == "on"
+                for r in rows
+                if r["mode"] == "on"
             ],
-            "all_ports_free_after": all(
-                r.get("port_free_after") for r in rows
-            ),
+            "all_ports_free_after": all(r.get("port_free_after") for r in rows),
         },
     }
     for mode in ("off", "on"):
@@ -554,8 +610,10 @@ def orchestrate() -> int:
         },
         "fixture": {
             "server": {
-                "model": MODEL, "served_model_name": SERVED_NAME,
-                "generation_config": "vllm", "gpu_memory_utilization": GPU_MEM_UTIL,
+                "model": MODEL,
+                "served_model_name": SERVED_NAME,
+                "generation_config": "vllm",
+                "gpu_memory_utilization": GPU_MEM_UTIL,
                 "compilation_config": COMPILATION_CONFIG,
             },
             "api1": {
@@ -570,8 +628,8 @@ def orchestrate() -> int:
                 "leg_order": [f"{m}_{t}" for m, t in JOINT_LEGS],
             },
             "note": "offline? NO -- this is the W2b serve protocol "
-                    "(vllm bench serve, openai-chat), kept verbatim except for the "
-                    "graph-mode + cache-disable pair, applied to both arms.",
+            "(vllm bench serve, openai-chat), kept verbatim except for the "
+            "graph-mode + cache-disable pair, applied to both arms.",
         },
         "legs": [],
         "summaries": [],
@@ -602,10 +660,18 @@ def orchestrate() -> int:
             with open(leg_log, "w") as fh:
                 proc = subprocess.Popen(
                     [
-                        sys.executable, self_path, "--leg", mode, leg_tag,
-                        str(port), case,
+                        sys.executable,
+                        self_path,
+                        "--leg",
+                        mode,
+                        leg_tag,
+                        str(port),
+                        case,
                     ],
-                    stdout=fh, stderr=subprocess.STDOUT, cwd="/tmp", env=env,
+                    stdout=fh,
+                    stderr=subprocess.STDOUT,
+                    cwd="/tmp",
+                    env=env,
                 )
                 leg_timeout = SERVER_READY_TIMEOUT_S + CLIENT_TIMEOUT_S + 600
                 try:
@@ -620,13 +686,16 @@ def orchestrate() -> int:
             for line in text.splitlines():
                 if line.startswith(SENTINEL):
                     try:
-                        row = json.loads(line[len(SENTINEL):])
+                        row = json.loads(line[len(SENTINEL) :])
                     except json.JSONDecodeError:
                         continue
             if row is None:
                 row = {
-                    "kind": case, "leg": leg_tag, "mode": mode,
-                    "port": port, "ok": False,
+                    "kind": case,
+                    "leg": leg_tag,
+                    "mode": mode,
+                    "port": port,
+                    "ok": False,
                 }
             row["index"] = idx + 1
             row["subprocess_rc"] = rc

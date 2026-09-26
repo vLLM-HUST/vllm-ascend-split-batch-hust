@@ -33,7 +33,7 @@ import sys
 import types
 
 import pytest
-import torch
+from _device_stack import torch  # noqa: F401  -- torch present, or skip
 
 from vllm_ascend_split_batch import fi_sampling_plugin as plugin
 from vllm_ascend_split_batch import fi_sampling_route as route
@@ -340,6 +340,7 @@ def test_host_top_k_extremes_reads_a_cpu_tensor() -> None:
 
 # --- review F1: the HOST import itself failing must stay fail-open -----------
 
+
 def test_install_is_fail_open_when_host_module_is_missing(monkeypatch) -> None:
     """A missing/unimportable ``vllm_ascend.sample.sampler`` must not raise.
 
@@ -435,6 +436,7 @@ def test_present_reduce_sample_knob_still_falls_back(monkeypatch) -> None:
 
 
 # --- review follow-up: garbage env VALUES must never raise either -----------
+
 
 def test_garbage_enable_value_is_treated_as_off_in_process() -> None:
     """``VLLM_HUST_FI_SAMPLING=true`` must disable, not crash the loader."""

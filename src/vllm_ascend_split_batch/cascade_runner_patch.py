@@ -238,9 +238,7 @@ def _capture_cascade_twins(self, args, kwargs) -> None:
     ):
         return
     batch_descriptors = _pick_arg(args, kwargs, 0, "batch_descriptors")
-    cudagraph_runtime_mode = _pick_arg(
-        args, kwargs, 1, "cudagraph_runtime_mode"
-    )
+    cudagraph_runtime_mode = _pick_arg(args, kwargs, 1, "cudagraph_runtime_mode")
     if batch_descriptors is None or cudagraph_runtime_mode is None:
         raise RuntimeError(
             "host _capture_cudagraphs no longer takes batch_descriptors / "
@@ -282,8 +280,7 @@ def _capture_cascade_twins(self, args, kwargs) -> None:
             gate.bench_all(self, batch_descriptors, blk)
         except Exception:
             logger.exception(
-                "cascade gate bench failed; gate stays neutral "
-                "(cascade-on everywhere)"
+                "cascade gate bench failed; gate stays neutral (cascade-on everywhere)"
             )
     for batch_desc in batch_descriptors:
         if not batch_desc.uniform:
@@ -379,13 +376,9 @@ def _make_model_forward_wrapper(orig):
                 from vllm.forward_context import get_forward_context
 
                 forward_context = get_forward_context()
-                num_tokens_padded = _pick_arg(
-                    args, kwargs, 0, "num_tokens_padded"
-                )
+                num_tokens_padded = _pick_arg(args, kwargs, 0, "num_tokens_padded")
                 if not isinstance(num_tokens_padded, int):
-                    descriptor = getattr(
-                        forward_context, "batch_descriptor", None
-                    )
+                    descriptor = getattr(forward_context, "batch_descriptor", None)
                     num_tokens_padded = getattr(descriptor, "num_tokens", None)
                 if not isinstance(num_tokens_padded, int):
                     raise RuntimeError(

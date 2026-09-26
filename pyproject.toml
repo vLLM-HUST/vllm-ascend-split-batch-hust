@@ -38,6 +38,13 @@ packages = ["src/vllm_ascend_split_batch"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    # Tests that need the vllm-ascend source checkout (source-level drift guards).
+    # They FAIL (not skip) when the tree is missing, so the dependency-free CI job
+    # deselects them: `pytest -q -m "not host_tree"`.  The full local run keeps
+    # them, which is what makes the guard loud.
+    "host_tree: needs the vllm-ascend source checkout (deselected on the CPU CI job)",
+]
 
 [tool.ruff]
 target-version = "py310"
