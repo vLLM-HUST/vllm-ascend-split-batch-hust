@@ -38,6 +38,11 @@ _PLUGIN = (
     / "aot_cache_guard_plugin.py"
 )
 
+#: Needs the vllm-ascend source checkout (reads the host compiler interface).
+#: Deselected on the dependency-free CI job via ``-m "not host_tree"``; a full
+#: local run without a host tree still errors loudly, which is the intent.
+pytestmark = pytest.mark.host_tree
+
 
 def _host_source() -> str:
     """Locate ``vllm_ascend/compilation/compiler_interface.py`` from disk only."""

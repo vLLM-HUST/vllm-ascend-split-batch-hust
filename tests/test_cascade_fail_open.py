@@ -36,7 +36,7 @@ import sys
 import types
 
 import pytest
-import torch
+from _device_stack import torch  # noqa: F401  -- torch present, or skip
 
 cascade_plugin = pytest.importorskip(
     "vllm_ascend_split_batch.cascade_plugin",

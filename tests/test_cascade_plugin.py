@@ -21,6 +21,7 @@ stand-in objects; the NPU kernels themselves are never invoked here.
 import sys
 import types
 
+import _device_stack  # noqa: F401  -- device stack present, or skip
 import pytest
 
 cascade_plugin = pytest.importorskip(

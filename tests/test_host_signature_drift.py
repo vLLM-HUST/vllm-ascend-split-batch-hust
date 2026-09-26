@@ -42,6 +42,7 @@ import logging
 import types
 from pathlib import Path
 
+import _device_stack  # noqa: F401  -- device stack present, or skip
 import pytest
 
 # Resolve the device_op <-> ops circular import exactly as the plugin's

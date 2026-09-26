@@ -90,9 +90,7 @@ import math
 import os
 
 import pytest
-import torch
-import torch.nn.functional as F
-import torch_npu  # noqa: F401  -- registers the "npu" device
+from _device_stack import F, torch, torch_npu  # noqa: F401
 
 from vllm_ascend_split_batch.mlp_chunk_plugin import (
     _ACT_WHITELIST,

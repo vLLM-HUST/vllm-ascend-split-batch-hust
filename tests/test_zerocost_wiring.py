@@ -47,7 +47,7 @@ import textwrap
 import types
 
 import pytest
-import torch
+from _device_stack import torch  # noqa: F401  -- torch present, or skip
 
 from vllm_ascend_split_batch import zerocost_wiring as carrier
 

@@ -153,10 +153,42 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
   `::test_disabled_discovery_reports_not_probed_wheel`、
   `tests/test_cascade_fail_open.py::test_disabled_load_does_not_probe_the_wheel`。
 
-## 7. 未做(登记,勿误读为已具备)
+## 8. CI(包级检查)与两套运行面
 
-- `ruff format --check .` 当前**不通过**(2026-09-26 实测:25 个文件需重排,含
-  `cascade_plugin.py` / `cascade_runner_patch.py` / `tests/test_cascade_*.py`;
-  同一批文件在 `9951e41` 上同样不通过 ⇒ 存量问题,非本轮引入)。
-  本仓 CI 模板 `.github/extension-ci.yml` 含这一步 ⇒ 原样启用 CI 会红;
-  启用前需先做一次纯格式化提交。
+**工作流**:`.github/workflows/ci.yml`(2026-09-26 由 `.github/extension-ci.yml` 迁入——
+GitHub 只执行 `workflows/` 下的文件,原模板位置从未生效,API 侧
+`actions/workflows total_count = 0` 可证)。矩阵 Python 3.10/3.12/3.14,步骤:
+`ruff check .` → `ruff format --check .` → `pytest -q -m "not host_tree"` →
+`python -m build` → `extension inspect`。
+
+CI runner 是**干净 ubuntu**(只装 `.[test]`),没有 torch / torch_npu / vllm-ascend,
+也没有宿主源码树。两套运行面的分工:
+
+| 测试类别 | CI(无设备/无宿主树) | 本机 NPU 宿主 |
+|---|---|---|
+| 纯逻辑(manifest / planner / op-selector / fi_sampling 路由 / fia-demask / rope-fix / zerocost) | 运行 | 运行 |
+| 需要设备栈(cascade / mlp-chunk / gelu / host-signature …) | **skip**(可见) | 运行 |
+| 源码级漂移守卫(rope-fix drift / aot-cache-guard drift) | **deselect**(`host_tree` 标记) | 运行(**缺宿主树即 fail**) |
+
+- 设备类测试在模块顶部 `import _device_stack`(或 `from _device_stack import torch…`):
+  该模块用 `pytest.importorskip` 探测 torch / torch_npu / vllm_ascend,缺任一即
+  **整模块 skip**,skip 理由写明缺什么。**为什么不能只靠 `importorskip(carrier)`**:
+  pytest ≥ 8.2 对"模块可导入、但其内部抛 ImportError"是**重抛**(避免掩盖真实缺陷),
+  于是缺 torch 会变成收集期 ERROR 而不是 skip;必须先把依赖探测掉。
+- `host_tree` 标记(`pyproject.toml [tool.pytest.ini_options] markers`)只用于
+  **显式排除**,不带自动 skip:`pytest -q` 全量跑时这些守卫仍然"缺宿主树即红"
+  (`test_rope_fix_drift.py` 的模块级 fixture、`test_aot_cache_guard_drift.py` 的
+  源文件断言)。CI 里的 `-m "not host_tree"` 是有意的、写在 workflow 里的排除,
+  而不是静默跳过。
+- 复现 CI 判定(本机,不装/不卸任何东西):把 `torch`/`torch_npu`/`vllm`/`vllm_ascend`
+  用 meta-path 拦截器屏蔽后重跑
+  `pytest -q -m "not host_tree"`(2026-09-26 实测:97 passed / 11 skipped /
+  14 deselected / 0 failed)。
+
+## 9. 未做(登记,勿误读为已具备)
+
+- ~~`ruff format --check .` 不通过~~ **已修**:`59e8dfa` 做了纯格式化提交,
+  格式与两套运行面自那以后全绿。
+- `docs/evidence/cascade/` 与 `src/vllm_ascend_split_batch/fi_sampling/` 是**存档/
+  vendor 件**,ruff 通过 `extend-exclude` 排除(重排会破坏 `MANIFEST.sha256`)。
+- 发布渠道未启用:证据齐后走 `uv publish` 到 pypi 或内部索引(见 §1)。

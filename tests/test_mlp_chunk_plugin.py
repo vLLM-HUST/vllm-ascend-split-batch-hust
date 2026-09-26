@@ -48,7 +48,7 @@ import sys
 import types
 
 import pytest
-import torch
+from _device_stack import torch  # noqa: F401  -- torch present, or skip
 
 from vllm_ascend_split_batch import mlp_chunk_plugin as plugin
 from vllm_ascend_split_batch.mlp_chunk_plugin import (

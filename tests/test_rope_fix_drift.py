@@ -107,21 +107,34 @@ def _host_root() -> Path | None:
 
 
 HOST_ROOT = _host_root()
-if HOST_ROOT is None:
-    # Deliberately a failure, not a skip: this guard is the only thing standing
-    # between the carrier and a silent upstream fix (or a silently moved seam).
-    # Missing evidence must be red -- a green "skipped" run would look like a
-    # passing guard.  Point VLLM_ASCEND_HUST_ROOT at the host checkout to run it.
-    pytest.fail(
-        "vllm-ascend source tree not found; the reverse defect guard (and the "
-        "mirror-equivalence proof) cannot be evaluated.  Set "
-        "VLLM_ASCEND_HUST_ROOT to the vllm-ascend checkout to run it.",
-        pytrace=False,
-    )
 
-UTILS_PY = HOST_ROOT / "utils.py"
-ROPE_PY = HOST_ROOT / "ops" / "rotary_embedding.py"
-WORKER_PY = HOST_ROOT / "worker" / "worker.py"
+#: This module cannot say anything useful without the host source tree.  It is
+#: marked (not skipped) so the guard keeps failing loudly on the full run, while
+#: the dependency-free CI job deselects it explicitly with
+#: ``pytest -m "not host_tree"``.  See ``docs/release.md`` §8.
+pytestmark = pytest.mark.host_tree
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _require_host_tree():
+    """Fail the module when the host checkout is missing (guard, not skip)."""
+    if HOST_ROOT is None:
+        # Deliberately a failure, not a skip: this guard is the only thing
+        # standing between the carrier and a silent upstream fix (or a silently
+        # moved seam).  Missing evidence must be red -- and on the org CI job the
+        # markers are deselected before this fixture can run.  Point
+        # VLLM_ASCEND_HUST_ROOT at the host checkout to run it.
+        pytest.fail(
+            "vllm-ascend source tree not found; the reverse defect guard (and the "
+            "mirror-equivalence proof) cannot be evaluated.  Set "
+            "VLLM_ASCEND_HUST_ROOT to the vllm-ascend checkout to run it.",
+            pytrace=False,
+        )
+
+
+UTILS_PY = (HOST_ROOT / "utils.py") if HOST_ROOT else Path()
+ROPE_PY = (HOST_ROOT / "ops" / "rotary_embedding.py") if HOST_ROOT else Path()
+WORKER_PY = (HOST_ROOT / "worker" / "worker.py") if HOST_ROOT else Path()
 
 LLAMA3_SIGNATURE = (
     "head_size",

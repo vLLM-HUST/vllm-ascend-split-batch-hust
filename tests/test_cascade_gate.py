@@ -13,6 +13,7 @@
 
 """CPU-only tests for the W2 cascade gate decision logic (no device)."""
 
+import _device_stack  # noqa: F401  -- device stack present, or skip
 import pytest
 
 gate = pytest.importorskip("vllm_ascend_split_batch.cascade_gate")

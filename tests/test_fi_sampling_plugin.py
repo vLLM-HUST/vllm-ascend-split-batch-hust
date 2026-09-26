@@ -33,7 +33,7 @@ import sys
 import types
 
 import pytest
-import torch
+from _device_stack import torch  # noqa: F401  -- torch present, or skip
 
 from vllm_ascend_split_batch import fi_sampling_plugin as plugin
 from vllm_ascend_split_batch import fi_sampling_route as route

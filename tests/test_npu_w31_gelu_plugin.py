@@ -41,6 +41,7 @@ import inspect
 import subprocess
 import sys
 
+import _device_stack  # noqa: F401  -- device stack present, or skip
 import pytest
 
 from vllm_ascend_split_batch import fi_gelu_plugin as plugin
