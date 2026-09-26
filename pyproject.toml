@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vllm-ascend-split-batch"
-version = "0.1.1"
+version = "0.1.2"
 description = "vLLM-HUST plugin carriers for vllm-ascend: cascade two-stage decode, decode FIA de-mask, RoPE variant fixes, zero-cost wiring, MLP chunking (all default-off)"
 readme = "README.md"
 requires-python = ">=3.10"

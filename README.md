@@ -23,8 +23,8 @@ See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
 pip install vllm-ascend-split-batch
 ```
 
-Published on PyPI (`0.1.1`; wheel + sdist, sha256 and PEP 740 attestations on
-the project page). Release receipt: [docs/release.md](docs/release.md) §11.7.
+Published on PyPI (`0.1.2`; wheel + sdist, sha256 and PEP 740 attestations on
+the project page). Release receipt: [docs/release.md](docs/release.md) §11.8.
 
 **What you get:** 8 `vllm.general_plugins` carriers and 4 extension bundles,
 all **default-off** — installing changes nothing until you enable a capability
@@ -207,6 +207,7 @@ default-off semantics are unchanged. Validated pairing:
 
 | plugin | kernel wheel | torch_npu | CANN |
 |---|---|---|---|
+| `0.1.2` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
 | `0.1.1` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
 
 The kernel wheel is not on any package index (it is platform-tagged and must be
