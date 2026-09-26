@@ -23,9 +23,8 @@ See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
 pip install vllm-ascend-split-batch
 ```
 
-Published on PyPI (`0.1.0`, 2026-09-26; wheel + sdist, sha256 and PEP 740
-attestations on the project page). Release receipt:
-[docs/release.md](docs/release.md) §11.6.
+Published on PyPI (`0.1.1`; wheel + sdist, sha256 and PEP 740 attestations on
+the project page). Release receipt: [docs/release.md](docs/release.md) §11.7.
 
 **What you get:** 8 `vllm.general_plugins` carriers and 4 extension bundles,
 all **default-off** — installing changes nothing until you enable a capability
@@ -37,7 +36,7 @@ extra resolves only with `--find-links`):
 ```bash
 # cascade-only soft dependency; skip it if you do not need the cascade path
 pip install "vllm-ascend-split-batch[kernels]" \
-  --find-links /path/to/ascend-kernel/output
+  --find-links https://github.com/Raing5Days/vllm-hust-cascade-kernel/releases/expanded_assets/v2026.9.26
 ```
 
 ⚠️ **Host pin.** The manifest pins one verified `vllm-ascend` build
@@ -184,15 +183,22 @@ default-off semantics are unchanged. Validated pairing:
 
 | plugin | kernel wheel | torch_npu | CANN |
 |---|---|---|---|
-| `0.1.0` | `ascend-kernel==2026.3.9` | `2.10.0.post2` | `9.0.1` |
+| `0.1.1` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
 
-The wheel is built in the kernel repo (`cascade-merge-op`, git), not
-published to PyPI:
+The kernel wheel is not on any package index (it is platform-tagged and must be
+rebuilt whenever the CANN / torch_npu / soc tuple changes), so it ships as a
+**GitHub Release asset**:
 
 ```bash
-pip install ".[kernels]" --find-links /vllm-workspace/ops/kernels/ascend-kernel/output
+pip install "vllm-ascend-split-batch[kernels]" \
+  --find-links https://github.com/Raing5Days/vllm-hust-cascade-kernel/releases/expanded_assets/v2026.9.26
 python -c "import ascend_kernel, torch; assert hasattr(torch.ops.npu, 'fa_fp32_stage1')"
 ```
+
+Verify the installed kernel build by its library fingerprint (the kernel repo's
+rule is "read the md5, not the file name"): `libascend_kernel.so` must hash to
+`ca8de2d70fe0504d` for `2026.9.26`. Building it from source is documented in the
+kernel repo README (`./build.sh`, ~2 min).
 
 Compat tuple & red lines for the kernel side live in the kernel repo README
 §4-§5. After bumping the kernel wheel: reinstall, then rerun the plugin
