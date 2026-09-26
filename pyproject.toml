@@ -5,11 +5,20 @@ build-backend = "hatchling.build"
 [project]
 name = "vllm-ascend-split-batch"
 version = "0.1.0"
-description = "vllm-ascend-split-batch inert vLLM-HUST contract descriptor"
+description = "vLLM-HUST plugin carriers for vllm-ascend: cascade two-stage decode, decode FIA de-mask, RoPE variant fixes, zero-cost wiring, MLP chunking (all default-off)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 dependencies = []
+# Honest maturity label: the carriers are validated on a point-pinned host build
+# (see host.version_range and docs/release.md §0.1), every capability defaults to
+# off, and the split-batch planner is descriptor-only.
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 
 [project.optional-dependencies]
 # CCE op wheel (fa_fp32_stage1 / lse_merge), Tier-1 fp32 tier; not on PyPI --

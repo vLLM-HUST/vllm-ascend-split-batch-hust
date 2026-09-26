@@ -3,12 +3,11 @@
 #
 # Why OIDC instead of an API token: PyPI matches a short-lived OIDC token minted
 # by GitHub Actions against the publisher configured on the PyPI side; nothing
-# secret is stored here. See docs/release.md §11.2 for the PyPI-side steps.
+# secret is stored here. PyPI-side setup steps: docs/release.md §11.2-11.4.
 #
 # Safe by default: this workflow only runs when a human dispatches it, and the
-# default target is TestPyPI. Publishing to the real index requires an explicit
-# `target: pypi` plus the protected-environment approval configured on PyPI's
-# side (the `pypi` environment below).
+# default target is TestPyPI (a stray dispatch can only fail against TestPyPI,
+# it cannot touch the real index). Publishing for real requires picking `pypi`.
 name: Publish
 
 on:
@@ -24,7 +23,8 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Must match the environment named in the PyPI trusted publisher config.
+    # Must match the environment name registered in the PyPI trusted publisher
+    # (lowercased by PyPI): `pypi` on pypi.org, `testpypi` on test.pypi.org.
     environment: ${{ inputs.target == 'pypi' && 'pypi' || 'testpypi' }}
     permissions:
       id-token: write # OIDC token for Trusted Publishing
@@ -34,6 +34,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install build twine
+      # vllm-hust-ext has no PyPI release yet (the org installs it from source;
+      # see vllm-hust-website plugins.html), and the `test` extra pins ==0.2.0.dev0,
+      # so install the git version first or `.[test]` cannot resolve. Same order
+      # as .github/workflows/ci.yml.
+      - run: python -m pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extension-manager.git@main"
       # Gate: the same checks CI runs, so a red tree never reaches the index.
       - run: python -m pip install -e ".[test]"
       - run: ruff check .
@@ -41,11 +46,31 @@ jobs:
       - run: pytest -q -m "not host_tree"
       - run: python -m build
       - run: python -m twine check dist/*
+      # The bundled manifests are the extension's public surface: a wheel
+      # without them installs but is undiscoverable, so check before uploading.
+      - name: Verify the artifact carries the extension manifests
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          manifests = [n for n in names if n.endswith("vllm-hust-extension-v0.2.json")]
+          entries = [n for n in names if n.endswith("entry_points.txt")]
+          print(f"{wheel}: {len(manifests)} manifests, {len(entries)} entry_points file(s)")
+          if len(manifests) < 4 or not entries:
+              sys.exit("wheel is missing manifests or entry points")
+          PY
       # Release receipt: which commit and which artifact hashes were uploaded.
       - name: Release receipt
         run: |
           echo "commit: $(git rev-parse HEAD)"
-          sha256sum dist/* | tee /tmp/dist.sha256
+          echo "version: $(python -c 'import tomllib,pathlib;print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          sha256sum dist/* | tee dist.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ inputs.target }}
+          path: |
+            dist/*
       - name: Publish to TestPyPI
         if: inputs.target == 'testpypi'
         uses: pypa/gh-action-pypi-publish@release/v1
