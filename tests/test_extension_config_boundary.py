@@ -190,20 +190,31 @@ def test_carriers_gate_on_env_not_on_extension_configuration() -> None:
 
 
 def _assert_version_dependent_states(states: list[str], *, enabled: bool) -> None:
-    """只对**不依赖宿主版本**的 state 做绝对断言。
+    """只对**不依赖宿主环境**的 state 做绝对断言，其余按三支分别断言。
 
     `check` 的 states 里,`installed`/`discovered` 恒在;`enabled` 只反映**用户开关**,
-    与宿主版本无关(2026-09-26 在隔离环境实测:未命中点钉时仍是
-    `['installed','discovered','incompatible','enabled']`);而 `compatible`/`configured`
-    取决于宿主版本是否命中 manifest 的 `host.version_range` 点钉 —— 未命中时是
-    `incompatible` 且没有 `configured`。
+    与宿主状态无关。其余 state 由"宿主可不可用 + 版本命不命中点钉"决定 ——
+    2026-09-26 在三个环境里各实测一次,得到**三种**形态:
 
-    本文件测的是**配置面边界**,不是版本兼容性,所以按"是否 compatible"分两支;
-    早期版本写死了 `configured`,换宿主即红,属测试自身的脆弱(2026-09-26 修)。
+    | 环境 | states |
+    |---|---|
+    | 无宿主包(CI 的干净 runner) | `installed, discovered, configured, degraded` |
+    | 宿主版本命中点钉(`hust` env) | `installed, discovered, compatible, configured` |
+    | 宿主版本不命中点钉(隔离重编的新宿主) | `installed, discovered, incompatible` |
+
+    三支都带用户开关决定的 `enabled`;`degraded` 支的 evidence 逐字是
+    "host version is unavailable; compatibility is unverified"。
+
+    本文件测的是**配置面边界**,不是版本兼容性;早期版本只写了后两种、写死 `configured`,
+    于是 CI 上的 `degraded` 支直接把三腿打红(2026-09-26 实测 run `36255078500`),已修。
     """
     assert "installed" in states and "discovered" in states, states
     assert ("enabled" in states) is enabled, states
-    if "compatible" in states:
+    if "degraded" in states:
+        assert "compatible" not in states, states
+        assert "incompatible" not in states, states
+        assert "configured" in states, states
+    elif "compatible" in states:
         assert "incompatible" not in states, states
         assert "configured" in states, states
     else:
