@@ -133,7 +133,8 @@ def _warn_wheel_missing() -> None:
         "feature is disabled for this process (fail-open to the standard "
         "full-KV path). Install the validated wheel, e.g. pip install "
         "'vllm-ascend-split-batch[kernels]' --find-links "
-        "<kernel-repo>/ascend-kernel/output",
+        "https://github.com/Raing5Days/vllm-hust-cascade-kernel/releases/"
+        "expanded_assets/v2026.9.26",
         _KERNEL_WHEEL_REASON,
     )
     _wheel_warning_logged = True

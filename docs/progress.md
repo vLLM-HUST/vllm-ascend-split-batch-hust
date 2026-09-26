@@ -43,7 +43,7 @@
 - 建立 [release.md](release.md) 发布流程与宿主升级核对清单。
 - 建立本 docs/ 知识库与仓库级 AGENTS.md。
 - kernel wheel 软依赖 + fail-open(W4 收尾,2026-09):`b1e7e61` 声明
-  `kernels` extra(钉 `ascend-kernel==2026.3.9`);wheel 探针守卫——
+  `kernels` extra(原钉 `ascend-kernel==2026.3.9`,0.1.1 起钉 `2026.9.26` 并由 Release 附件提供);wheel 探针守卫——
   缺失/注册失败时 cascade 整体禁用 + 单条 warning(探针/eager gate/twin
   capture/gate bench 子进程四处守卫),单测
   `tests/test_cascade_fail_open.py`(含删 wheel 子进程等价场景);
@@ -306,3 +306,24 @@
 - **登记（未做）**：`ruff format --check .` 存量不过（25 文件，含本轮改的 4 个；`9951e41`
   上同样不过）⇒ CI 模板原样启用会红，启用前需先做一次纯格式化提交。见
   `docs/release.md` §7。
+
+## 2026-09-26 插件包上 PyPI（0.1.0 → 0.1.1）+ 算子轮改走 Release 附件
+
+- **0.1.0 首发**：组织页 pending publisher（OIDC Trusted Publishing，无 token）→
+  `workflow_dispatch` target=`pypi` → PyPI `pypi.org/project/vllm-ascend-split-batch/0.1.0/`。
+  回执见 `docs/release.md` §11.6。用**非 editable** 的 site-packages 做管理器发现已实测
+  `activation_ready=True` / `blocker=None` ⇒ 此前"管理器仍按 import_only 拒绝启用"闭环。
+- **首发前拦下的两个问题**：① `publish.yml` 缺 `vllm-hust-ext` 的 git 安装（该包无 PyPI 发布，
+  而 test extra 钉 `==0.2.0.dev0`）⇒ runner 上必然解析失败；② **内网地址泄漏**：
+  `docs/evidence/w2b-fi-sampling/logs/` 下 10 个日志含未遮蔽的私网地址（cascade 目录当时已遮蔽，
+  这批早先提交的漏了）⇒ 一并遮蔽 + 新增 `tests/test_public_hygiene.py` 把判据机械化。
+- **0.1.1**：0.1.0 不可覆盖，而它的 `kernels` extra 钉着任何索引都查不到的 `ascend-kernel==2026.3.9`
+  ⇒ 修钉子只能发新版。现钉 `2026.9.26`，来源 = 算子仓 GitHub Release 附件；
+  `pip install "vllm-ascend-split-batch[kernels]" --find-links <该目录>` 解析已实测通过。
+  回执见 `docs/release.md` §11.7。
+- **算子轮补齐**（算子仓 `ca5bd9d`，已推送）：根 `LICENSE` 补 CANN OSL 2.0 全文（定性依据：
+  `csrc` 40 处 `#include "catlass/..."` ⇒ `.so` 是该模板树的衍生件，§3.3 要求随附协议）、
+  vendored 树补 `LICENSE`、根 `NOTICE` 写明判定链与不含项清单、wheel 内置协议文本、
+  METADATA 的 license 从误写的 `BSD 3 License` 改为实际协议名、`config.ini` bump 至 `2026.09.26`。
+  **重建等价性实测**：重跑 `./build.sh` 后 `_C.so` / `libascend_kernel.so` 与 `2026.9.16` 轮
+  md5 逐字节相同（`add6e6951d253328` / `ca8de2d70fe0504d`）⇒ 只改打包元数据与许可，目标码未变。

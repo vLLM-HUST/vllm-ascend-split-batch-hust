@@ -302,9 +302,11 @@ https://pypi.org/simple`;用户按项目名 `uv pip install bidkv` 安装)。
    - §2.1 允许为**华为 AI 处理器**系统分发(我们正是该场景);
    - §3.3 要求分发时**随附协议副本**并保留 notices ⇒ 仓与轮内都要有该协议文本,catlass 副本本身漏了 LICENSE;
    - 轮内 METADATA 现写 `License: BSD 3 License`,与实际不符 ⇒ 必须改。
-2. **对齐 `kernels` extra 的钉子**:现钉 `ascend-kernel==2026.3.9`,而该版本**任何索引上都查不到**,
-   且装机内容已不是它(lib 来自 2026.9.16 构建,`pip show` 仍报 2026.3.9)⇒ 钉到真实存在的版本,
-   并让"发布版本号 ↔ 内容"一一对应(README 的 md5 表就是现成的判据)。
+2. ~~**对齐 `kernels` extra 的钉子**~~ **已修(0.1.1)**:原钉 `ascend-kernel==2026.3.9`,
+   该版本任何索引都查不到 ⇒ `pip install "vllm-ascend-split-batch[kernels]"` 必然失败。
+   现钉 `ascend-kernel==2026.9.26`,该轮作为 **GitHub Release 附件**发布(见 §11.7),
+   解析已实测通过。算子仓侧同时修了 METADATA 的 license 字段(原误写 BSD-3)并随包嵌入
+   CANN OSL 2.0 协议文本。
 
 **为什么插件包放 PyPI 就能解掉维护者的"仍拒绝启用"**:管理器读**已安装发行版里的 manifest**
 (§11 末段),插件上了索引后任何人 `pip install` 都是当前状态,不需要我们再手工给轮子。
@@ -323,7 +325,7 @@ https://pypi.org/simple`;用户按项目名 `uv pip install bidkv` 安装)。
 | 设计语义 | README 与 §6 的"软依赖 + fail-open(缺算子 ⇒ 整体禁用 + 单条 warning)"**作废** |
 | 许可混合 | 插件 Apache-2.0 vs 算子轮 METADATA 声称 BSD-3 却**仓内无 LICENSE 文件** ⇒ 先解决 |
 | 仓侧体积 | 算子仓 tracked = 67.6 MB / 317 文件,其中 `catlass-example-data/{k,v}.bin` 占 **64 MB**(S1 锚点数据) |
-| 既存硬伤(与是否合并无关) | `kernels` extra 钉 `ascend-kernel==2026.3.9`,而该包**任何索引上都没有** ⇒ 第三方 `pip install ".[kernels]"` 必然失败 |
+| ~~既存硬伤~~ **已修(0.1.1)** | `kernels` extra 曾钉 `ascend-kernel==2026.3.9`(任何索引都没有)⇒ 第三方 `pip install ".[kernels]"` 必然失败;现钉 `2026.9.26` 并由 Release 附件提供(§11.7) |
 
 **建议**:两个 wheel 分开发布(插件保持 `py3-none-any`);若想少一个仓,可"同仓 monorepo、两个发行物",
 但**不要把设备算子并进纯 Python 的那个包**。
@@ -489,7 +491,7 @@ PyPI 只在 Add 时做**一次只读校验**,然后在你名下存一条 "pendin
 误点时最多在 TestPyPI 认证失败,不会污染正式索引)。只发 PyPI 时**必须在下拉里选 `pypi`**;
 `testpypi` 那个 GitHub 环境不会被创建,不影响任何东西。
 
-### 11.6 首发回执:0.1.0 已发布(2026-09-26T11:12Z)
+### 11.6 首发回执:0.1.0 已发布(2026-09-26T11:12Z) — 历史留档,已被 11.7 取代
 
 **结论:插件包已上公共 PyPI。** 过程与产物如下(全部可核对)。
 
@@ -544,3 +546,36 @@ vllm-ascend-split-batch` 之后,`vllm-hust-ext extension enable org.vllm-hust.sp
    算子轮的公共分发位(选项 A:GitHub Release 附件)还差两件前置:给它补 CANN OSL 2.0 协议文本
    (catlass 衍生,见 §12.2/facts §M)与修正轮内 METADATA 的 license 字段(现误写 BSD-3)。
 3. cascade 在缺算子轮时是**整体禁用**(fail-open),所以只装插件包不会启用 cascade。
+
+### 11.7 0.1.1 已发布:修 `kernels` 钉子 + 算子轮改走 Release 附件(2026-09-26)
+
+**为什么发 0.1.1**:0.1.0 已上 PyPI 且**不可覆盖**,而它的 `kernels` extra 钉着一个
+任何索引都查不到的版本(`ascend-kernel==2026.3.9`)⇒ `pip install "vllm-ascend-split-batch[kernels]"`
+在任何机器上都会失败。修钉子只能发新版本。
+
+| 项 | 值 |
+|---|---|
+| 索引 | `https://pypi.org/project/vllm-ascend-split-batch/0.1.1/` |
+| 版本 | `0.1.1` |
+| 算子轮钉子 | `ascend-kernel==2026.9.26`(原 `==2026.3.9`) |
+| 算子轮来源 | GitHub Release 附件:`Raing5Days/vllm-hust-cascade-kernel` 的 tag `v2026.9.26` |
+| 解析实测 | `pip install "vllm-ascend-split-batch[kernels]" --find-links <含该轮的目录>` ⇒ `Would install ascend-kernel-2026.9.26 vllm-ascend-split-batch-0.1.1` |
+
+**算子轮的补齐内容**(见算子仓 `NOTICE` 与 `ascend-kernel/README.md`):
+
+1. **许可**:根 `LICENSE` 补齐 CANN Open Software License Agreement 2.0 全文
+   (实测定性:`csrc` 有 40 处 `#include "catlass/..."`,即 `.so` 在编译期实例化了该 vendored
+   模板树 ⇒ 属 CANN 开源软件的衍生件,§3.3 要求分发时随附协议)；vendored 树补 `LICENSE`；
+   **协议文本随 wheel 安装**(`ascend_kernel-2026.9.26.dist-info/licenses/LICENSE`)。
+2. **METADATA**:`license` 字段由误写的 `BSD 3 License` 改为实际协议名。
+3. **版本↔内容对齐**:`config.ini` bump `2026.09.16` → `2026.09.26`(禁止覆盖同名轮子),
+   `pip show` 不再报错位版本;判据仍是 **lib md5 `ca8de2d70fe0504d`**。
+4. **目标码未变(实测)**:重跑 `./build.sh`(CANN 9.1.0 / torch_npu 2.13.0rc1)后
+   `_C.so` md5 `add6e6951d253328`、`libascend_kernel.so` md5 `ca8de2d70fe0504d`,
+   与 `2026.9.16` 轮**逐字节相同** ⇒ 此前 cascade 验证过的同一份目标码。
+5. 附件含 `dist.sha256`(自行下载后可自校验;`fa_fp32_stage1` / `lse_merge` /
+   `add_rms_norm_stats` 三个 op 在安装后实测均已注册)。
+
+**仍未解决(与 0.1.0 相同)**:`host.version_range` 仍是点钉 ⇒ 在其它 `vllm-ascend` build 上
+管理器判 `incompatible`、`vllm-hust-ext run` 拒启(env 注入路由不受影响)。放宽须按 §4 在目标
+build 上重核并留档,该工作属"环境核验",按工作区分工归测试机。
