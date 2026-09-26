@@ -17,6 +17,32 @@ activation is considered.
 
 See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
 
+## Install
+
+```bash
+pip install vllm-ascend-split-batch
+```
+
+**What you get:** 8 `vllm.general_plugins` carriers and 4 extension bundles,
+all **default-off** — installing changes nothing until you enable a capability
+via its env var (see the table below). Cascade attention additionally needs the
+`ascend_kernel` CCE op wheel, which is **not on any package index** (the
+`kernels` extra pins a version that only exists in the kernel repository, so the
+extra resolves only with `--find-links`):
+
+```bash
+# cascade-only soft dependency; skip it if you do not need the cascade path
+pip install "vllm-ascend-split-batch[kernels]" \
+  --find-links /path/to/ascend-kernel/output
+```
+
+⚠️ **Host pin.** The manifest pins one verified `vllm-ascend` build
+(`host.version_range`; see [docs/release.md](docs/release.md) §0.1). On any other
+build the manager reports the extension as `incompatible` and
+`vllm-hust-ext run` refuses to launch it — `extension enable` still works, and
+the env-var route below is unaffected. Widening the pin requires re-running the
+host-upgrade checklist on the target build (§4).
+
 ## Documentation
 
 Normative knowledge (architecture & contracts, coding rules for humans and

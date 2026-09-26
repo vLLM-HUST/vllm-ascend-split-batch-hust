@@ -43,7 +43,7 @@ INFO 09-09 05:37:56 [platform.py:62] Breakable cudagraph is force disabled on As
 (EngineCore pid=2112768) `Qwen2VLImageProcessorFast` is deprecated. The `Fast` suffix for image processors has been removed; use `Qwen2VLImageProcessor` instead.
 (EngineCore pid=2112768) INFO 09-09 05:38:10 [ascend_config.py:862] Dynamic EPLB is False
 (EngineCore pid=2112768) INFO 09-09 05:38:10 [ascend_config.py:863] The number of redundant experts is 0
-(EngineCore pid=2112768) INFO 09-09 05:38:12 [parallel_state.py:1568] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://192.168.0.5:48725 backend=hccl
+(EngineCore pid=2112768) INFO 09-09 05:38:12 [parallel_state.py:1568] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://192.168.x.x:48725 backend=hccl
 [Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
 [Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
 [Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
@@ -55,14 +55,22 @@ INFO 09-09 05:37:56 [platform.py:62] Breakable cudagraph is force disabled on As
 (EngineCore pid=2112768) INFO 09-09 05:38:15 [model_runner_v1.py:3661] Starting to load model /data/shared_models/Qwen--Qwen2.5-Coder-14B-Instruct...
 (EngineCore pid=2112768) INFO 09-09 05:38:17 [weight_utils.py:922] Filesystem type for checkpoints: XFS. Checkpoint size: 27.51 GiB. Available RAM: 1005.07 GiB.
 (EngineCore pid=2112768) INFO 09-09 05:38:17 [weight_utils.py:945] Auto-prefetch is disabled because the filesystem (XFS) is not a recognized network FS (NFS/Lustre). If you want to force prefetching, start vLLM with --safetensors-load-strategy=prefetch.
-(EngineCore pid=2112768) Loading safetensors checkpoint shards:   0% Completed | 0/6 [00:00<?, ?it/s]
-(EngineCore pid=2112768) Loading safetensors checkpoint shards:  17% Completed | 1/6 [00:06<00:32,  6.42s/it]
-(EngineCore pid=2112768) Loading safetensors checkpoint shards:  33% Completed | 2/6 [00:12<00:24,  6.05s/it]
-(EngineCore pid=2112768) Loading safetensors checkpoint shards:  50% Completed | 3/6 [00:18<00:18,  6.21s/it]
-(EngineCore pid=2112768) Loading safetensors checkpoint shards:  67% Completed | 4/6 [00:24<00:12,  6.24s/it]
-(EngineCore pid=2112768) Loading safetensors checkpoint shards:  83% Completed | 5/6 [00:32<00:06,  6.57s/it]
-(EngineCore pid=2112768) Loading safetensors checkpoint shards: 100% Completed | 6/6 [00:38<00:00,  6.40s/it]
-(EngineCore pid=2112768) Loading safetensors checkpoint shards: 100% Completed | 6/6 [00:38<00:00,  6.35s/it]
+(EngineCore pid=2112768) 
+Loading safetensors checkpoint shards:   0% Completed | 0/6 [00:00<?, ?it/s]
+(EngineCore pid=2112768) 
+Loading safetensors checkpoint shards:  17% Completed | 1/6 [00:06<00:32,  6.42s/it]
+(EngineCore pid=2112768) 
+Loading safetensors checkpoint shards:  33% Completed | 2/6 [00:12<00:24,  6.05s/it]
+(EngineCore pid=2112768) 
+Loading safetensors checkpoint shards:  50% Completed | 3/6 [00:18<00:18,  6.21s/it]
+(EngineCore pid=2112768) 
+Loading safetensors checkpoint shards:  67% Completed | 4/6 [00:24<00:12,  6.24s/it]
+(EngineCore pid=2112768) 
+Loading safetensors checkpoint shards:  83% Completed | 5/6 [00:32<00:06,  6.57s/it]
+(EngineCore pid=2112768) 
+Loading safetensors checkpoint shards: 100% Completed | 6/6 [00:38<00:00,  6.40s/it]
+(EngineCore pid=2112768) 
+Loading safetensors checkpoint shards: 100% Completed | 6/6 [00:38<00:00,  6.35s/it]
 (EngineCore pid=2112768) 
 (EngineCore pid=2112768) INFO 09-09 05:38:56 [default_loader.py:397] Loading weights took 38.47 seconds
 (EngineCore pid=2112768) INFO 09-09 05:38:57 [model_runner_v1.py:3737] Loading model weights took 27.5350 GB

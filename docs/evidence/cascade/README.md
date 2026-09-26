@@ -38,9 +38,10 @@
 - **未入仓 209 个文件**：体量最大的逐步 sweep 日志（`logs/v1-ev3*/`，合计约 18 MB），
   按体积裁剪；它们可由本目录脚本重放，且已排除项清单在 `MANIFEST.sha256`
   末尾逐条列出（路径 + 字节数 + sha256，可对照工作区原件校验）。
-- **遮蔽 1 类 3 处**：私网地址 `192.168.0.5`（torch distributed init 打印的
-  `distributed_init_method=tcp://…`）改为 `192.168.x.x`，见上表 3 个 `serve-*.log`。
+- **遮蔽 1 类 3 处**：私网地址（torch distributed init 打印的
+  `distributed_init_method=tcp://<address>:<port>`）已改为 `192.168.x.x`，见上表 3 个 `serve-*.log`。
   其余端口/回环地址（`127.0.0.1`、`0.0.0.0`）为服务绑定与健康检查，原样保留。
+  （同一类遮蔽也应用于 `docs/evidence/w2b-fi-sampling/logs/` 下的 10 个日志，2026-09-26 首发前复核。）
 - **未纳入的内容**：模型权重与语料（只引用路径）、kernel wheel 二进制（在 kernel 仓构建）、
   宿主源码（本仓不含，按契约只走公开面）。
 
