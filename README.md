@@ -172,6 +172,25 @@ vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
 pytest -q && ruff check .
 ```
 
+⚠️ **`vllm-hust-ext` is not on PyPI** (see the org's own note on
+[vllm-hust-website](https://github.com/vLLM-HUST/vllm-hust-website): *"No public
+vllm-hust-ext PyPI alpha exists yet; install the current source"*). It is the
+org's extension-manager package, maintained in
+[`vLLM-HUST/extension-manager`](https://github.com/vLLM-HUST/extension-manager) —
+this repository only consumes it. Because the released `test` extra pins it,
+install the manager from git **first**, which is exactly what CI and
+`publish.yml` do:
+
+```bash
+python -m pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extension-manager.git@main"
+python -m pip install -e ".[test]"   # now resolves
+```
+
+Without that step `pip install "vllm-ascend-split-batch[test]"` fails with
+`Could not find a version that satisfies the requirement vllm-hust-ext==0.2.0.dev0`
+(measured 2026-09-26). The `kernels` extra is the one end users need, and it is
+resolvable (`--find-links` to the kernel release, see "Install" above).
+
 ## Kernel wheel dependency (soft, fail-open)
 
 Both cascade tiers consume the `ascend_kernel` CCE op wheel

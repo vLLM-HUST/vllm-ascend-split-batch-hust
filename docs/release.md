@@ -633,6 +633,20 @@ vllm-ascend-split-batch` 之后,`vllm-hust-ext extension enable org.vllm-hust.sp
 管理器判 `incompatible`、`vllm-hust-ext run` 拒启(env 注入路由不受影响)。放宽须按 §4 在目标
 build 上重核并留档,该工作属"环境核验",按工作区分工归测试机。
 
+**两个 extra 的可解析性(2026-09-26 实测)**:发布出去的元数据里有两个 extra,处境不同 ——
+
+| extra | 钉的东西 | 第三方能否解析 |
+|---|---|---|
+| `kernels` | `ascend-kernel==2026.9.26`(GitHub Release 附件) | ✅ 带 `--find-links <该目录>` 即可(§11.7) |
+| `test` | `vllm-hust-ext==0.2.0.dev0`(**不在任何索引上**) | ❌ 实测报 `Could not find a version that satisfies the requirement vllm-hust-ext==0.2.0.dev0 (from versions: none)` |
+
+`vllm-hust-ext` 是**组织的框架包**,维护在 `vLLM-HUST/extension-manager`,**不由本仓管理/发布**
+(官网自己写着"No public vllm-hust-ext PyPI alpha exists yet; install the current source")。
+本仓只是它的消费方:`test` extra 需要它才能跑 `tests/test_manifest.py`,CI 与 `publish.yml`
+都先 `pip install "vllm-hust-ext @ git+..."` 再装 `.[test]`(README「Extension framework」
+一节已写明这个前置)。0.1.1 的元数据已发布且不可覆盖,故该 extra 的第三方可用性问题
+只能靠文档说明;后续发版可考虑把它从 extra 里摘出去、让开发者显式安装。
+
 **发布附件的字节口径(2026-09-26 自纠)**:GitHub Release 的附件必须是**PyPI 上那一批字节**
 (由 `publish.yml` 在 runner 上构建,带 PEP 740 attestation),不能在本地用 `python -m hatchling build`
 重造的等价物 —— 两次构建的 sha256 不同(实测 `a7480733…` vs `e7c2dc4f…`),同时挂两份不同字节
