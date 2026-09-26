@@ -21,24 +21,30 @@ wheel,单向依赖;算子库对 vllm-hust-ext 与插件机制零感知。日常�
 ## 2. 三层关系
 
 ```text
-┌─ 宿主(只读,禁止修改)────────────────────────────┐
-│  vllm 0.23.0 (VLLM_TARGET_DEVICE=empty)          │
-│  vllm-ascend 0.23.0rc1                           │
-└──────────────┬───────────────────────────────────┘
+┌─ 宿主(只读,禁止修改)────────────────────────────────────────────┐
+│  vllm 0.28.1.post1.dev143+gf18cf803c (VLLM_TARGET_DEVICE=empty) │
+│  vllm-ascend 0.25.1rc2.dev125+hust.20260903.4                   │
+└──────────────┬──────────────────────────────────────────────────┘
                │ 唯一官方入口: vllm.general_plugins
                │ entry `cascade-attention` → cascade_plugin:load()
-┌──────────────▼───────────────────────────────────┐
-│  本壳 vllm-ascend-split-batch(纯 Python)         │
-│  · bundle manifest(0.2-experimental, cascade active)│
-│  · env 门控 + monkeypatch(见 HOST_CONTRACT.md)   │
-│  · 纯逻辑 planner / gate(CPU 可测)              │
-└──────────────┬───────────────────────────────────┘
+┌──────────────▼──────────────────────────────────────────────────┐
+│  本壳 vllm-ascend-split-batch(纯 Python)                        │
+│  · bundle manifest(0.2-experimental, cascade active)            │
+│  · env 门控 + monkeypatch(见 HOST_CONTRACT.md)                  │
+│  · 纯逻辑 planner / gate(CPU 可测)                              │
+└──────────────┬──────────────────────────────────────────────────┘
                │ 单向依赖: torch.ops.npu.*
-┌──────────────▼───────────────────────────────────┐
-│  ascend_kernel wheel(CCE 算子, 仓库外)          │
-│  fa_fp32_stage1 / lse_merge;对本壳零感知          │
-└───────────────────────────────────────────────────┘
+┌──────────────▼──────────────────────────────────────────────────┐
+│  ascend_kernel wheel(CCE 算子, 仓库外)                          │
+│  fa_fp32_stage1 / lse_merge;对本壳零感知                        │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+> 图中的版本号只是层级示意,**现行验证域以 [release.md](release.md) §0.1 为准**:
+> vllm `0.28.1.post1.dev143+gf18cf803c`(vllm-hust release v1)/ vllm-ascend
+> `0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`。旧基线 `vllm 0.23.0` /
+> `vllm-ascend 0.23.0rc1` 仅在 `docs/evidence/cascade/EVIDENCE.md` §8 留档,
+> 其参考源码树已删,只作历史数字对照,不继承。
 
 依赖方向铁律:**本壳 → kernel 包**单向;kernel 包禁止 import 本壳或任何
 vllm 模块;宿主源码不可修改,宿主能力只走公开面(entry point、
