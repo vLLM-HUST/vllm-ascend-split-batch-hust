@@ -144,6 +144,10 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
 - **启用态的 fail-open 不变**:内核 wheel 缺失/注册失败时仍是"整体禁用 + 单条
   warning"(见根 README「Kernel wheel dependency」),只是探测时机从"每次 load"
   收窄为"仅在启用时"。
+- **代价(明示)**:三个 fail-open shim 现在只在启用路径安装 ⇒ 关闭态下,若宿主的
+  `policy_factory` / `spec_decode` import 本身是坏的,不再有插件侧静默兜底。
+  这是"关闭即不动宿主"的必然代价(宿主自身缺陷不应由关闭态的插件掩盖),已由
+  `test_disabled_discovery_touches_nothing` 固定。
 - 测试:`tests/test_cascade_plugin.py::test_disabled_discovery_touches_nothing`
   (把 env 注入/shim/探测全部替换为 `pytest.fail`,关闭态调用 `load()`)、
   `::test_disabled_discovery_reports_not_probed_wheel`、
