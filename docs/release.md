@@ -452,3 +452,39 @@ PyPI 只在 Add 时做**一次只读校验**,然后在你名下存一条 "pendin
 匹配成功后:`reify()` **找到或新建**一条普通 `GitHubPublisher`(同仓+owner+workflow+environment),
 **删除 pending 记录**,项目由该组织创建并归属该组织。此后就是普通 publisher,**不需要再注册**;
 要改配置则在项目页的 Publishing 里增删。
+
+### 11.5 首发时机与首发前的最后决定(2026-09-26)
+
+**"首发时机"= 你手动点 `Actions → Publish → Run workflow`(target=`pypi`)的那一刻。** 为什么它是一个需要
+主动选的时间点,而不是"随时都行":
+
+| 在首发那一刻发生 | 之前 | 之后 |
+|---|---|---|
+| 项目名归属 | pending publisher **不占名**(§11.4) | 项目由组织创建,名字归组织 |
+| 版本号 | 可任意改 | **永不可覆盖**(PyPI 不允许同版本重传) |
+| pending 记录 | 保留 | `reify()` 转正为普通 publisher 并删除该记录 |
+
+⏳ **计时已开始**:pending publisher 自 Add 起 **30 天**过期(`PENDING_PUBLISHER_EXPIRY_DAYS = 30`,
+提前 5 天提醒)。⇒ 首发应在 30 天内完成,否则要重新 Add。
+
+**首发前的最后决定(本轮已完成其中一项)**:
+
+1. **版本号:已从 `0.1.0.dev0` 改为 `0.1.0`**(本次改动: `pyproject.toml`、4 个 bundle manifest 的
+   `extension_version`、`fi_gelu`/`fi_sampling` 的 `__version__`、README 配对表)。
+   压测过的理由:
+   - 裸 `pip install vllm-ascend-split-batch` 即使只有 dev 版本也能装上(pip 的
+     "找不到正式版则回落到预发布"规则;uv 默认 `if-necessary` 同样会回落到预发布)——但这是**回落**,不是正常路径;
+   - 一旦有人写 `vllm-ascend-split-batch>=0.1`,**实测直接失败**:
+     `ERROR: Could not find a version that satisfies the requirement ... (from versions: 0.1.0.dev0)`
+     —— 因为 `0.1.0.dev0 < 0.1.0`,不满足 `>=0.1`;
+   - 永久发行物带 `dev` 后缀在语义上也不对(它不是"开发版",是第一个公开版)。
+2. **`host.version_range` 的宽度(未决,见下)**:现值是点钉
+   `==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`。它决定"装上也**只有**匹配宿主能 `run`":
+   管理器对不匹配宿主报 `INCOMPATIBLE`,而 `vllm-hust-ext run` **会拒绝启动**(`extension enable`
+   仍可用)。放宽带需要按 §4 清单在目标宿主上重验并留档,`AGENTS.md` 禁止写 `>=0`。
+3. **可选**:给仓库 `pypi` 环境加 required reviewers;给 METADATA 加
+   `Development Status :: 3 - Alpha` 分类器(诚实标注成熟度)。
+
+**不做 TestPyPI 的含义**:`.github/workflows/publish.yml` 的下拉默认值是 `testpypi`(**安全默认**:
+误点时最多在 TestPyPI 认证失败,不会污染正式索引)。只发 PyPI 时**必须在下拉里选 `pypi`**;
+`testpypi` 那个 GitHub 环境不会被创建,不影响任何东西。
