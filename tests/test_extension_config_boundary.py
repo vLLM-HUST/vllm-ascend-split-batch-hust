@@ -189,6 +189,28 @@ def test_carriers_gate_on_env_not_on_extension_configuration() -> None:
     )
 
 
+def _assert_version_dependent_states(states: list[str], *, enabled: bool) -> None:
+    """只对**不依赖宿主版本**的 state 做绝对断言。
+
+    `check` 的 states 里,`installed`/`discovered` 恒在;`enabled` 只反映**用户开关**,
+    与宿主版本无关(2026-09-26 在隔离环境实测:未命中点钉时仍是
+    `['installed','discovered','incompatible','enabled']`);而 `compatible`/`configured`
+    取决于宿主版本是否命中 manifest 的 `host.version_range` 点钉 —— 未命中时是
+    `incompatible` 且没有 `configured`。
+
+    本文件测的是**配置面边界**,不是版本兼容性,所以按"是否 compatible"分两支;
+    早期版本写死了 `configured`,换宿主即红,属测试自身的脆弱(2026-09-26 修)。
+    """
+    assert "installed" in states and "discovered" in states, states
+    assert ("enabled" in states) is enabled, states
+    if "compatible" in states:
+        assert "incompatible" not in states, states
+        assert "configured" in states, states
+    else:
+        assert "incompatible" in states, states
+        assert "configured" not in states, states
+
+
 def test_unknown_configuration_keys_do_not_change_any_verdict(
     probe_result: dict,
 ) -> None:
@@ -202,8 +224,7 @@ def test_unknown_configuration_keys_do_not_change_any_verdict(
         f"without={json.dumps(without, sort_keys=True)}\n"
         f"with={json.dumps(with_unknown, sort_keys=True)}"
     )
-    assert "enabled" in with_unknown["states"]
-    assert "configured" in with_unknown["states"]
+    _assert_version_dependent_states(with_unknown["states"], enabled=True)
 
 
 def test_lifecycle_writes_metadata_only_and_keeps_unknown_keys(
@@ -227,8 +248,9 @@ def test_lifecycle_writes_metadata_only_and_keeps_unknown_keys(
     assert after_disable["configuration"] == UNKNOWN_CONFIGURATION, (
         "disable must not drop the stored configuration"
     )
-    assert "enabled" not in result["check_after_disable"]["states"]
-    assert "configured" in result["check_after_disable"]["states"]
+    _assert_version_dependent_states(
+        result["check_after_disable"]["states"], enabled=False
+    )
 
     assert result["after_forget"] is None, (
         "forget must remove the stored state entirely"
