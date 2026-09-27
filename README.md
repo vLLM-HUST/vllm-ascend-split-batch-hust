@@ -162,9 +162,12 @@ Extension ID: `org.vllm-hust.split-batch-full-graph`
 The Manifest 0.2 descriptor marks the two cascade carriers `active` (the
 planner stays `import_only`): `vllm-hust-ext extension enable` injects the
 `activation.environment` flags, and installation alone changes no vLLM
-behavior because the cascade capability is env-gated at runtime. Verified
-host range: `vllm-ascend==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`
-(point-pinned; see `docs/release.md` §0.1).
+behavior because the cascade capability is env-gated at runtime. Declared
+host range: **`vllm-ascend >=0.25.1rc2.dev125,<0.25.2`** — a bounded
+*compatibility window*, not a point pin: both endpoints were verified on
+910B2 hardware (`dev125` historically; `dev605` = `fbe4911bb` on 2026-09-27),
+and a failure inside the window is a host-side finding by design (rationale
+and the core-pairing caveat: `docs/release.md` §0.1/§0.3).
 
 ```bash
 python -m pip install -e ".[test]"

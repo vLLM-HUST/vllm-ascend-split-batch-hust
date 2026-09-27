@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 try:  # Python 3.11+
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover -- Python 3.10 (CI matrix leg)
@@ -139,23 +141,78 @@ def test_zerocost_bundle_is_active_with_its_own_keys() -> None:
     assert raw["host"]["version_range"] == _manifest_json()["host"]["version_range"]
 
 
-def test_host_version_range_pins_the_verified_baseline() -> None:
-    """host.version_range must pin the exact verified host build.
+def test_host_version_range_is_a_bounded_verified_interval() -> None:
+    """host.version_range is a **bounded interval**, not a point pin and not ``>=0``.
 
-    packaging rejects local-version labels in ordered comparators, so the
-    single verified point is pinned with an ``==`` (local label included).
+    Decision (2026-09-27, owner ruling): a point pin made the extension
+    un-verifiable on every build but one, so failures could not be attributed to
+    the host at all.  The declared range is now the whole verified fork line
+    ``0.25.1``: lower bound = the previously verified build (``dev125``),
+    upper bound = ``<0.25.2``.  The two endpoints are verified on real hardware
+    (dev125: `docs/evidence/cascade/`; dev605 = `fbe4911bb`: receipts
+    ``VERIFY-PROGRAM-20260927.md``); builds in between are declared compatible
+    **by range**, not per-revision verified, and a failure there is a host-side
+    finding by definition (that is the point of the relaxation).
+
+    Mechanical guards below:
+    * both verified points must be inside the range;
+    * the range must be bounded (0.24 / 0.26 must fall outside) — ``>=0`` is
+      forbidden by AGENTS.md and would also be unbounded;
+    * no local-version label in ordered comparators: ``packaging`` rejects
+      ``>=0.25.1rc2.dev125+hust...`` outright, so a "pin both endpoints with
+      local labels" attempt would break the manifest at load time.  The range
+      therefore uses public version parts only; ``packaging`` ignores a
+      candidate's local label when the specifier has none (PEP 440), which is
+      what lets ``+hust.<date>.<n>.g<sha>`` builds match.
     """
     import packaging.specifiers
     import packaging.version
 
     host = _manifest_json()["host"]
-    range_ = packaging.specifiers.SpecifierSet(host["version_range"])
-    verified = "0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27"
-    assert range_.contains(packaging.version.Version(verified), prereleases=True)
-    # A neighbouring build must NOT satisfy a point pin.
-    assert not range_.contains(
-        packaging.version.Version("0.25.1rc2.dev126"), prereleases=True
+    raw = host["version_range"]
+    range_ = packaging.specifiers.SpecifierSet(raw)
+
+    for verified in (
+        # previously verified fork build (dev125, the old point pin)
+        "0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27",
+        # locally rebuilt target revision verified 2026-09-27 (dev605)
+        "0.25.1rc2.dev605+hust.20260903.4.gfbe4911bb",
+    ):
+        assert range_.contains(packaging.version.Version(verified), prereleases=True), (
+            f"verified host build {verified} is outside the declared range {raw}"
+        )
+
+    # Bounded on both sides: the neighbouring feature line and the previous one
+    # must not match, otherwise the declaration is effectively unbounded.
+    for outside in ("0.26.0", "0.24.0"):
+        assert not range_.contains(
+            packaging.version.Version(outside), prereleases=True
+        ), f"{outside} must not satisfy {raw}: the range has to stay bounded"
+    assert "<" in raw, (
+        f"{raw} is not upper-bounded (>=0-style declarations are forbidden)"
     )
+    assert not raw.strip().startswith(">=") or "," in raw, (
+        f"{raw} looks unbounded; declare a bounded interval instead"
+    )
+
+
+def test_no_local_version_label_in_ordered_comparators() -> None:
+    """Ordered comparators must not carry ``+local`` labels (packaging rejects them).
+
+    ``>=0.25.1rc2.dev125+hust.20260903.4`` raises ``InvalidSpecifier``.  This
+    guard fails loudly at test time instead of at manifest load time on a user's
+    machine.
+    """
+    import packaging.specifiers
+
+    raw = _manifest_json()["host"]["version_range"]
+    for clause in raw.split(","):
+        clause = clause.strip()
+        if clause[:1] in "<>~=" and "+" in clause:
+            pytest.fail(
+                f"local version label inside an ordered comparator: {clause!r} ({raw})"
+            )
+    packaging.specifiers.SpecifierSet(raw)  # must parse at all
 
 
 def test_extension_version_matches_distribution_version() -> None:

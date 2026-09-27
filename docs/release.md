@@ -11,12 +11,17 @@
 - 翻 `active` 前,`activation.environment` 必须是可注入的真实值
   (`"1"`,由 `tests/test_manifest.py` 保证格式);default-off 语义由
   "不 enable 就不注入 + `load()` 内部门控" 双层保证。
-- `host.version_range` 钉住**实际验证域**(当前
-  `==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27` 点钉,2026-09-11 起),禁止
-  `>=0`。历史教训:packaging 语义下 prerelease 不属于
-  `>=X.Y.Z,<next` 形式的下界(如 `0.23.0rc1 ∉ >=0.23.0`),区间写法必须对照
-  实装版本核 packaging 判定。区间收窄/放宽前先过 §4 清单并留档验证环境
-  (见 §0.1)。
+- `host.version_range` 声明**有界的已验证域**(2026-09-27 起
+  `>=0.25.1rc2.dev125,<0.25.2`;见 §0.1),禁止 `>=0`(也无上界=等同 `>=0`)。
+  历史教训:packaging 语义下 prerelease 不属于 `>=X.Y.Z,<next` 形式的下界
+  (如 `0.23.0rc1 ∉ >=0.23.0`),且**有序比较符内不得出现 `+local` 标签**
+  (packaging 直接 `InvalidSpecifier`;已由 `tests/test_manifest.py` 守住),
+  区间写法必须对照实装版本核 packaging 判定。区间收窄/放宽前先过 §4 清单并
+  留档验证环境(见 §0.1)。
+- **区间的语义边界(2026-09-27 裁定)**:区间是"**声明兼容窗口**",不是"逐
+  revision 验证"。两个端点都已真机验证(dev125、dev605);端点之间/之后的 build
+  按区间**声明**兼容 ⇒ 若在那里出问题,**归因给宿主**(这正是放宽的目的:把
+  失败变成宿主侧发现,而不是让插件替宿主扛下来)。裁定与理由见 §0.3。
 - `protocols[].version_range` 为 `null`:这四个协议(`vllm.graph.runtime-key` /
   `vllm.forward.split-context` / `vllm.ascend.graph-pool` /
   `vllm.worker.split-executor`)是本仓库单方面遵守的弱契约,**宿主不独立
@@ -30,13 +35,17 @@
 
 | 项 | 值 |
 |---|---|
-| `host.version_range` | `==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`(点钉) |
-| vllm-ascend | `0.25.1rc2.dev125+hust.20260903.4`,`74f0c0a272376412b51e1c1864803d5f3a0f1b5f`(main) |
-| vllm | `0.28.1.post1.dev143+gf18cf803c.empty`,`f18cf803c5f63625e2c71253ddaf8b0bad0bad1a`(vllm-hust release v1) |
+| `host.version_range` | **`>=0.25.1rc2.dev125,<0.25.2`**(有界区间,2026-09-27 起;此前为点钉 `==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`) |
+| 区间内**已验证端点 1** | vllm-ascend `0.25.1rc2.dev125+hust.20260903.4` @ `74f0c0a272376412b51e1c1864803d5f3a0f1b5f`(main) + vllm `0.28.1.post1.dev143+gf18cf803c.empty` @ `f18cf803c5f63625e2c71253ddaf8b0bad0bad1a`(vllm-hust release v1) |
+| 区间内**已验证端点 2** | vllm-ascend `0.25.1rc2.dev605+hust.20260903.4` @ `fbe4911bb`(本地自编;**必须配 vllm core `0aee727ff6`**,见 §0.3 的配对警告) + 正确性/顺序/性能证据 `handoffs/receipts/20260926-rebuild-verify/VERIFY-PROGRAM-20260927.md` |
+| 区间**之外** | `0.24.*` / `0.26.*` 判 `incompatible`(有界性由 `tests/test_manifest.py` 机械守住) |
 | 验证环境 | Python 3.12.14 / torch 2.13.0+cpu / torch_npu 2.13.0rc1 / CANN 9.1.0 (`/usr/local/ascend91`) / 910B2 |
 | 验证证据 | `extension check` → compatible;§3 启用验证(`knowledge/evidence/cascade/section4-active-enablement.md`);正确性 `section2-correctness.md`(真模型 6/64);历史域(0.23.0rc1 / CANN 9.0.1,已退役)留档于 `EVIDENCE.md` 与 c3-legacy 产物 |
 
-### 0.2 点钉到底是什么,以及它拦住的是哪条路(2026-09-26)
+### 0.2 点钉到底是什么,以及它拦住的是哪条路(2026-09-26；**2026-09-27 起已被 §0.3 的有界区间取代**)
+
+> 历史留档:本节叙述**点钉时期**的行为与解法,保留用于解释"当时为什么只认一个 build"以及
+> 点钉字符串怎么解开。现行声明是**有界区间**(§0.1/§0.3);下面表格里的"钉值"按历史读。
 
 **点钉的字符串是可以解开的**:`==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`
 = git tag `v0.25.1rc1+hust.20260903.4`(→ commit `4e57439e`,2026-09-03)
@@ -67,6 +76,45 @@
    按工作区分工归测试机(本机只有 `74f0c0a27` 一个宿主)。
 2. **让消费方固定到已验证的宿主 revision**:即 checkout `74f0c0a27` 自行构建 ——
    可复现但代价明显(旧提交 + 完整历史 + CANN 配齐),只适合"就要这一份"的场景。
+
+> **现状(2026-09-27)**:上表第 1 条已落地 —— 区间 `>=0.25.1rc2.dev125,<0.25.2` 覆盖整条 0.25.1 线,
+> 两个端点均已真机验证;窗口内失败的归因规则、实测放行效果与 core 配对警告见 §0.3。
+
+### 0.3 为什么从点钉改为有界区间(2026-09-27 裁定)
+
+**裁定**:`host.version_range` 从点钉改为 **`>=0.25.1rc2.dev125,<0.25.2`**。
+理由(owner 原话的意思,逐条落账):
+
+1. **点钉让插件在除一个 build 之外的地方都无法验证**。`vllm-hust-ext run` 只在点钉上放行,
+   于是 480 个后续提交、以及任何其它装机形态都到不了"能不能跑"这一步 —— 连"哪里会出问题"
+   都测不出来,这种正确性对使用者没有价值。
+2. **失败的归因应当落在宿主侧**。区间是"声明兼容窗口":端点已验证,窗口内的 build 声明兼容;
+   窗口内出问题 ⇒ 那是宿主 build 的发现(我们据此登记/修),而不是让插件替宿主承担"不可用"。
+3. **纪律不变**:仍然禁止 `>=0`(以及任何无上界写法)。区间必须**有界**,由
+   `tests/test_manifest.py::test_host_version_range_is_a_bounded_verified_interval` 机械守住
+   (两个已验证端点必须在区间内;`0.24.*`/`0.26.*` 必须在区间外);
+   `test_no_local_version_label_in_ordered_comparators` 守住"有序比较符内不得有 `+local`"
+   (packaging 会直接 `InvalidSpecifier`)。
+
+**已实测的放行效果**(同一份 manifest,两种宿主):
+
+| 宿主 | 放行前 | 放行后 |
+|---|---|---|
+| `0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`(旧点钉) | compatible | **compatible** |
+| `0.25.1rc2.dev605+hust.20260903.4.gfbe4911bb`(目标栈,自编) | **incompatible**(`check` 拒、`run` 拒启) | **compatible**;`run --dry-run` exit 0 且正确注入 `activation.environment` |
+| `0.26.0` / `0.24.0` | incompatible | **incompatible**(有界性未破) |
+
+⚠️ **配对警告(区间表达不了的维度)**:`host.version_range` 只覆盖 **vllm-ascend** 的版本,
+**不覆盖 vllm core**(两个 fork 各自独立演进)。2026-09-27 实测:asc `fbe4911bb`
+**必须**配 core `0aee727ff6`;配 core 最新 `fb1fd64f93` 会
+`ImportError: cannot import name 'RoutedExpertsLists' from 'vllm.v1.outputs'`
+(上游 #45635 删了该符号,而 asc 仍 import 它),配 release v1 `f18cf803c` 会
+`ModuleNotFoundError: vllm.models.deepseek_v41`。这类错**在 import 期就炸、信息明确**,
+不会被误读成 cascade 的行为问题;选配对时以上面两个已验证端点为准。
+
+**使用者在窗口外怎么办**(两条,均为操作者自担):① 换到窗口内的 build;② 用管理器的
+自述通道 `configure --file` 声明 `host_version`(等于操作者认下"我在未验证宿主上跑",
+见 §0.2)。
 
 ## 1. 版本与构建
 

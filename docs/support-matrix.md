@@ -71,6 +71,14 @@
 `vllm.ascend.graph-pool` / `vllm.worker.split-executor`）`version_range` 均为 `null`，宿主不存在对应的 typed
 contract（见 [release.md](release.md) §0）。这是"能力预览"而非可用能力，管理器据此拒绝 enable。
 
+## 4.1 宿主窗口（2026-09-27 起）
+
+`host.version_range = >=0.25.1rc2.dev125,<0.25.2`（**有界兼容窗口**，非点钉）。窗口两端点均已真机验证
+（`dev125` 历史；`dev605` = `fbe4911bb`，证据 `VERIFY-PROGRAM-20260927.md`）；窗口内其它 build
+**声明兼容**，在那里出问题按宿主侧发现处理（裁定见 [release.md](release.md) §0.3）。
+窗口外（`<0.25.1rc2.dev125` 或 `>=0.25.2`）判 `incompatible`，`vllm-hust-ext run` 拒启。
+⚠️ 该区间只覆盖 **vllm-ascend**，不含 vllm core：asc `fbe4911bb` 必须配 core `0aee727ff6`（§0.3 配对警告）。
+
 ## 5. 兼容禁区（两侧一致 fail-closed 的部分）
 
 | 形态 | dual-pad planner | cascade |

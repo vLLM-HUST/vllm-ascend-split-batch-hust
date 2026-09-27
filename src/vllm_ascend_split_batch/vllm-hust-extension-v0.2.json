@@ -6,7 +6,7 @@
   "host": {
     "provider": "vllm",
     "name": "vllm-ascend",
-    "version_range": "==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27"
+    "version_range": ">=0.25.1rc2.dev125,<0.25.2"
   },
   "runtime": {
     "type": "python",
