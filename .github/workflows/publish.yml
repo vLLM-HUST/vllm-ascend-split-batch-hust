@@ -5,9 +5,20 @@
 # by GitHub Actions against the publisher configured on the PyPI side; nothing
 # secret is stored here. PyPI-side setup steps: docs/release.md §11.2-11.4.
 #
-# Safe by default: this workflow only runs when a human dispatches it, and the
-# default target is TestPyPI (a stray dispatch can only fail against TestPyPI,
-# it cannot touch the real index). Publishing for real requires picking `pypi`.
+# Two triggers, both OIDC-only:
+#
+#   * `workflow_dispatch` (safe by default): target defaults to TestPyPI, so a
+#     stray dispatch cannot touch the real index. Publishing for real requires
+#     picking `pypi`. This is the path used for 0.1.0-0.1.2.
+#   * `push` of a `v*` tag: publishes to PyPI (a release tag is an explicit
+#     release act). Added 2026-09-27 because dispatching the job needs GitHub
+#     API credentials, and a maintainer without them can still release by
+#     pushing a tag over SSH. Guarded by a tag/version equality check below, so
+#     a stale or mistyped tag fails BEFORE the upload step.
+#
+# The PyPI trusted publisher is registered for this exact file
+# (`.github/workflows/publish.yml`) and the environment `pypi`; both triggers
+# satisfy that (verified PyPI-side semantics: docs/release.md §11.4).
 name: Publish
 
 on:
@@ -19,13 +30,17 @@ on:
         options: [testpypi, pypi]
         default: testpypi
         required: true
+  push:
+    tags:
+      - "v*"
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     # Must match the environment name registered in the PyPI trusted publisher
     # (lowercased by PyPI): `pypi` on pypi.org, `testpypi` on test.pypi.org.
-    environment: ${{ inputs.target == 'pypi' && 'pypi' || 'testpypi' }}
+    # A tag push always targets the real index; a dispatch keeps its choice.
+    environment: ${{ (github.event_name == 'push' || inputs.target == 'pypi') && 'pypi' || 'testpypi' }}
     permissions:
       id-token: write # OIDC token for Trusted Publishing
     steps:
@@ -44,6 +59,24 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest -q -m "not host_tree"
+      # Tag-push guard: the tag must name exactly the version in pyproject.toml.
+      # Runs before the build so a mismatched tag cannot reach the index (PyPI
+      # files are immutable, so this is the cheap place to be strict).
+      - name: Verify the release tag matches the project version (tag pushes)
+        if: github.event_name == 'push'
+        run: |
+          python - <<'PY'
+          import os, pathlib
+          try:
+              import tomllib
+          except ModuleNotFoundError:  # py<3.11 backstop; runner is 3.12
+              import tomli as tomllib
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
+          expected = f"v{version}"
+          assert tag == expected, f"tag {tag!r} does not name the project version ({expected!r})"
+          print(f"tag {tag} matches pyproject version {version}")
+          PY
       - run: python -m build
       - run: python -m twine check dist/*
       # The bundled manifests are the extension's public surface: a wheel
@@ -64,18 +97,19 @@ jobs:
       - name: Release receipt
         run: |
           echo "commit: $(git rev-parse HEAD)"
+          echo "ref: $(git describe --tags --always 2>/dev/null || echo "$GITHUB_REF_NAME")"
           echo "version: $(python -c 'import tomllib,pathlib;print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           sha256sum dist/* | tee dist.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ inputs.target }}
+          name: dist-${{ (github.event_name == 'push' || inputs.target == 'pypi') && 'pypi' || 'testpypi' }}
           path: |
             dist/*
       - name: Publish to TestPyPI
-        if: inputs.target == 'testpypi'
+        if: ${{ !(github.event_name == 'push' || inputs.target == 'pypi') }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
       - name: Publish to PyPI
-        if: inputs.target == 'pypi'
+        if: ${{ github.event_name == 'push' || inputs.target == 'pypi' }}
         uses: pypa/gh-action-pypi-publish@release/v1
