@@ -821,3 +821,37 @@ build 上重核并留档,该工作属"环境核验",按工作区分工归测试�
 2. **`github.com:443` 直连在本容器超时**(与 §11.7 记录同根因):Release 附件的浏览器下载路径
    **仍未实测**;本次回环走 API 资产端点(`/releases/assets/{id}` + `Accept: application/octet-stream`,
    重定向到 `objects.githubusercontent.com`)完成,字节与 PyPI 一致。
+
+### 11.9 0.1.3(待发布):`host.version_range` 放开为有界兼容窗口 + UpdatableGraph 接缝修复
+
+**本版相对 0.1.2 的改动**(均为已合入 `main` 的提交,无行为默认值变更):
+
+| 提交 | 内容 |
+|---|---|
+| `a30c761` | 4 个 manifest 的 `host.version_range`:`==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`(点钉)→ **`>=0.25.1rc2.dev125,<0.25.2`**(有界窗口;裁定与理由见 §0.3) |
+| `aba09a2` | cascade 图孪生适配宿主新的 `UpdatableGraph` 重放机制(修"图开了但首步后卡死",机理见 `pitfalls.md` §2.4) |
+| `2176c95` | 该修复的单测跨测试污染修正(全套 465 passed) |
+| `7f68bbb` | `pitfalls.md` §2.5:正确性验收必须走离线固定批 harness(HTTP 并发路线会给假发散) |
+
+**发布前已完成的验证**(证据 `knowledge/handoffs/receipts/20260926-rebuild-verify/VERIFY-PROGRAM-20260927.md`):
+
+| 项 | 结果 |
+|---|---|
+| 放行效果(真管理器,同 manifest 两种宿主) | `dev125` → compatible(不变);**`dev605`(`fbe4911bb`) → incompatible ⇒ compatible**;两代宿主 `run --dry-run` 均 exit 0 且注入正确 |
+| 有界性 | `0.26.0`/`0.24.0`/`0.23.0rc1` 仍判 incompatible(`<0.25.2` 上界生效) |
+| 正确性门(目标栈,离线固定批,真模型,自然 EOS) | `p420_b64` **ON vs OFF = 6/64** ≤ 8/64;确定性 **0/64**;噪声底 **0/64**;参考帧(无 cascade)`OFF-eager vs OFF-graph` = **7/64** |
+| 顺序卫生 | gate bench 先于 twin 捕获(trace 行 665 < 720);分档 margin 判定正确 |
+| 单 cell / 形状矩阵 TPOT | 6 格:2 亏(`+15.1%`/`+5.2%`)、4 赢(`−2.3%`/`−19.7%`/`−25.9%`/`−44.4%`);符号与历史一致 |
+| CPU 门槛 | `pytest -q` 466 passed、`ruff check/format` 干净(见本次提交) |
+
+⚠️ **配对警告**:区间只覆盖 vllm-ascend,**不含 vllm core**。已验证配对 =
+core `0aee727ff6`;其它 core 会 import 期报错(§0.3 有逐条报错原文)。
+
+**发布状态(2026-09-27):待发布 —— 本机无 GitHub/PyPI 凭据**(`gh` 未装、`GH_TOKEN` 未设、
+无 `~/.pypirc`)。发布动作二选一:① GitHub UI → Actions → **Publish** → Run workflow(`target=pypi`);
+② 提供一次性 token。发布后在本节追加回执(run id / 两个 sha256 / Release 与 tag)。
+
+**发布后的判据(照 §11.8 的做法,机械可核)**:
+① 干净 venv 打 `pypi.org/simple` ⇒ `Would install … 0.1.3`,且 `importlib.metadata` 读出
+`Version: 0.1.3`;② 反向:`==0.1.2` 的元数据里 `host.version_range` 仍是点钉(证明"放宽只在新版生效");
+③ 两代宿主 `extension check` 均 `compatible`。

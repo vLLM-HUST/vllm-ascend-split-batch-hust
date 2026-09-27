@@ -23,8 +23,11 @@ See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
 pip install vllm-ascend-split-batch
 ```
 
-Published on PyPI (`0.1.2`; wheel + sdist, sha256 and PEP 740 attestations on
-the project page). Release receipt: [docs/release.md](docs/release.md) §11.8.
+Latest on PyPI: **`0.1.2`** (wheel + sdist, sha256 and PEP 740 attestations on the
+project page; receipt [docs/release.md](docs/release.md) §11.8). **`0.1.3` is prepared and
+pending publication** — it widens `host.version_range` from a point pin to the bounded
+window `>=0.25.1rc2.dev125,<0.25.2` (rationale §0.3) and carries the UpdatableGraph replay
+fix; see §11.9 for its pre-publication verification and the publish criteria.
 
 **What you get:** 8 `vllm.general_plugins` carriers and 4 extension bundles,
 all **default-off** — installing changes nothing until you enable a capability
@@ -210,6 +213,7 @@ default-off semantics are unchanged. Validated pairing:
 
 | plugin | kernel wheel | torch_npu | CANN |
 |---|---|---|---|
+| `0.1.3` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
 | `0.1.2` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
 | `0.1.1` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
 
