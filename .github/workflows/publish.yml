@@ -105,11 +105,29 @@ jobs:
           name: dist-${{ (github.event_name == 'push' || inputs.target == 'pypi') && 'pypi' || 'testpypi' }}
           path: |
             dist/*
+      # Re-running a tag push (e.g. to (re)create the GitHub Release in
+      # release.yml) must not fail here: PyPI files are immutable, so an upload
+      # of an existing version can only error. Check first and skip -- the
+      # Release workflow takes the authoritative bytes from PyPI anyway.
+      - name: Check whether this version is already on PyPI
+        if: ${{ github.event_name == 'push' || inputs.target == 'pypi' }}
+        id: pypi_state
+        run: |
+          NAME=$(python -c 'import tomllib,pathlib;print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["name"])')
+          VERSION=$(python -c 'import tomllib,pathlib;print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/$NAME/$VERSION/json")
+          echo "pypi.org/pypi/$NAME/$VERSION/json -> HTTP $CODE"
+          if [ "$CODE" = "200" ]; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$NAME $VERSION is already on PyPI; skipping the upload step"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish to TestPyPI
         if: ${{ !(github.event_name == 'push' || inputs.target == 'pypi') }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
       - name: Publish to PyPI
-        if: ${{ github.event_name == 'push' || inputs.target == 'pypi' }}
+        if: ${{ (github.event_name == 'push' || inputs.target == 'pypi') && steps.pypi_state.outputs.already != 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
