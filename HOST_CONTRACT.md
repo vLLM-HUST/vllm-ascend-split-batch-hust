@@ -58,6 +58,7 @@ main (`0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`), CANN 9.1.0.
 | `_warmup_and_capture` | `(self, desc, cudagraph_runtime_mode, profile_seq_lens=None, allow_microbatching=False, num_warmups=None, profiler=None)` | not wrapped (called via `orig`) | OK |
 | `AscendTopKTopPSampler` / `AscendSampler` | `vllm_ascend/sample/sampler.py` | subclass replacement | OK |
 | `update_full_graph_params` / `GraphParams` / `get_graph_params` / `ACLGraphWrapper` | `vllm_ascend/compilation/acl_graph.py` (:279/:306/:334/:60) | read-only use | OK |
+| `ACLGraphWrapper._updatable_graph_replay` (**只在有新机制的被测宿主上存在**;基线 `74f0c0a27` 无此方法) | `vllm_ascend/compilation/acl_graph.py:304` 起;触发条件 `runtime_mode == FULL and use_updatable_graph(self.attn_backend)`(`:297`)。配套:`vllm_ascend/compilation/updatable_graph.py` 的 `UpdatableGraph` 与 `vllm_ascend/utils.py:1773` 的 `use_updatable_graph` —— **旧基线三者在树里都不存在** | 包装该方法,在**宿主重放之前**做 cascade 重参数化(见 `cascade_graph_plugin._wrap_updatable_graph_replay`);特征探测,旧宿主自动 no-op | **新增接缝(2026-09-27)**,机制与顺序约束见 `docs/pitfalls.md` §2.4 |
 | `BatchDescriptor` | `vllm/forward_context.py` | unchanged | OK |
 | `spec_decode` / `spec_decode.ngram_proposer` / `eplb.core.policy.policy_factory` | present (needs `scipy` + `decorator`) | shims | OK |
 

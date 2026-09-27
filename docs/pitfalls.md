@@ -92,6 +92,49 @@ cascade 两段式与任何 microbatching(`use_ubatching`: DBO 或 `ubatch_size>1
   (历史 fix 9899f00)。
 - 详见 kernel 仓库 README §4-§5。
 
+### 2.4 宿主换图重放机制 ⇒ cascade 孪生卡死(2026-09-27 定位并修)
+
+**症状**:目标栈(`vllm-ascend` `fbe4911bb`,自编 `0.25.1rc2.dev605+…`)上,图孪生开启时
+**第一个 decode step 之后请求再也不出 token**(4 并发实测 1/4 完成、其余 >90 s 零吞吐;
+引擎 CPU ~60% **自旋**,不是 I/O 等待)。`capture body SUCCESS` 照常 96 次、`cascade plugin
+loaded (gate=1, graph_gate=1, kernel_wheel=ok)` 照常、`twin missing` 0 次、0 TypeError
+⇒ **所有旧观测点都显示"正常",只有吞吐是 0**。关图孪生(`VLLM_ASCEND_ENABLE_CASCADE_GRAPH=0`)
+则 4/4 正常(0.5–0.7 s) ⇒ 问题专属图重放路径。
+
+**机理**:新宿主给 FULL 图换了重放机制 —— 新增 `vllm_ascend/compilation/updatable_graph.py`
+的 `UpdatableGraph` 与 `use_updatable_graph`(`vllm_ascend/utils.py:1773`),`ACLGraphWrapper.__call__`
+对 `FULL + use_updatable_graph(attn_backend)` 改走 `_updatable_graph_replay(...)`
+(`acl_graph.py:297`),**不再**调 `update_full_graph_params`(该函数对可更新图直接
+`return`);而插件的重参数化包装挂在 `impl_cls.update_graph_params` 上 ⇒ **一次都不会被调到**
+(实测 `replay update` = 0;旧宿主上是 2)。孪生图里每个 stage 任务组前后都有
+`ExternalEvent.wait`(捕获期写入),**只有**插件的重参数化会 `record` 这些事件 ⇒
+没人 record ⇒ 图内等待永不满足 ⇒ 重放挂死。
+
+**修法**(`cascade_graph_plugin._wrap_updatable_graph_replay`,特征探测 + fail-open):
+包装 `ACLGraphWrapper._updatable_graph_replay`,在 **`orig(...)` 之前**调
+`_update_cascade_on_updatable_replay`。**顺序是硬约束**:放在 `orig` 之后会挂
+(实测:同一个 4 并发负载,更新放后面 ⇒ >90 s 超时;放前面 ⇒ 8/8 成功、0.2–0.4 s)。
+宿主自己的 `enable_enpu` 分支也是"先 update 再 replay",插件与之对齐。
+
+**判据(两代宿主都要跑)**:
+
+| 宿主 | 期望 |
+|---|---|
+| 新机制(≥`fbe4911bb`) | trace 出现 `updatable replay: cascade update ran=True`,且 `cascade key hit` **= 0**(那是旧接缝的观测点,新机制下不再触发) |
+| 旧机制(基线 `74f0c0a27`) | trace 出现 `updatable-replay seam absent on this host`,`cascade key hit` > 0,且 `cascade update ran` **= 0**(新接缝必须 no-op) |
+
+**同源坑(诊断期踩到,值得记住)**:
+- **`VLLM_ASCEND_CASCADE_MIN_PREFIX` 小于一个 block ⇒ 孪生捕获静默关闭**:
+  `cascade_runner_patch.py:266-271` 里 `dummy_prefix = min(MIN_PREFIX, …)`,若 `< block_size`
+  就 `return`,**无任何日志**;运行期 gate 仍判 on ⇒ 表现为"图开了但没接管"
+  (`cascade twin missing … step replays the standard full-KV graph`)。冒烟想放宽运行期门槛时
+  别把它设成 0,用 ≥ 一个 block(本机用 1024)。
+- **挂死的引擎无视 SIGTERM**:上述死锁状态下 `kill <pid>` 无效(实测仍在、HBM 位不释放),
+  必须 `kill -9`;杀完等 10 s+ 再复查 `npu-smi info -t usages -i <card>`。
+- **单请求冒烟会给出假绿**:`VLLM_ASCEND_CASCADE_MIN_REQS` 默认 32(本机冒烟设 2),
+  1 个请求时常 < 门槛 ⇒ cascade 未准入 ⇒ 走标准图 ⇒ **0.3 s 返回正常**,而 ≥2 并发才触发孪生。
+  验证 cascade 图路径**必须**发 ≥ 门槛的并发请求。
+
 ## 3. 打包与发布类
 
 ### 3.1 manifest `activation.environment` 填文档字符串(2026-09 已修)

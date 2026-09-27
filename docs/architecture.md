@@ -86,6 +86,8 @@ manifest 与 entry point 打包完整性由构建检查保证,流程见 [release
   `_update_full_graph_params_if_needed`
 - vllm-ascend:`update_full_graph_params` / `get_graph_params` / `GraphParams`
 - `ACLGraphWrapper` variant-entry 侧表(按标准 `BatchDescriptor` 键)
+- `ACLGraphWrapper._updatable_graph_replay`(**只在新图重放机制的宿主上存在**;插件在宿主
+  重放**之前**做 cascade 重参数化,旧宿主自动 no-op —— 机理见 [pitfalls.md](pitfalls.md) §2.4)
 
 这是与 bidkv 类"宿主主动调插件"的 typed contract 最大的不同:**宿主没有
 给我们的 seam,契约靠我们单方面遵守 + `host.version_range` 钉死**。宿主

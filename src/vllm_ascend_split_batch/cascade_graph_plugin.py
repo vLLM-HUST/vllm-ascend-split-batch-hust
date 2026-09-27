@@ -40,9 +40,21 @@ the ``concrete_aclgraph_entries`` mapping to the cascade table for the
 duration of the call, so descriptor equality selects the cascade twin graph
 without altering the host dataclass.
 
+Two host generations, two update seams (2026-09-26): the host used to call
+``update_full_graph_params`` before/after every FULL replay, which reaches the
+impl's ``update_graph_params`` (our seam #1).  Builds with the ``UpdatableGraph``
+mechanism (vllm-ascend ``fbe4911bb`` and later) early-return from
+``update_full_graph_params`` for FULL graphs and instead update *their own*
+task groups right after the replay, on the update stream, inside
+``ACLGraphWrapper._updatable_graph_replay``.  The cascade task groups are not
+part of the host's task list, so the plugin hooks that method too (seam #2) and
+runs the same re-parameterization there.  Seam #2 is feature-detected: on
+hosts without ``_updatable_graph_replay`` it is a no-op and seam #1 keeps
+working.
+
 Host source trees stay untouched; everything rides the official public
-surface: the runner's public capture methods and vllm-ascend's
-``update_full_graph_params`` entry.
+surface: the runner's public capture methods, vllm-ascend's
+``update_full_graph_params`` entry, and the wrapper's own replay hook.
 """
 
 from __future__ import annotations
@@ -721,13 +733,121 @@ def _wrap_aclgraph_wrapper(ACLGraphWrapper) -> None:
                     return orig_call(self, *args, **kwargs)
             orig_entries = self.concrete_aclgraph_entries
             self.concrete_aclgraph_entries = self._cascade_aclgraph_entries
+            # Only a cascade *replay* may re-parameterize the cascade task
+            # groups; the capture window swaps the table for the same reason
+            # (route the new graph into the cascade table) but captures the
+            # graph, so it must not claim a replay for the update hook.
+            _replay_ctx.cascade_selected = cascade_replay
             try:
                 return orig_call(self, *args, **kwargs)
             finally:
+                _replay_ctx.cascade_selected = False
                 self.concrete_aclgraph_entries = orig_entries
         return orig_call(self, *args, **kwargs)
 
     ACLGraphWrapper.__call__ = __call__
+
+
+def _update_cascade_on_updatable_replay(wrapper, forward_context) -> bool:
+    """Re-parameterize the cascade task groups on the host's updatable path.
+
+    Host builds with the ``UpdatableGraph`` mechanism never call
+    ``update_full_graph_params`` for FULL graphs (it early-returns when
+    ``use_updatable_graph(attn_backend)``; see
+    ``vllm_ascend/compilation/acl_graph.py``), so the wrapper installed on
+    ``impl_cls.update_graph_params`` is not entered and the cascade twin would
+    replay with capture-time parameters (dummy prefix).  The host updates its
+    own task groups on the update stream right after the replay; we mirror that
+    for the cascade groups.
+
+    Returns True when the update ran (or was legitimately skipped because the
+    step has no cascade task groups), False when a prerequisite is missing.
+    """
+    from vllm_ascend.compilation.acl_graph import get_graph_params
+
+    update_stream = getattr(wrapper, "update_stream", None)
+    descriptor = getattr(forward_context, "batch_descriptor", None)
+    num_tokens = getattr(descriptor, "num_tokens", None)
+    if update_stream is None or not num_tokens:
+        _warn_once(
+            "cascade update on the updatable-graph path skipped: "
+            "update_stream=%s num_tokens=%s",
+            update_stream is not None,
+            num_tokens,
+        )
+        return False
+    graph_params = get_graph_params()
+    if graph_params is None:
+        _warn_once(
+            "cascade update on the updatable-graph path skipped: "
+            "GraphParams unavailable"
+        )
+        return False
+    _update_cascade_graph_params(
+        update_stream, forward_context, graph_params, num_tokens
+    )
+    return True
+
+
+def _wrap_updatable_graph_replay(ACLGraphWrapper) -> bool:
+    """Hook the host's ``UpdatableGraph`` replay so cascade params keep updating.
+
+    Feature-detected seam: hosts without ``_updatable_graph_replay`` (the
+    ``update_full_graph_params`` generation) are left alone, and the wrapper on
+    ``impl_cls.update_graph_params`` keeps doing the work there.
+
+    Fail-open: any failure inside our update is logged once and the host replay
+    result is returned untouched (a cascade step then keeps capture-time
+    parameters, which is the pre-existing behavior on such hosts).
+    """
+    orig = getattr(ACLGraphWrapper, "_updatable_graph_replay", None)
+    if orig is None:
+        _trace(
+            "updatable-replay seam absent on this host; "
+            "the update_full_graph_params seam stays in charge"
+        )
+        return False
+    if getattr(ACLGraphWrapper, "_cascade_updatable_patched", False):
+        return False
+
+    def _updatable_graph_replay(self, forward_context, graph):
+        if _replay_ctx.cascade_selected and (
+            getattr(envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", False)
+            and getattr(envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_GRAPH", False)
+        ):
+            # ORDER IS LOAD-BEARING: the cascade twin contains in-graph
+            # ``ExternalEvent`` waits (recorded around each stage task group at
+            # capture); the host records its *own* tasks' events only AFTER the
+            # replay, and the cascade groups are not in the host's task list --
+            # so if we updated afterwards the replay would block forever on
+            # events nobody records (measured: 4-concurrent request hung > 90 s
+            # with the update placed after the replay).  Re-parameterize and
+            # record the events FIRST, exactly like the host's ``enable_enpu``
+            # branch (``graph.update(...); graph.replay()``).
+            try:
+                updated = _update_cascade_on_updatable_replay(self, forward_context)
+                _trace(
+                    "updatable replay: cascade update ran=%s num_tokens=%s",
+                    updated,
+                    getattr(
+                        getattr(forward_context, "batch_descriptor", None),
+                        "num_tokens",
+                        None,
+                    ),
+                )
+            except Exception as exc:  # fail-open: the host replay still happens
+                _warn_once(
+                    "cascade update on the updatable-graph replay path failed "
+                    "(%s: %s); the step keeps capture-time parameters",
+                    type(exc).__name__,
+                    exc,
+                )
+        return orig(self, forward_context, graph)
+
+    ACLGraphWrapper._updatable_graph_replay = _updatable_graph_replay
+    ACLGraphWrapper._cascade_updatable_patched = True
+    _trace("updatable-replay seam hooked")
+    return True
 
 
 # ---------------------------------------------------------------- install()
@@ -742,6 +862,22 @@ class _CaptureContext:
 
 
 _capture_ctx = _CaptureContext()
+
+
+class _ReplayContext:
+    """Per-step cascade replay state (set by the wrapper, read by the update hook).
+
+    ``cascade_selected`` is True for the duration of an ``ACLGraphWrapper`` call
+    that actually swapped in the cascade twin table.  The updatable-graph replay
+    hook runs *inside* that call, so the flag tells it whether this step replayed
+    the twin (only then may the cascade task groups be re-parameterized).
+    """
+
+    def __init__(self):
+        self.cascade_selected = False
+
+
+_replay_ctx = _ReplayContext()
 
 
 def _wrap_aclgraph_entries(wrapper):
@@ -876,6 +1012,10 @@ def install(attn_mod, builder_cls, impl_cls):
         if not getattr(ACLGraphWrapper, "_cascade_graph_patched", False):
             _wrap_aclgraph_wrapper(ACLGraphWrapper)
             ACLGraphWrapper._cascade_graph_patched = True
+
+        # --- ACLGraphWrapper: UpdatableGraph replay seam (host >= fbe4911bb) --
+        # Feature-detected: a no-op on the update_full_graph_params generation.
+        _wrap_updatable_graph_replay(ACLGraphWrapper)
 
         # --- builder: capture-window metadata translation -------------------
         orig_build = builder_cls.build  # eager wrapper (sets shared_len)

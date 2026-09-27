@@ -138,6 +138,14 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
       `_update_full_graph_params_if_needed`
 - [ ] vllm-ascend: `update_full_graph_params` / `get_graph_params` / `GraphParams`
 - [ ] `ACLGraphWrapper` variant-entry 表结构(标准 `BatchDescriptor` 键)
+- [ ] **图重放机制代际**(2026-09-27 新增,两代语义不同,必须逐条核对):
+      `vllm_ascend/compilation/updatable_graph.py` 是否存在(基线 `74f0c0a27` 无)、
+      `vllm_ascend/utils.py:use_updatable_graph`、`acl_graph.py` 里
+      `ACLGraphWrapper._updatable_graph_replay` 的**签名与调用点**、
+      以及 `update_full_graph_params` 是否对可更新图提前 `return`。
+      判据:新机制宿主上冒烟日志出现 `updatable replay: cascade update ran=True`
+      且 `cascade key hit` = 0;旧宿主上出现 `updatable-replay seam absent on this host`
+      且 `cascade key hit` > 0。机理与顺序约束见 [pitfalls.md](pitfalls.md) §2.4
 - [ ] `vllm.general_plugins` 加载时机未变
 - [ ] fi_sampling 面:`vllm_ascend.sample.sampler.AscendTopKTopPSampler` 名称与
       `forward_native(logits, generators, k, p)` 签名、`AscendSampler.__init__`
