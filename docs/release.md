@@ -847,9 +847,38 @@ build 上重核并留档,该工作属"环境核验",按工作区分工归测试�
 ⚠️ **配对警告**:区间只覆盖 vllm-ascend,**不含 vllm core**。已验证配对 =
 core `0aee727ff6`;其它 core 会 import 期报错(§0.3 有逐条报错原文)。
 
-**发布状态(2026-09-27):待发布 —— 本机无 GitHub/PyPI 凭据**(`gh` 未装、`GH_TOKEN` 未设、
-无 `~/.pypirc`)。发布动作二选一:① GitHub UI → Actions → **Publish** → Run workflow(`target=pypi`);
-② 提供一次性 token。发布后在本节追加回执(run id / 两个 sha256 / Release 与 tag)。
+**发布状态:已发布(2026-09-27T06:44Z)**。发布路径 = **推 tag**(零凭据,见下方机制说明)。
+
+| 项 | 值 |
+|---|---|
+| PyPI | `https://pypi.org/project/vllm-ascend-split-batch/0.1.3/`(顶层 `info.version` 已为 `0.1.3`) |
+| 发布 commit | `c8a1891`(tag `v0.1.3` 首次指向;后移至 `9a9beb1` 以便同 tag 触发 Release 工作流,见机制说明) |
+| Publish run | `36301111078`(`event=push`,`v0.1.3`)16 步全 success,含 tag 守卫与 `Publish to PyPI` |
+| wheel | `vllm_ascend_split_batch-0.1.3-py3-none-any.whl` 131900 B<br>`26601452302c374a57b9da58ad26011b2936b17e7bd9127e51bc5dd6601af389` |
+| sdist | `vllm_ascend_split_batch-0.1.3.tar.gz` 1319978 B<br>`d3f3a55e69c84a25d62eb29ddd98ae4e616c54f4bd622a011e4641cad007ab90` |
+| GitHub Release | `v0.1.3`(Release run `36301712587` 自动创建;附件 = 从 PyPI 下载并**逐件核对 sha256** 的权威字节 + `dist.sha256`)|
+
+**发布后冒烟(判据在**发布字节**上,不是 editable 工作树)**:在目标栈 env 里装 PyPI 的 0.1.3
+(卸掉 editable),结果:
+
+| 判据 | 结果 |
+|---|---|
+| 字节来源 | `site-packages`,version `0.1.3`,4 个 manifest 的 `version_range` 均为新区间 |
+| `extension check` | `['installed','discovered','compatible','configured','enabled']`,evidence 逐字 "host version 0.25.1rc2.dev605+… satisfies the declared range" |
+| `run --dry-run` | exit 0,注入 2 个 cascade 开关 |
+| 真机 4 并发 ×2 轮 | **8/8 OK(0.2–0.3 s)**;`capture body SUCCESS` 96;`cascade update ran=True` 4;`twin missing` 0;`TypeError` 0 |
+
+**发布机制(2026-09-27 新增,零凭据)** —— 两个工作流,均只用 OIDC / run 自带 token:
+
+| 工作流 | 触发 | 作用 |
+|---|---|---|
+| `publish.yml` | `workflow_dispatch`(默认 testpypi)**或 `push` tag `v*`** | 发 PyPI;tag 推送 ⇒ target=pypi;含 tag/版本一致性守卫;上传前查 PyPI,已存在则**跳过上传**(幂等,重推 tag 不会变红) |
+| `release.yml` | `push` tag `v*` | 建/更新 GitHub Release;附件 = 从 PyPI 下载并核对 digest 的字节(遵 §11.7 附件字节纪律);用 annotated tag 正文作 notes |
+
+**为什么加 tag 触发**:dispatch 需要 GitHub API 凭据,而维护者可能只有 SSH key(本机即如此)
+⇒ tag 推送是等价且更常规的发布姿势。**代价(如实登记)**:tag 一旦推送即发正式版,
+因此"tag/版本一致性守卫"放在 build 之前;`v0.1.3` 曾因需补 Release 工作流而**移动过一次**
+(同一 tag 名,从 `c8a1891` 到 `9a9beb1`,内容仍是 0.1.3),这是移动已发布 tag 的先例,后续应避免。
 
 **发布后的判据(照 §11.8 的做法,机械可核)**:
 ① 干净 venv 打 `pypi.org/simple` ⇒ `Would install … 0.1.3`,且 `importlib.metadata` 读出
