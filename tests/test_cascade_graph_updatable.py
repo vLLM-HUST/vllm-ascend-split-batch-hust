@@ -71,37 +71,50 @@ def hooked(monkeypatch):
     return wrapper_cls
 
 
+def _set_env_flag(monkeypatch, key: str, value: bool) -> None:
+    """Turn a plugin gate flag on through the module's **env_variables** table.
+
+    Do NOT use ``monkeypatch.setattr(envs_mod, KEY, …)``: ``vllm_ascend.envs``
+    resolves unknown attributes through ``__getattr__`` + ``env_variables``, and
+    pytest's undo then writes the *resolved old value* into the module
+    ``__dict__`` as a real attribute -- which sticks for the rest of the process
+    and silently defeats lazy resolution for every later test (measured: 4
+    downstream failures in ``tests/test_cascade_plugin.py``).  Patching the
+    table entry is exactly the surface the plugin injects into.
+    """
+    from vllm_ascend import envs as envs_mod
+
+    monkeypatch.setitem(envs_mod.env_variables, key, lambda: value)
+
+
 @pytest.fixture()
 def cascade_step(monkeypatch):
     """Cascade graph gate on + 'this step selected the twin' flag set."""
-    from vllm_ascend import envs as envs_mod
-
-    monkeypatch.setattr(
-        envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", True, raising=False
-    )
-    monkeypatch.setattr(
-        envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_GRAPH", True, raising=False
-    )
+    _set_env_flag(monkeypatch, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", True)
+    _set_env_flag(monkeypatch, "VLLM_ASCEND_ENABLE_CASCADE_GRAPH", True)
     monkeypatch.setattr(gp._replay_ctx, "cascade_selected", True)
     yield
     gp._replay_ctx.cascade_selected = False
 
 
 def _install_fake_graph_params(monkeypatch, recorded):
-    """Replace the lazily-imported host ``get_graph_params`` with a recorder."""
-    import sys
-    import types
+    """Patch the **real** host ``get_graph_params`` with a recorder.
 
-    module = sys.modules.get("vllm_ascend.compilation.acl_graph")
-    if module is None:
-        module = types.ModuleType("vllm_ascend.compilation.acl_graph")
-        sys.modules["vllm_ascend.compilation.acl_graph"] = module
+    Must import the real module: inserting a stub into ``sys.modules`` would
+    survive monkeypatch undo and make every later test that imports
+    ``vllm_ascend.compilation.acl_graph`` fail (measured: 18 downstream failures
+    in ``tests/test_cascade_plugin.py`` when this helper stubbed the module).
+    """
+    acl_graph = pytest.importorskip(
+        "vllm_ascend.compilation.acl_graph",
+        reason="the updatable-graph seam lives in the vllm-ascend compilation stack",
+    )
 
     def get_graph_params():
         recorded["graph_params_calls"] += 1
         return "graph-params"
 
-    monkeypatch.setattr(module, "get_graph_params", get_graph_params, raising=False)
+    monkeypatch.setattr(acl_graph, "get_graph_params", get_graph_params, raising=False)
 
 
 def test_seam_absent_is_a_noop(monkeypatch) -> None:
@@ -177,7 +190,6 @@ def test_default_off_graph_gate_skips_the_update(
     hooked, cascade_step, monkeypatch
 ) -> None:
     """Graph gate off (or decode gate off) => no cascade update at all."""
-    from vllm_ascend import envs as envs_mod
 
     recorded = {"graph_params_calls": 0, "update_args": None}
     _install_fake_graph_params(monkeypatch, recorded)
@@ -186,12 +198,8 @@ def test_default_off_graph_gate_skips_the_update(
         "_update_cascade_graph_params",
         lambda *a, **k: recorded.update(update_args=a),
     )
-    monkeypatch.setattr(
-        envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_GRAPH", False, raising=False
-    )
-    monkeypatch.setattr(
-        envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", True, raising=False
-    )
+    _set_env_flag(monkeypatch, "VLLM_ASCEND_ENABLE_CASCADE_GRAPH", False)
+    _set_env_flag(monkeypatch, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", True)
 
     hooked()._updatable_graph_replay(_FakeForwardContext(), object())
     assert recorded["update_args"] is None
@@ -295,11 +303,8 @@ def test_replay_context_flag_is_set_only_around_the_twin_call(monkeypatch) -> No
     wrapper_cls.__call__ = fake_orig_call
 
     # Cascade replay: step flag on, capture window off, twin present.
-    from vllm_ascend import envs as envs_mod
 
-    monkeypatch.setattr(
-        envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", True, raising=False
-    )
+    _set_env_flag(monkeypatch, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", True)
     monkeypatch.setattr(gp, "_capture_ctx", gp._CaptureContext())
     import vllm_ascend_split_batch.cascade_runner_patch as rp
 
@@ -346,11 +351,7 @@ def test_capture_window_does_not_set_the_replay_flag(monkeypatch) -> None:
     wrapper_cls = type("FakeWrapper3", (_Wrapper,), {})
     wrapper_cls.__call__ = fake_orig_call
 
-    from vllm_ascend import envs as envs_mod
-
-    monkeypatch.setattr(
-        envs_mod, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", True, raising=False
-    )
+    _set_env_flag(monkeypatch, "VLLM_ASCEND_ENABLE_CASCADE_DECODE", True)
     ctx = gp._CaptureContext()
     ctx.active = True  # capture window
     monkeypatch.setattr(gp, "_capture_ctx", ctx)
