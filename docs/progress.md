@@ -328,6 +328,22 @@
   **重建等价性实测**：重跑 `./build.sh` 后 `_C.so` / `libascend_kernel.so` 与 `2026.9.16` 轮
   md5 逐字节相同（`add6e6951d253328` / `ca8de2d70fe0504d`）⇒ 只改打包元数据与许可，目标码未变。
 
+## 2026-09-27 0.1.3 已发布：`host.version_range` 放开为有界窗口
+
+- **裁定**（用户）：点钉让插件在除一个 build 之外都无法验证、连"哪里会出问题"都测不出来
+  ⇒ 改为**有界兼容窗口** `>=0.25.1rc2.dev125,<0.25.2`；窗口内失败按**宿主侧发现**归因
+  （理由与纪律：`docs/release.md` §0.3；归因落点 `knowledge/host-findings/`）。
+- **改动**：4 个 manifest 的区间 + UpdatableGraph 重放接缝修复 + 5 个发布前测试/文档提交；
+  阈值守卫 3 例（两端点在区间内、0.24/0.26 在外、有序比较符内禁 `+local`）。
+- **发布**：PyPI `0.1.3`（Publish run `36301111078`）+ GitHub Release `v0.1.3`
+  （Release run `36301712587`，附件 == PyPI 字节）。**零凭据**：`publish.yml` 增 tag 触发
+  （推 `v*` ⇒ target=pypi，仍走 OIDC）、`release.yml` 用 run 自带 token 建 Release、
+  上传前查 PyPI 已存在则跳过（幂等）。
+- **发布字节复验**（目标栈 dev605 装 PyPI 的 0.1.3）：`check` compatible、`run --dry-run` exit 0、
+  4 并发 8/8（0.2–0.3 s）、`capture body SUCCESS` 96、`cascade update ran=True` 4、0 TypeError。
+- **如实登记**：`v0.1.3` tag 曾从 `c8a1891` 移到 `9a9beb1`（同 tag 名、内容仍 0.1.3，为带上
+  Release 工作流）—— 属移动已发布 tag 的先例，后续应避免。
+
 ## 2026-09-26 0.1.2 已发布（让 `test` extra 摘钉生效）
 
 - **动机**：0.1.1 及以前的 `test` extra 钉着不在任何索引上的 `vllm-hust-ext==0.2.0.dev0`

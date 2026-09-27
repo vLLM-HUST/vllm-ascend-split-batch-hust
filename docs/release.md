@@ -822,7 +822,7 @@ build 上重核并留档,该工作属"环境核验",按工作区分工归测试�
    **仍未实测**;本次回环走 API 资产端点(`/releases/assets/{id}` + `Accept: application/octet-stream`,
    重定向到 `objects.githubusercontent.com`)完成,字节与 PyPI 一致。
 
-### 11.9 0.1.3(待发布):`host.version_range` 放开为有界兼容窗口 + UpdatableGraph 接缝修复
+### 11.9 0.1.3 已发布(2026-09-27):`host.version_range` 放开为有界兼容窗口 + UpdatableGraph 接缝修复
 
 **本版相对 0.1.2 的改动**(均为已合入 `main` 的提交,无行为默认值变更):
 
