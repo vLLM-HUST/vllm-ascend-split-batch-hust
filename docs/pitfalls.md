@@ -135,6 +135,33 @@ loaded (gate=1, graph_gate=1, kernel_wheel=ok)` 照常、`twin missing` 0 次、
   1 个请求时常 < 门槛 ⇒ cascade 未准入 ⇒ 走标准图 ⇒ **0.3 s 返回正常**,而 ≥2 并发才触发孪生。
   验证 cascade 图路径**必须**发 ≥ 门槛的并发请求。
 
+### 2.5 正确性验收必须走离线固定批 harness；HTTP 并发路线会给出假发散(2026-09-27 实测)
+
+**症状**:用 `vllm serve` + 64 个并发 HTTP 请求做 cascade ON/OFF 的 token 序列比对,得到
+**21–23/64** 发散 —— 高于 C 口径判据(≤8/64)。看起来像"cascade 数值有问题",但**不是**。
+
+**实测判据(同配置、不同进程各跑一轮)**:
+
+| 对照(HTTP 路线,64 并发) | 发散 |
+|---|---|
+| ON vs OFF | 21–23/64 |
+| ON 重复 | 1/64 |
+| **OFF 重复** | **22/64** |
+
+**OFF 基线自身跨进程就不一致** ⇒ 该路线的噪声底(22/64)本身远高于判据,数字不可用。
+
+**机理**:并发请求的**到达顺序**在两次运行间不同 ⇒ 引擎批组成/调度不同 ⇒ bf16 级归约路径不同。
+历史验收用的 `llm.generate` **固定批** harness 没有这个自由度(同一栈上离线复跑 OFF 两轮 = **0/64**,
+ON 两轮 = 0/64,ON-vs-OFF = **6/64**)。
+
+**纪律**:
+- **C 口径(逐 token 发散计数)验收只能用离线固定批 harness**(`docs/evidence/cascade/ev2_run.py`
+  + `ev2_compare.py`,每腿独立 `VLLM_CACHE_ROOT` 与 `VLLM_DISABLE_COMPILE_CACHE=1`)。
+- HTTP 路线只适合**统计量**(服务可用性、TTFT/TPOT 分位),**其正确性数字不得用于判据**。
+- 判据必须带**参考帧对照**:同一栈上 `OFF-eager vs OFF-graph` 给出"纯图机制(与 cascade 无关)的
+  发散量级" —— 本机目标栈实测 **7/64**(与历史同值),而 cascade 的 ON-vs-OFF 是 **6/64**
+  ⇒ cascade 的发散**不高于**图机制自身的噪声底。
+
 ## 3. 打包与发布类
 
 ### 3.1 manifest `activation.environment` 填文档字符串(2026-09 已修)
