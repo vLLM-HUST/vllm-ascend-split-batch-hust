@@ -90,7 +90,7 @@ contract（见 [release.md](release.md) §0）。这是"能力预览"而非可�
 
 ## 5.1 证据的 cohort 边界（2026-09-28/29 上游裁定，勿外推）
 
-上游在 issue #2 评论 `5867233862`（2026-09-28，对 `77dc222227ab`… 即当时的 `f77dc22`）确认：
+上游在 issue #2 评论 `5867233862`（2026-09-28，对 `f77dc2214727ab1448874f1aee787a67328f1433`）确认：
 本仓把任何 `speculative_config` 判为 `speculative_decode_conflict`、README 写明"这是 guard 不是 MTP 支持"、
 `HOST_CONTRACT.md:11` 要求拒绝 speculative decoding —— **审计未发现"形式上成功但实际退化为 native"的点**。
 同时划定边界：
