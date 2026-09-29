@@ -88,6 +88,24 @@ contract（见 [release.md](release.md) §0）。这是"能力预览"而非可�
 | 多 query row（MTP 校验、prefill） | 拒（非 uniform decode） | 拒（条件 7） |
 | microbatching（DBO / ubatch>1） | 未判 | 拒（条件 4） |
 
+## 5.1 证据的 cohort 边界（2026-09-28/29 上游裁定，勿外推）
+
+上游在 issue #2 评论 `5867233862`（2026-09-28，对 `77dc222227ab`… 即当时的 `f77dc22`）确认：
+本仓把任何 `speculative_config` 判为 `speculative_decode_conflict`、README 写明"这是 guard 不是 MTP 支持"、
+`HOST_CONTRACT.md:11` 要求拒绝 speculative decoding —— **审计未发现"形式上成功但实际退化为 native"的点**。
+同时划定边界：
+
+| 本仓证据覆盖 | **不覆盖**（不得外推） |
+|---|---|
+| `vllm-ascend` **0.25.x** 线（`host.version_range = >=0.25.1rc2.dev125,<0.25.2`） | 其它宿主线 |
+| Qwen2.5-14B（真模型）/ Qwen2.5-Coder-14B（性能替身） | Qwen3.5-35B-A3B hybrid TP2 |
+| 每请求 1 个 query row | native **MTP2** 的 k+1 verification rows |
+| APC + FULL_AND_PIECEWISE + release §0.1 记的 capture sizes | 未跑过的 `async` 组合 |
+
+⇒ 该配置上"cascade ON"跑的其实是**原生路径**（准入守卫拒了），**不构成 cascade 效果**。
+要进统一 cohort，前置是"支持 k+1 verification rows 的 dual-pad/graph bucket 合同 + 该配置上的
+真实 replay correctness"—— 本仓**未立项**（与 OPEN-05 裁定一致）。
+
 ## 6. 扩展 `configuration` 字段：本仓**不消费**（边界声明）
 
 `vllm-hust-ext configure <id> --file <json>` 会把 JSON 原样存进该扩展的

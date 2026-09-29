@@ -97,6 +97,25 @@ same way (`planner.precheck_reason` -> `speculative_decode_conflict`). Enabling
 Cascade with speculative decoding therefore yields no cascade speedup — it is
 a compatibility boundary, not an enabled-Cascade result.
 
+### Cohort scope (what our evidence does and does not cover)
+
+Stated here so the numbers below are not over-extended (source: upstream audit on
+issue #2, comment `5867233862`, 2026-09-28 — the central team fixed this classification
+against `f77dc22`):
+
+| This repository's evidence covers | This repository's evidence does **not** cover |
+|---|---|
+| `vllm-ascend` **0.25.x** host line (`host.version_range = >=0.25.1rc2.dev125,<0.25.2`) | other host lines |
+| Qwen2.5-14B (real) and Qwen2.5-Coder-14B (stand-in) | Qwen3.5-35B-A3B hybrid TP2 |
+| one query row per request (no MTP / chunked prefill) | native **MTP2** verification rows |
+| `APC` + `FULL_AND_PIECEWISE` + the capture sizes in `docs/release.md` §0.1 | `async` scheduling combinations we did not run |
+
+⇒ **Do not extrapolate the Qwen2.5 numbers to the Qwen3.5 + MTP2 configuration.** Cascade never
+engages there (the guard above), so a "cascade ON" run on that configuration measures the native
+path, not this feature. Entering the unified cohort would first require a dual-pad/graph bucket
+contract for `k + 1` verification rows plus real replay correctness on that configuration — that
+work is **not** planned here (see `docs/support-matrix.md` §5 and the workspace ledger, OPEN-05).
+
 
 Microbatching: the plugin mirrors the official vllm core gate and keeps the
 two-stage path off under ANY microbatching (`use_ubatching`, i.e. DBO or
