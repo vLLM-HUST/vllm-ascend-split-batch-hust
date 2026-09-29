@@ -15,6 +15,18 @@ vllm-ascend 宿主的 default-off 插件壳:cascade 两段式 decode(eager+图�
 4. `provenance/` 只读;提取代码保留 Huawei 版权头与溯源。
 5. **不要以 `/vllm-workspace` 为 CWD 跑任何 python/vllm 命令**(目录会遮蔽
    真实 vllm 包)。
+6. **cohort 与归属(2026-09-28/29 上游裁定,长期核心约束)**——详见
+   [docs/cohort-and-ownership.md](docs/cohort-and-ownership.md):
+   - 中央团队只保留"分类与发布边界";**下列四项由本仓 owner 负责**:
+     ① independent cohort definition;② kernel-wheel licensing/distribution;
+     ③ NPU evidence;④ performance claims。
+   - 任何正确性/性能声明**必须带 cohort 边界**:`vllm-ascend` 0.25.x 线、
+     Qwen2.5 真模型与替身、每请求 1 个 query row、APC + `FULL_AND_PIECEWISE`。
+     **不得外推**到 Qwen3.5 hybrid TP2 / native MTP2 / chunked prefill。
+   - MTP 是**边界不是支持**:任何 `speculative_config` fail-closed;该配置下
+     "开 cascade"跑的是原生路径,不构成 cascade 效果。
+   - "进统一 cohort"需先有 k+1 verification rows 的 dual-pad/graph bucket 合同
+     + 该配置真实 replay correctness;**当前未立项**,未经裁定不得绕过上述守卫。
 
 ## 常用命令
 

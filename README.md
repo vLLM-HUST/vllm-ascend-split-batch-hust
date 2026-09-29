@@ -99,6 +99,9 @@ a compatibility boundary, not an enabled-Cascade result.
 
 ### Cohort scope (what our evidence does and does not cover)
 
+> Authority: [`docs/cohort-and-ownership.md`](docs/cohort-and-ownership.md) — the cohort boundary plus the four
+> ownership items returned to this repository; binding rule: [`AGENTS.md`](AGENTS.md) hard constraint 6.
+
 Stated here so the numbers below are not over-extended (source: upstream audit on
 issue #2, comment `5867233862`, 2026-09-28 — the central team fixed this classification
 against `f77dc22`):
