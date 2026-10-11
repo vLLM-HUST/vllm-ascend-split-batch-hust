@@ -213,6 +213,17 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
       ①的委托目标跟随 `op_registry_oot["RotaryEmbedding"]`——进入 310P 验证域时,
       需补一条 310P 真机核对(本机 910B2 只有构造级 mock 证据)
 
+### 4.1 0.28 镜像 host 实测通过(2026-10-11 切镜像日)
+
+宿主 vllm `0.28.1.post1.dev143` + vllm_ascend `0.25.1rc2.dev125+hust…`(CANN 9.1.0 /
+Py 3.12.13 / glibc 2.35 底座)。**门 3 处 JSON 零修改放行**(门读 `version("vllm-ascend")`,
+落在有界窗口内)+ 依赖面 **22/22** + 全量测试 **461/466**(5 失败=cascade 内核 wheel 的
+GLIBC 环境缺口,fail-open 兜底,非代码冲突)。两点警示见证据文件:
+①版本串漂移——hust 构建的 vllm_ascend 版本串停在 0.25.1rc2.dev 窗口而代码已追平
+0.28,**门的满足不能推断宿主代码代际**,升级核对仍须走本清单;②cascade 内核在 2.35
+底座不可载,0.28 主栈暂不启用(用户裁定),重启用条件=22.04 底座重建 wheel。
+完整证据:[evidence/host-028-2026-10-11.md](evidence/host-028-2026-10-11.md)。
+
 ## 5. 检查表
 
 **构建前**
