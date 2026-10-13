@@ -29,9 +29,11 @@ vllm-ascend 宿主的 default-off 插件壳:cascade 两段式 decode(eager+图�
    - 中央团队只保留"分类与发布边界";**下列四项由本仓 owner 负责**:
      ① independent cohort definition;② kernel-wheel licensing/distribution;
      ③ NPU evidence;④ performance claims。
-   - 任何正确性/性能声明**必须带 cohort 边界**:`vllm-ascend` 0.25.x 线、
-     Qwen2.5 真模型与替身、每请求 1 个 query row、APC + `FULL_AND_PIECEWISE`。
-     **不得外推**到 Qwen3.5 hybrid TP2 / native MTP2 / chunked prefill。
+   - 任何正确性/性能声明**必须带 cohort 边界**(2026-10-13 基准切换):
+     **0.28 镜像栈**(vllm `0.28.1.post1.dev143+gf18cf803c` + vllm-ascend
+     `0.25.1rc2.dev125+hust` 构建, CANN 9.1.0, 2×910B2 TP=2) + **Qwen3.5-35B-A3B**
+     hybrid TP2 + chunked prefill on / APC off / `cudagraph_mode=NONE`。
+     **不得跨域外推**:Qwen2.5/0.25 的历史证据(独立专项)不适用于该基准,反之亦然。
    - MTP 是**边界不是支持**:任何 `speculative_config` fail-closed;该配置下
      "开 cascade"跑的是原生路径,不构成 cascade 效果。
    - "进统一 cohort"需先有 k+1 verification rows 的 dual-pad/graph bucket 合同

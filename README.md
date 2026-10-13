@@ -102,22 +102,25 @@ a compatibility boundary, not an enabled-Cascade result.
 > Authority: [`docs/cohort-and-ownership.md`](docs/cohort-and-ownership.md) — the cohort boundary plus the four
 > ownership items returned to this repository; binding rule: [`AGENTS.md`](AGENTS.md) hard constraint 6.
 
-Stated here so the numbers below are not over-extended (source: upstream audit on
-issue #2, comment `5867233862`, 2026-09-28 — the central team fixed this classification
-against `f77dc22`):
+Stated here so the numbers below are not over-extended. **2026-10-13 owner ruling: the baseline moved to the
+0.28 image + Qwen3.5-35B-A3B** ("we no longer work on Qwen2.5"). The upstream audit quotes in
+[`docs/cohort-and-ownership.md`](docs/cohort-and-ownership.md) §1 are kept verbatim as historical receipts;
+the table below is the current claim surface. The Qwen2.5 / 0.25 evidence is retained as an **independent,
+historical** set and must not be crossed with the numbers below.
 
-| This repository's evidence covers | This repository's evidence does **not** cover |
+| This repository's evidence covers (0.28 baseline) | This repository's evidence does **not** cover |
 |---|---|
-| `vllm-ascend` **0.25.x** host line (`host.version_range = >=0.25.1rc2.dev125,<0.25.2`) | other host lines |
-| Qwen2.5-14B (real) and Qwen2.5-Coder-14B (stand-in) | Qwen3.5-35B-A3B hybrid TP2 |
-| one query row per request (no MTP / chunked prefill) | native **MTP2** verification rows |
-| `APC` + `FULL_AND_PIECEWISE` + the capture sizes in `docs/release.md` §0.1 | `async` scheduling combinations we did not run |
+| 0.28 image stack: vllm `0.28.1.post1.dev143+gf18cf803c` + vllm-ascend `0.25.1rc2.dev125+hust…`, CANN 9.1.0, 2×910B2 TP=2 | other host builds outside the measured 0.28 image |
+| Qwen3.5-35B-A3B (40L: 30 GDN + 10 MoE) hybrid **TP2** | native **MTP2** verification rows / any speculative decoding |
+| chunked prefill **on**, APC **off**, `cudagraph_mode=NONE` | `async` scheduling combinations we did not run |
+| bf16 | the retired Qwen2.5 / 0.25 line (historical set only) |
 
-⇒ **Do not extrapolate the Qwen2.5 numbers to the Qwen3.5 + MTP2 configuration.** Cascade never
-engages there (the guard above), so a "cascade ON" run on that configuration measures the native
-path, not this feature. Entering the unified cohort would first require a dual-pad/graph bucket
-contract for `k + 1` verification rows plus real replay correctness on that configuration — that
-work is **not** planned here (see `docs/support-matrix.md` §5 and the workspace ledger, OPEN-05).
+⇒ **Do not cross-extrapolate**: the historical Qwen2.5/0.25 numbers do not carry over to the 0.28/Qwen3.5
+baseline, and vice versa. Speculative decoding (incl. MTP2) stays **fail-closed** on both domains — a
+"cascade ON" run under it measures the native path, not this feature. Entering the unified cohort would
+still first require a dual-pad/graph bucket contract for `k + 1` verification rows plus real replay
+correctness on that configuration — that work is **not** planned here (see `docs/support-matrix.md` §5 and
+the workspace ledger, OPEN-05).
 
 
 Microbatching: the plugin mirrors the official vllm core gate and keeps the
@@ -125,7 +128,7 @@ two-stage path off under ANY microbatching (`use_ubatching`, i.e. DBO or
 `ubatch_size > 1`).  On the current vllm-ascend the platform layer resets both
 `enable_dbo` and `ubatch_size`, so this gate is dormant there by construction.
 
-Verified evidence (Qwen2.5-Coder-14B-Instruct, 910B2, CANN 9.0.1):
+Verified evidence — **historical (Qwen2.5 / 0.25 domain)**, Qwen2.5-Coder-14B-Instruct, 910B2, CANN 9.0.1:
 
 - eager off/on/on_fp32 token-identical; graph off/on/on_fp32 token-identical;
 - C3-shaped run (B=64, shared ~4.1k tokens, gen128): 0/64 divergent arms;
@@ -141,7 +144,8 @@ per-section reports (`section2-correctness.md`, `section3-performance.md`,
 JSONs and the sha256 manifest (including the list of large sweep logs left in
 the development workspace). Read its §1 before quoting any number: the Coder
 model is a **performance stand-in** and must not be compared with the real
-`Qwen2.5-14B-Instruct` on behavior.
+`Qwen2.5-14B-Instruct` on behavior. This whole set is **historical (Qwen2.5 /
+0.25)** and must not be crossed with the current 0.28/Qwen3.5 baseline.
 
 ## fi_sampling plugin (default-off, evidence-only)
 
@@ -168,7 +172,8 @@ all five mandatory fallbacks: per-request generators, processed
 logits/logprobs modes, batch-invariant, reduce-sample, async-exponential)
 stays on the fork chain with no device sync.
 
-Evidence (`docs/evidence/w2b-fi-sampling/REPORT.md`, Qwen2.5-Coder-14B, 910B2):
+Evidence (`docs/evidence/w2b-fi-sampling/REPORT.md`, Qwen2.5-Coder-14B, 910B2 —
+**historical Qwen2.5/0.25 domain**, see the cohort scope above):
 
 - default-off is zero-diff (no host/kernel import, no patch) and NPU smoke is
   6/6 PASS;

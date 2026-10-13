@@ -46,6 +46,7 @@ test = [
 "org.vllm-hust.fia-demask" = "vllm_ascend_split_batch.fia_demask"
 "org.vllm-hust.rope-fix" = "vllm_ascend_split_batch.rope_fix"
 "org.vllm-hust.zerocost-wiring" = "vllm_ascend_split_batch.zerocost"
+"org.vllm-hust.gate-fp32" = "vllm_ascend_split_batch.gate_fp32"
 
 [project.entry-points."vllm.general_plugins"]
 "cascade-attention" = "vllm_ascend_split_batch.cascade_plugin:load"

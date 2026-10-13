@@ -12,6 +12,7 @@ from vllm_hust_ext.manifest import activation_blocker, load_manifest
 
 import vllm_ascend_split_batch
 import vllm_ascend_split_batch.fia_demask as fia_demask_module
+import vllm_ascend_split_batch.gate_fp32 as gate_fp32_module
 import vllm_ascend_split_batch.rope_fix as rope_fix_module
 import vllm_ascend_split_batch.zerocost as zerocost_module
 
@@ -26,6 +27,9 @@ ROPE_FIX_MANIFEST_PATH = Path(rope_fix_module.__file__).with_name(
     "vllm-hust-extension-v0.2.json"
 )
 ZEROCOST_MANIFEST_PATH = Path(zerocost_module.__file__).with_name(
+    "vllm-hust-extension-v0.2.json"
+)
+GATE_FP32_MANIFEST_PATH = Path(gate_fp32_module.__file__).with_name(
     "vllm-hust-extension-v0.2.json"
 )
 
@@ -141,6 +145,27 @@ def test_zerocost_bundle_is_active_with_its_own_keys() -> None:
     assert raw["host"]["version_range"] == _manifest_json()["host"]["version_range"]
 
 
+def test_gate_fp32_bundle_is_active_with_its_own_key() -> None:
+    """The D4 gate-fp32 carrier is env-gated and now ``active``.
+
+    Three acceptance items were gathered on the D4 stack -- default-off smoke
+    (zero regression), bit-identical correctness (L3 8/8), and interleaved
+    L1/L2 performance (L2 out_tok_s +2.16% median, all 3 pairs same sign) --
+    bounded by ``docs/evidence/d4-gate-fp32-cohort.md``.  Flipping ``active``
+    injects ``VLLM_HUST_GATE_FP32=1`` for deployments that enable the bundle;
+    the opt-in contract still holds because the manager does not enable the
+    bundle by default and ``load()`` gates internally.
+    """
+    manifest = load_manifest(GATE_FP32_MANIFEST_PATH)
+    assert manifest.bundle_id == "org.vllm-hust.gate-fp32"
+    assert activation_blocker(manifest) is None
+    raw = json.loads(GATE_FP32_MANIFEST_PATH.read_text(encoding="utf-8"))
+    carriers = {i["module"]: i["status"] for i in raw["implementation"]}
+    assert carriers["vllm_ascend_split_batch.gate_fp32_plugin"] == "active"
+    assert raw["activation"]["environment"] == {"VLLM_HUST_GATE_FP32": "1"}
+    assert raw["host"]["version_range"] == _manifest_json()["host"]["version_range"]
+
+
 def test_host_version_range_is_a_bounded_verified_interval() -> None:
     """host.version_range is a **bounded interval**, not a point pin and not ``>=0``.
 
@@ -229,6 +254,7 @@ def test_extension_version_matches_distribution_version() -> None:
         MANIFEST_PATH,
         FIA_DEMASK_MANIFEST_PATH,
         ROPE_FIX_MANIFEST_PATH,
+        GATE_FP32_MANIFEST_PATH,
     ):
         raw = json.loads(path.read_text(encoding="utf-8"))
         assert raw["extension_version"] == version, path

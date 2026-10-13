@@ -38,6 +38,10 @@ pip install pytest-xdist
 - **姿势**:显式 `--compilation-config '{"cudagraph_mode":"FULL"}'`
   (npugraph_ex + ACL graph,自带 AOT 缓存规避);所有 A/B 腿必须**对称施加**。
 - **另注**:`VLLM_DISABLE_COMPILE_CACHE=1` 仍是必须项(共享 AOT 缓存命中硬崩,见证据③口径)。
+- **2026-10-13（0.28 镜像）更新**:该镜像上默认 `FULL_AND_PIECEWISE`（以及单值 `FULL`）在
+  `capture_model` 阶段失败（`rtStreamBeginCapture … resource alloc fail`）。现行 **0.28/Qwen3.5 基准**
+  降到 `--compilation-config '{"cudagraph_mode":"NONE"}'`（保留 torch.compile/inductor 融合）；
+  A/B 腿仍须对称施加。见 [evidence/d4-gate-fp32-cohort.md](evidence/d4-gate-fp32-cohort.md)。
 
 - **副作用须知**:`triton` 包元数据不存在(`pip show triton` 查不到、`pip check`
   常驻告警),vllm 的 HAS_TRITON 检测基于 import 不受影响。裸调
@@ -60,8 +64,9 @@ pip install pytest-xdist
 ### 1.4 模型卷只读
 
 `/data/shared_models`(与 `/data/shared_datasets` 同卷)是只读挂载;拉新模型放
-容器内可写目录。当前主力模型:Qwen2.5-Coder-14B-Instruct(单卡,48 层/hidden
-5120/bf16)。
+容器内可写目录。当前主力模型:**Qwen3.5-35B-A3B**（0.28 镜像基准，hybrid **TP2**，
+40 层:30 GDN + 10 MoE）。历史主力 Qwen2.5-Coder-14B-Instruct（单卡,48 层/hidden 5120/bf16）
+随 Qwen2.5/0.25 域**退役为历史专项**（见 [cohort-and-ownership.md](cohort-and-ownership.md) §2）。
 
 ## 2. 宿主与集成类
 
