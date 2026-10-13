@@ -4,8 +4,9 @@
 
 本仓库是 **vllm-ascend 宿主的插件壳**:以 default-off 方式为 vLLM 注入
 cascade 两段式 decode(调度 + 图模式)能力,并承载 split-batch 规划契约的
-提案描述符。算子实现在仓库外的 `ascend_kernel` wheel 里,本壳只做适配、
-门控与调度决策。
+提案描述符。**编译型算子(CCE/Ascend C)实现在仓库外的 `ascend_kernel`
+wheel 里**;**Triton / 纯 Python kernel 载体则在本仓内**(见 §6),本壳统一
+只做适配、门控与调度决策。
 
 ## 1.1 仓库命名约定(团队沟通用语)
 
@@ -95,6 +96,11 @@ manifest 与 entry point 打包完整性由构建检查保证,流程见 [release
 
 ## 6. 与 kernel 库的边界
 
+- **形态边界(2026-10-13 明确)**:CCE / Ascend C / CATLASS(编译成 `.so`)→
+  仓库外 `ascend_kernel` wheel;**Triton / 纯 Python kernel → 本仓 default-off
+  载体**(先例 W3.1 `fi_gelu`、`fi_sampling/kernels.py`),`triton` lazy import、
+  关闭时零 import。不得把 Triton 塞进 kernel 库,也不得改宿主只读的
+  `vllm_ascend/ops/triton/`。
 - 调用面只有 `torch.ops.npu.fa_fp32_stage1` / `torch.ops.npu.lse_merge`
   (`import ascend_kernel` 即注册);wheel 是软依赖,仅在 `[kernels]` extra
   声明,基础依赖不含。

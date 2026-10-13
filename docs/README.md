@@ -27,7 +27,7 @@
 | **cohort 边界（我们能声称什么）× 四项归属** | [cohort-and-ownership.md](cohort-and-ownership.md)（约束入口 [../AGENTS.md](../AGENTS.md) 硬约束 6） |
 | 宿主 seam 与 monkeypatch 面清单 | [../HOST_CONTRACT.md](../HOST_CONTRACT.md) |
 | 历史实现溯源（索引 + 逐条核对结论） | [../PROVENANCE.md](../PROVENANCE.md) / [provenance-verification.md](provenance-verification.md) / [../provenance/](../provenance/)(只读) |
-| kernel 算子(fa_fp32_stage1 / lse_merge) | `ops/kernels/ascend-kernel/README.md`(工作区,仓库外) |
+| 算子落点:CCE(`fa_fp32_stage1` / `lse_merge`)在仓库外 wheel;**Triton/纯 Python 载体在本仓** | `ops/kernels/ascend-kernel/README.md`(工作区,仓库外) + 本仓 `src/vllm_ascend_split_batch/` |
 | 算子调度(选择)接口 | [design/operator-dispatch.md](design/operator-dispatch.md)(骨架,未接线) |
 | 架构语义、编程规范、发布、踩坑、进度 | 本目录 |
 
