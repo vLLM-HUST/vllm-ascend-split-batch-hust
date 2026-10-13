@@ -54,6 +54,7 @@ test = [
 "fia-demask" = "vllm_ascend_split_batch.fia_demask_plugin:load"
 "aot-cache-guard" = "vllm_ascend_split_batch.aot_cache_guard_plugin:load"
 "mlp-chunk" = "vllm_ascend_split_batch.mlp_chunk_plugin:load"
+"gate-fp32" = "vllm_ascend_split_batch.gate_fp32_plugin:load"
 "rope-fix" = "vllm_ascend_split_batch.rope_fix_plugin:load"
 "zerocost-wiring" = "vllm_ascend_split_batch.zerocost_wiring:load"
 
