@@ -10,13 +10,19 @@
 |---|---|
 | host | 0.28 镜像默认栈：vllm core `0.28.1.post1.dev143+gf18cf803c`、vllm-ascend `0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27.d20260909`、CANN 9.1.0、Python 3.12.13、2×910B2 TP=2（版本门放行依据见 [host-028-2026-10-11.md](host-028-2026-10-11.md)） |
 | 模型 | Qwen3.5-35B-A3B（40 层：30 GDN + 10 MoE） |
-| serve | console script + `--no-enable-prefix-caching` + 双 inductor 缓存禁用 + `--compilation-config {"cudagraph_mode":"NONE"}` + TP=2 / max_model_len 8192 |
+| serve | console script + `--no-enable-prefix-caching` + 双 inductor 缓存禁用 + `--compilation-config '{"mode":"VLLM_COMPILE","cudagraph_mode":"FULL","cudagraph_capture_sizes":[1,2,4,8,16,32]}'` + TP=2 / max_model_len 8192 |
 | 负载 | L1 单请求（~2K prompt / 256 tok 贪心, 10 iters）；L2 `128 题 2048→256 @ 并发32`；L4 4 请求 128 tok 剖析窗 |
 
 **不得外推**：本页不主张 0.25 线 + Qwen2.5 cohort 的结论，也不覆盖 MTP / APC /
 `FULL_AND_PIECEWISE`。与 `docs/cohort-and-ownership.md` §2 的 Qwen2.5 cohort 是**并存的两个域**。
 
 ## 2. 三项证据
+
+> 📌 **口径标注（2026-10-13）**：下列三项证据是在当时那条**退化 serve 栈**上测得的
+> （`cudagraph_mode=NONE` ⇒ `mode=NONE`，inductor 亦被关闭，见 [pitfalls.md](../pitfalls.md) §1.3）。
+> 该口径**不影响优化本身的结论方向**（`Cast[256,2048]` 归零、逐字符一致、开销来源判断均独立成立）；
+> 引用其中的**数字**时标注此口径即可。后续实验一律走恢复后的默认配置
+> （`mode=VLLM_COMPILE + cudagraph_mode=FULL + cudagraph_capture_sizes=[1,2,4,8,16,32]`）。
 
 1. **default-off 零回归冒烟**：不注入 env 起 serve，载体不装载（serve 日志 `Gate fp32 cache
    populated` 计数 = 0），行为与原生一致；另有子进程用例证明 `load()` 关闭时不 import

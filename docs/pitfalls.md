@@ -38,10 +38,12 @@ pip install pytest-xdist
 - **姿势**:显式 `--compilation-config '{"cudagraph_mode":"FULL"}'`
   (npugraph_ex + ACL graph,自带 AOT 缓存规避);所有 A/B 腿必须**对称施加**。
 - **另注**:`VLLM_DISABLE_COMPILE_CACHE=1` 仍是必须项(共享 AOT 缓存命中硬崩,见证据③口径)。
-- **2026-10-13（0.28 镜像）更新**:该镜像上默认 `FULL_AND_PIECEWISE`（以及单值 `FULL`）在
-  `capture_model` 阶段失败（`rtStreamBeginCapture … resource alloc fail`）。现行 **0.28/Qwen3.5 基准**
-  降到 `--compilation-config '{"cudagraph_mode":"NONE"}'`（保留 torch.compile/inductor 融合）；
-  A/B 腿仍须对称施加。见 [evidence/d4-gate-fp32-cohort.md](evidence/d4-gate-fp32-cohort.md)。
+- **2026-10-13（0.28 镜像）更新**:该镜像上默认捕获网格 / piecewise 档在 `capture_model` 阶段失败
+  （`Resource_Error(EE1023) Alloc Stream resource failed: Too many streams are created`）。
+  **正解不是退成 `cudagraph_mode=NONE`**——Ascend 上 `NONE ⇒ mode=NONE`（`vllm_ascend/platform.py:1195`）
+  会把 inductor 一起关掉（L1 TPOT 250ms vs 正常 ~14ms，17x 退化）。可用配置是**收小捕获网格 + FULL 档**：
+  `--compilation-config '{"mode":"VLLM_COMPILE","cudagraph_mode":"FULL","cudagraph_capture_sizes":[1,2,4,8,16,32]}'`
+  （实测 L1 TPOT 14.08ms / L2 3983 tok/s）。已固化进 `bench-ladder.sh` 的 serve 默认。
 
 - **副作用须知**:`triton` 包元数据不存在(`pip show triton` 查不到、`pip check`
   常驻告警),vllm 的 HAS_TRITON 检测基于 import 不受影响。裸调
