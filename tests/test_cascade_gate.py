@@ -18,6 +18,9 @@ import pytest
 
 gate = pytest.importorskip("vllm_ascend_split_batch.cascade_gate")
 
+# Archived 0.25-line cascade bundle; see tests/_cascade_kernel.py.
+pytestmark = pytest.mark.legacy_kernel
+
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):

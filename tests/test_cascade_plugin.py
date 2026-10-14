@@ -23,12 +23,16 @@ import types
 
 import _device_stack  # noqa: F401  -- device stack present, or skip
 import pytest
+from _cascade_kernel import require_cascade_kernel
 
 cascade_plugin = pytest.importorskip(
     "vllm_ascend_split_batch.cascade_plugin",
     reason="cascade plugin unit tests run on the NPU host with the full "
     "vllm-ascend stack installed",
 )
+
+# Archived 0.25-line cascade bundle; see tests/_cascade_kernel.py.
+pytestmark = pytest.mark.legacy_kernel
 
 ENV_KEYS = (
     "VLLM_ASCEND_ENABLE_CASCADE_DECODE",
@@ -130,19 +134,42 @@ def test_disabled_discovery_touches_nothing(monkeypatch) -> None:
     assert injected_before >= set(ENV_KEYS)
 
 
-def test_disabled_discovery_reports_not_probed_wheel(monkeypatch, caplog) -> None:
-    """The marker must not claim "unavailable" for a wheel it never probed."""
+def _collect_startup_marker(monkeypatch) -> list[str]:
+    """Collect the marker lines from the plugin's own (non-propagating) logger.
+
+    ``caplog`` only sees root-propagated records, and ``_startup_logger()`` is a
+    child of vLLM's configured ``vllm`` logger (propagate=False) -- the marker is
+    visible in serve logs precisely *because* it does not reach the root logger,
+    so it must be captured with a handler on that logger instead of via caplog.
+    """
     import logging
 
-    _reset_env(monkeypatch)
-    cascade_plugin._reset_fail_open_for_tests()
-    with caplog.at_level(logging.INFO):
+    records: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect()
+    startup_logger = cascade_plugin._startup_logger()
+    startup_logger.addHandler(handler)
+    startup_logger.setLevel(logging.INFO)
+    try:
+        _reset_env(monkeypatch)
+        cascade_plugin._reset_fail_open_for_tests()
         cascade_plugin.load()
-    markers = [
-        r.getMessage()
-        for r in caplog.records
-        if "cascade plugin loaded (" in r.getMessage()
+    finally:
+        startup_logger.removeHandler(handler)
+    return [
+        rec.getMessage()
+        for rec in records
+        if "cascade plugin loaded (" in rec.getMessage()
     ]
+
+
+def test_disabled_discovery_reports_not_probed_wheel(monkeypatch) -> None:
+    """The marker must not claim "unavailable" for a wheel it never probed."""
+    markers = _collect_startup_marker(monkeypatch)
     assert markers, "the disabled load() must still log the startup marker"
     assert markers[-1].endswith("gate=0, graph_gate=0, kernel_wheel=not-probed)"), (
         markers[-1]
@@ -367,6 +394,7 @@ def test_gate_rejects_multi_query_batches(monkeypatch) -> None:
 
 def test_gate_rejects_speculative_configs(monkeypatch) -> None:
     """Any speculative decoding config fails closed until MTP is supported."""
+    require_cascade_kernel()  # the wheel-present half of the assertion
     gate, _, _ = _gate(monkeypatch)
     monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     builder = types.SimpleNamespace(
@@ -421,6 +449,7 @@ def test_rejects_unsupported_attention_variants(monkeypatch) -> None:
 
 
 def test_precision_whitelist(monkeypatch) -> None:
+    require_cascade_kernel()  # fp32 admission needs the wheel
     gate, _, _ = _gate(monkeypatch)
     monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     kwargs = dict(

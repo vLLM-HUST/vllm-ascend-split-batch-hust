@@ -36,6 +36,7 @@ import sys
 import types
 
 import pytest
+from _cascade_kernel import require_cascade_kernel
 from _device_stack import torch  # noqa: F401  -- torch present, or skip
 
 cascade_plugin = pytest.importorskip(
@@ -43,6 +44,9 @@ cascade_plugin = pytest.importorskip(
     reason="fail-open tests run on the NPU host with the full vllm-ascend "
     "stack installed",
 )
+
+# Archived 0.25-line cascade bundle; see tests/_cascade_kernel.py.
+pytestmark = pytest.mark.legacy_kernel
 
 ENV_KEYS = (
     "VLLM_ASCEND_ENABLE_CASCADE_DECODE",
@@ -131,6 +135,7 @@ def test_probe_reports_unregistered_ops(monkeypatch) -> None:
 
 
 def test_probe_succeeds_on_healthy_host() -> None:
+    require_cascade_kernel()
     ok, reason = cascade_plugin._probe_kernel_wheel()
     assert ok is True, reason
     assert reason == ""
@@ -207,6 +212,7 @@ def test_gate_default_off_stays_silent_shape_without_wheel(monkeypatch, caplog) 
 
 
 def test_gate_still_opens_with_wheel_present(monkeypatch) -> None:
+    require_cascade_kernel()
     _reset_env(monkeypatch)
     monkeypatch.setenv("VLLM_ASCEND_ENABLE_CASCADE_DECODE", "1")
     monkeypatch.setenv("VLLM_ASCEND_CASCADE_PRECISION", "fp32")

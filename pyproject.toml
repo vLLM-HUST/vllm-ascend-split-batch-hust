@@ -70,6 +70,14 @@ markers = [
     # deselects them: `pytest -q -m "not host_tree"`.  The full local run keeps
     # them, which is what makes the guard loud.
     "host_tree: needs the vllm-ascend source checkout (deselected on the CPU CI job)",
+    # The archived 0.25-line cascade bundle.  Its native kernel wheel cannot load
+    # on the 0.28 base (built against glibc >= 2.38; the image is Ubuntu 22.04.5 /
+    # glibc 2.35 -- see tests/_cascade_kernel.py).  The wheel-dependent tests skip
+    # by themselves; this marker is the coarse escape hatch for a run that wants
+    # the whole legacy family out: `pytest -q -m "not legacy_kernel"`.  Re-enable
+    # only after rebuilding the wheel on the 22.04 base (ops/kernels/AGENTS.md 6,
+    # ruling 2026-10-11: keep cascade archived on the 0.28 stack).
+    "legacy_kernel: archived 0.25-line cascade bundle (wheel unusable on the 0.28 base)",
 ]
 
 [tool.ruff]

@@ -38,6 +38,9 @@ import pytest
 
 from vllm_ascend_split_batch import cascade_graph_plugin as gp
 
+# Archived 0.25-line cascade bundle; see tests/_cascade_kernel.py.
+pytestmark = pytest.mark.legacy_kernel
+
 
 class _FakeWrapper:
     """Duck-typed stand-in for ``ACLGraphWrapper``."""
