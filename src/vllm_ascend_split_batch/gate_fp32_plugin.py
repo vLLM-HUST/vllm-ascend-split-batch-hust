@@ -12,6 +12,7 @@ worker constructs the model, so this module wraps the active model-runner
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import threading
@@ -42,9 +43,7 @@ def _serve_logger():
         try:
             from vllm.logger import init_logger
 
-            _SERVE_LOGGER = init_logger(
-                "vllm.vllm_ascend_split_batch.gate_fp32_plugin"
-            )
+            _SERVE_LOGGER = init_logger("vllm.vllm_ascend_split_batch.gate_fp32_plugin")
         except Exception:  # noqa: BLE001 -- logging must never break startup
             _SERVE_LOGGER = logger
     return _SERVE_LOGGER
@@ -111,10 +110,8 @@ def install() -> bool:
         # only the (unused) v2/GPU runners.  Best-effort: any host without the
         # package (or a future rework) simply falls through to the plain probe
         # below, and a warm-up failure must never break engine startup.
-        try:
+        with contextlib.suppress(Exception):  # a warm-up must never break startup
             import vllm_ascend.ops  # noqa: F401
-        except Exception:  # noqa: BLE001 -- a warm-up must never break startup
-            pass
         candidates = (
             ("vllm_ascend.worker.model_runner_v1", "NPUModelRunner"),
             ("vllm_ascend.worker.v2.model_runner", "NPUModelRunner"),

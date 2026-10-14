@@ -509,9 +509,7 @@ def test_entry_point_is_declared_in_pyproject():
 
     data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
     general = data["project"]["entry-points"]["vllm.general_plugins"]
-    assert general["gate-fp32"] == (
-        "vllm_ascend_split_batch.gate_fp32_plugin:load"
-    )
+    assert general["gate-fp32"] == ("vllm_ascend_split_batch.gate_fp32_plugin:load")
 
 
 def test_entry_point_target_is_callable():
