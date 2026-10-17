@@ -20,6 +20,7 @@
 | zerocost-wiring（prefill `.out` + 跳过 cos/sin） | `org.vllm-hust.zerocost-wiring` / `zerocost-wiring` | **active** | `VLLM_HUST_FI_PREFILL_OUT=1`、`VLLM_HUST_SKIP_COS_SIN=1` | 可用 |
 | gate-fp32（MoE gate 权重 fp32 外提，D4 const-hoist；归零每步 `Cast[256,2048]`） | `org.vllm-hust.gate-fp32` / `gate-fp32` | **active** | `VLLM_HUST_GATE_FP32=1`（默认关） | 可用；证据在 **0.28/Qwen3.5 基准**，cohort 见 [cohort-and-ownership.md](cohort-and-ownership.md) §2 与 [evidence/d4-gate-fp32-cohort.md](evidence/d4-gate-fp32-cohort.md) |
 | mlp-chunk（MLP token 分块） | 无 bundle manifest / `mlp-chunk` | — | `VLLM_HUST_MLP_CHUNKS`（默认 1 = 关）、`VLLM_HUST_MLP_CHUNK_MIN_TOKENS` | 插件可加载；**未收录 manifest**，即不经管理器发布面 |
+| gdn-merge-inproj（GDN `in_proj_ba`→`in_proj_qkvz` 加载期权重合并，F2 迁移载体） | `org.vllm-hust.gdn-merge-inproj` / `gdn-merge-inproj` | **import_only** | `VLLM_HUST_GDN_MERGE_INPROJ=1`（默认关） | **当前不生效且不改任何权重（fail-closed）**：宿主 `AscendGatedDeltaNetAttention.forward` 没有可安全消费合并权重的 seam，载体只打一条 warning；已验收的 F2 数字属于运行树补丁，**不随迁移继承**，须同口径重新 L4 验收（判定代码 `gdn_merge_inproj_plugin.forward_consumer_available`，blocker 见 [../HOST_CONTRACT.md](../HOST_CONTRACT.md) GDN 段） |
 | aot-cache-guard（AOTAutograd 缓存 guard） | 无 bundle manifest / `aot-cache-guard` | — | **默认开**（`VLLM_HUST_AOT_CACHE_GUARD=0` 关） | 验收前置修复；宿主自修后变 no-op |
 | fi-gelu / fi-sampling | 无 bundle manifest / `fi-gelu`、`fi-sampling` | — | `VLLM_HUST_FI_GELU`、`VLLM_HUST_FI_SAMPLING` | 能力在、证据显示 e2e 收益在噪声带内，保持默认关 |
 

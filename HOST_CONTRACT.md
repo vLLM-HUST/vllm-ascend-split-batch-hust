@@ -159,3 +159,94 @@ and logs nothing. Fail-open: a missing/renamed seam, a foreign registry entry
 (e.g. the 310P variants) or any internal error warns once and leaves the host
 implementation in place; a failure *after* the wrapper was installed rolls it back
 so `stats()` matches the log.
+
+## GDN in_proj merge carrier (implemented, default-off, fail-closed)
+
+`gdn_merge_inproj_plugin.py` is the plugin-library home of the accepted **F2**
+mechanism (load-time `in_proj_ba` -> `in_proj_qkvz` weight merge, one
+`[6176, 2048]` `MatMulV2` per GDN layer instead of two). It rides ONLY:
+
+- `vllm.general_plugins` entry point `gdn-merge-inproj` (`load()`), plus the
+  descriptor-only bundle `org.vllm-hust.gdn-merge-inproj`
+  (`src/vllm_ascend_split_batch/gdn_merge_inproj/`, `implementation[].status =
+  import_only`, injection key `VLLM_HUST_GDN_MERGE_INPROJ=1`). The status is
+  deliberately **not** `active`: the extension manager must refuse to enable a
+  carrier that is fail-closed on this host (same ladder as `rope-fix`).
+- the active model runner's `load_model` method, wrapped exactly like
+  `gate_fp32_plugin` (same probe list and order, `vllm_ascend.ops` warm-up,
+  fail-open on a missing seam). Both carriers wrap the same method; each checks
+  its own marker, calls through to whatever it wrapped (so the other hook still
+  runs) and is undone by its own `uninstall()`.
+- read-only resolution of
+  `vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn.QwenGatedDeltaNetAttention`
+  — the class the model's GDN layers are instances of, because `patch_qwen3_5`
+  rebinds the Ascend methods onto it — plus its `in_proj_qkvz` / `in_proj_ba`
+  `MergedColumnParallelLinear` shards and the `key_dim` / `value_dim` / `tp_size`
+  / `num_v_heads` attributes used to derive the F2 row counts.
+
+Host cohort: vllm-ascend `0.25.1rc2.dev605+hust.20260903.4.gfbe4911bb` (active
+stack tree, `/root/vllm-workspace/.stack/ascend-fbe4911`), vllm
+`0.28.1.post1.dev143+gf18cf803c`, 2x910B2 TP=2, Qwen3.5-35B-A3B, caliber
+`mmlu-pro-eval-traffic`, cohort `028-qwen35-35b-a3b-tp2-fullgraph`.
+
+### Current status: fail-closed on the missing forward-consumer seam
+
+The weight conversion is implemented and CPU-tested, but on this host the carrier
+rewrites **nothing** and logs one warning, because the merged weight has no safe
+consumer.
+
+`AscendGatedDeltaNetAttention.forward` computes `self.in_proj_qkvz(...)` and
+`self.in_proj_ba(...)` inline and then runs `torch.ops.vllm.qwen_gdn_attention_core`
++ `RMSNormGated` + `out_proj` inside the same method body: there is no projection
+or custom-op seam. A plugin-side single-matmul consumer would need either
+
+1. per-call Python state inside the traced `forward` (a module attribute or
+   thread-local carrying the fused output to the second projection call) — the
+   dynamo-unsafe shape the F2 v1 carrier was rejected for, or
+2. a copy of the host `forward` body in this repository — host private source,
+   which would then drift silently.
+
+Merging without a consumer is not a fallback: it removes no kernel (the stock
+second `in_proj_ba` matmul still runs) and feeds a `[*, 6176]` tensor into the
+stock `mixed_qkvz.split([qkv_size, z_size])`. `FORWARD_CONSUMER_BLOCKER` in the
+carrier is the machine-readable form of this paragraph;
+`forward_consumer_available()` is the single gate, and the merge path behind it is
+exercised by `tests/test_gdn_merge_inproj_plugin.py` (the fail-closed path and
+the merge path are both pinned).
+
+Unblocking condition (any one): the host forward grows an env-gated
+merged-consumption branch for the flat `gqa_interleaved_layout=False` layout, or
+the projection step becomes its own bindable method / custom op.
+
+Default-off / fail-open semantics: with `VLLM_HUST_GDN_MERGE_INPROJ` unset (or
+anything other than the exact token `1`) `load()` returns before importing
+`torch` / `vllm` / `vllm_ascend`, touches no class and logs nothing. Enabled: a
+missing/renamed host class, a missing runner seam or any internal error warns and
+changes nothing; the post-load hook never raises into `load_model`, and a
+`load_model` that raises is never post-processed.
+
+Coexistence with the runtime-tree F2 patch (read before reading any serve log):
+the accepted F2 measurement came from the runtime-tree patch, which consumes the
+**same** env key `VLLM_HUST_GDN_MERGE_INPROJ=1` (the validation ladder exports it
+by default, `tools/bench-ladder.sh`). On a host where the patch is applied, a
+`=1` run therefore shows the patch's merge *and* this carrier's fail-closed
+warning in the same log; with the plugin carrier alone the key has the visible
+effect of that one warning and nothing else. The two cannot double-merge even if
+the seam appears later: the patch leaves a `[6176, 2048]` weight, which
+`plan_merge` refuses on the row-count guard (`layer dims imply (6144, 32)`).
+
+Host-upgrade checklist item — re-audit when the host moves: (a) the
+`QwenGatedDeltaNetAttention` name and its `in_proj_qkvz` / `in_proj_ba`
+attributes; (b) that GDN layers are still instances of the core class rather than
+of a fork subclass; (c) `gqa_interleaved_layout` and the four dim attributes;
+(d) the runner probe list and the `load_model` signature; (e) **whether a
+merged-consumption seam now exists** — if it does, delete this blocker and run the
+L3/L4 acceptance.
+
+Statistics scope: the accepted evidence (L1 card `f2_accepted_verdict_1016`) —
+decode `MatMulV2` -30.1/step, device kernel time -15.4% per pattern, TPOT -1.10%
+(no regression), L3 8/8 identical, zero new `ConcatD`/`CopyD` — belongs to caliber
+`mmlu-pro-eval-traffic` / cohort `028-qwen35-35b-a3b-tp2-fullgraph` **and to the
+runtime-tree patch**, not to this carrier: any performance number for this carrier
+must be re-accepted with a fresh L4 window on the same caliber. Nothing here may
+be extrapolated to another caliber, cohort, `capture_size` or the eager path.

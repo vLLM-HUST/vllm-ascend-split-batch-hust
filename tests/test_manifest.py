@@ -13,6 +13,7 @@ from vllm_hust_ext.manifest import activation_blocker, load_manifest
 import vllm_ascend_split_batch
 import vllm_ascend_split_batch.fia_demask as fia_demask_module
 import vllm_ascend_split_batch.gate_fp32 as gate_fp32_module
+import vllm_ascend_split_batch.gdn_merge_inproj as gdn_merge_inproj_module
 import vllm_ascend_split_batch.rope_fix as rope_fix_module
 import vllm_ascend_split_batch.zerocost as zerocost_module
 
@@ -30,6 +31,9 @@ ZEROCOST_MANIFEST_PATH = Path(zerocost_module.__file__).with_name(
     "vllm-hust-extension-v0.2.json"
 )
 GATE_FP32_MANIFEST_PATH = Path(gate_fp32_module.__file__).with_name(
+    "vllm-hust-extension-v0.2.json"
+)
+GDN_MERGE_INPROJ_MANIFEST_PATH = Path(gdn_merge_inproj_module.__file__).with_name(
     "vllm-hust-extension-v0.2.json"
 )
 
@@ -166,6 +170,28 @@ def test_gate_fp32_bundle_is_active_with_its_own_key() -> None:
     assert raw["host"]["version_range"] == _manifest_json()["host"]["version_range"]
 
 
+def test_gdn_merge_inproj_bundle_is_import_only_with_its_own_key() -> None:
+    """The F2 GDN in_proj merge carrier is described, but not enable-able.
+
+    The carrier is default-off and **fail-closed** on this host: the merged
+    ``in_proj_qkvz`` weight has no safe forward consumer (see
+    ``HOST_CONTRACT.md``, GDN section).  It therefore rides the same ladder the
+    rope-fix carrier did -- ``import_only`` + its own injection key -- and
+    ``activation_blocker`` must keep the manager from enabling it.  Flipping the
+    status without a re-acceptance would inject a switch whose only host effect
+    is a warning.
+    """
+    manifest = load_manifest(GDN_MERGE_INPROJ_MANIFEST_PATH)
+    assert manifest.bundle_id == "org.vllm-hust.gdn-merge-inproj"
+    blocker = activation_blocker(manifest)
+    assert blocker is not None and "import_only" in blocker
+    raw = json.loads(GDN_MERGE_INPROJ_MANIFEST_PATH.read_text(encoding="utf-8"))
+    carriers = {i["module"]: i["status"] for i in raw["implementation"]}
+    assert carriers["vllm_ascend_split_batch.gdn_merge_inproj_plugin"] == "import_only"
+    assert raw["activation"]["environment"] == {"VLLM_HUST_GDN_MERGE_INPROJ": "1"}
+    assert raw["host"]["version_range"] == _manifest_json()["host"]["version_range"]
+
+
 def test_host_version_range_is_a_bounded_verified_interval() -> None:
     """host.version_range is a **bounded interval**, not a point pin and not ``>=0``.
 
@@ -255,6 +281,7 @@ def test_extension_version_matches_distribution_version() -> None:
         FIA_DEMASK_MANIFEST_PATH,
         ROPE_FIX_MANIFEST_PATH,
         GATE_FP32_MANIFEST_PATH,
+        GDN_MERGE_INPROJ_MANIFEST_PATH,
     ):
         raw = json.loads(path.read_text(encoding="utf-8"))
         assert raw["extension_version"] == version, path

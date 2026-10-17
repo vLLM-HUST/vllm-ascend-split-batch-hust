@@ -89,6 +89,16 @@ manifest 与 entry point 打包完整性由构建检查保证,流程见 [release
 - `ACLGraphWrapper` variant-entry 侧表(按标准 `BatchDescriptor` 键)
 - `ACLGraphWrapper._updatable_graph_replay`(**只在新图重放机制的宿主上存在**;插件在宿主
   重放**之前**做 cascade 重参数化,旧宿主自动 no-op —— 机理见 [pitfalls.md](pitfalls.md) §2.4)
+- active runner 的 `load_model`(D4 `gate-fp32` 与 F2 迁移载体 `gdn-merge-inproj`
+  都只包这一个方法,各自幂等标记 + 各自 `uninstall()`;后者当前是 **fail-closed**,
+  见 HOST_CONTRACT.md 的 GDN 段)
+
+`gdn-merge-inproj`(`gdn_merge_inproj_plugin.py`)是已验收 F2(加载期
+`in_proj_ba`→`in_proj_qkvz` 权重拼接)从运行树补丁**迁移**到插件库的载体:加载期权重转换
+已实现且有 CPU 单测,但宿主 forward 没有可安全消费合并权重的 seam,故载体 default-off 且
+**拒绝改写任何权重**(fail-closed,一条 warning;blocker 见 HOST_CONTRACT.md)。其性能数字
+**必须**在当前口径 `mmlu-pro-eval-traffic` 上重新 L4 验收,已验收的 F2 数字属于运行树补丁,
+不随迁移继承。
 
 这是与 bidkv 类"宿主主动调插件"的 typed contract 最大的不同:**宿主没有
 给我们的 seam,契约靠我们单方面遵守 + `host.version_range` 钉死**。宿主
