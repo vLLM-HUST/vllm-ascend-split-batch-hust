@@ -263,6 +263,50 @@ Compat tuple & red lines for the kernel side live in the kernel repo README
 §4-§5. After bumping the kernel wheel: reinstall, then rerun the plugin
 smoke (see [docs/release.md](docs/release.md) §2).
 
+## Operator validation workflow
+
+The repository owns the executable ladder at `tools/bench-ladder.sh`; `opt bench`
+dispatches to this checked-in source rather than mutating archived evidence scripts.
+The enforced cadence is:
+
+1. static checks and CPU tests;
+2. `opt bench serve`, then `opt bench screen <unique-tag>` on a **plain** server
+   (`L1×3 + L2×3 + L3×1`), producing `screen.json`;
+3. after recording the candidate as `ready`/`validating`, run a bounded light L4
+   with `--trace-tier light --screen-report <screen.json>`;
+4. use `--trace-tier deep` only with `--collection-reason mechanism-gap`;
+5. parse offline and slim immediately after delivery.
+
+`light` defaults to the host's `max_iterations=32` bounded window, disables stack/memory/shape collection,
+stamps the capture scope into the opstat, and removes profiler databases after the
+CSV/all-kernel result is delivered. `deep` defaults to a full window and retains
+the shape database. Plain and profiler-enabled servers cannot be reused across
+modes; stop the active server before switching.
+
+### Carrier status is recorded, not gated
+
+`screen.json` carries a `carriers` block (`opt-ops-carriers.v1`), and
+`opt bench serve` prints the same summary right after `/health` is ready
+(`tools/bench-ladder.sh carriers [serve_log]` prints it as one JSON line). It records the
+three things that actually decide whether the plugin carrier is live:
+
+1. `find_spec("vllm_ascend_split_batch")` under the **serving interpreter**
+   (`/usr/local/python3.12.13/bin/python` on this host; `/usr/bin/python3` cannot see
+   the package and will report a false absence);
+2. the husk entry points enumerable from the `vllm.general_plugins` group
+   (name + value; an install that failed to register is equivalent to no carrier);
+3. functional markers counted from that run's serve log: `cascade plugin loaded`,
+   `Gate fp32 cache populated`, `W3F2: GDN in_proj merge applied`, plus the
+   `gdn_merge_inproj` fail-closed warning (that one means "no double merge", not failure).
+
+`Unknown vLLM environment variable detected: VLLM_HUST_*` is **not** an absence signal —
+it shows up whether or not the carrier is installed, so it is recorded separately under
+`unreliable_absence_signals` with `is_absence_signal: false` (see
+[docs/pitfalls.md](docs/pitfalls.md) §1.5). Carrier state is a **recording axis**: the probe is
+fail-closed (absence, an entry-point enumeration error, or a missing log records
+`unknown`/`false`) and never changes `screen`/`serve` exit codes; only cross-window absolute
+comparisons require two windows to share a carrier state.
+
 ## Canonical MOD metadata
 
 Repository identity, directly responsible maintainers, advisor status, default-off

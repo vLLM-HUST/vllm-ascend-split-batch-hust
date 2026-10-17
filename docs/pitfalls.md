@@ -70,6 +70,30 @@ pip install pytest-xdist
 40 层:30 GDN + 10 MoE）。历史主力 Qwen2.5-Coder-14B-Instruct（单卡,48 层/hidden 5120/bf16）
 随 Qwen2.5/0.25 域**退役为历史专项**（见 [cohort-and-ownership.md](cohort-and-ownership.md) §2）。
 
+### 1.5 `Unknown vLLM environment variable` 警告**不是**载体缺席判据(2026-10-17)
+
+- **症状**:调 `opt bench serve` / 跑窗口后看日志,见到
+  `WARNING [envs.py:2296] Unknown vLLM environment variable detected: VLLM_HUST_GATE_FP32`
+  与 `... VLLM_HUST_GDN_MERGE_INPROJ`,于是判定"husk 载体没装、`VLLM_HUST_*` 全是空开关"。
+- **原因**:该警告只说明这两个键**不在 vllm 自己的 env 白名单**里(vllm 的 `envs.py` 不认插件自定义键),
+  与插件装没装无关 —— **载体生效时同样会打这两行**
+  (`包体恢复/logs/ladder-serve-1017-081645.log:18-19`,而同一份日志 `:8,174,177` 有全套功能 marker)。
+  按它判缺席会把"载体已恢复"误读成"载体缺席"(2026-10-17 早间实际发生过一次)。
+- **姿势**(判据三件,缺一件只能说 unknown):
+  1. **服务实际 Python** 的 `importlib.util.find_spec("vllm_ascend_split_batch")` 非 None。
+     解释器必须与 serve 一致(本机 `/usr/local/python3.12.13/bin/python`);
+     `/usr/bin/python3`(3.10)看不到这个包,会假报缺席。
+  2. `vllm.general_plugins` 里能枚举到 husk 入口点(本机 10 个,含 `gate-fp32` / `gdn-merge-inproj`)。
+  3. **本 serve 日志**里功能 marker 命中:`cascade plugin loaded`(每进程一条)、
+     `Gate fp32 cache populated: 40 MoE gates`(TP0/TP1)、`W3F2: GDN in_proj merge applied on 30 layer(s)`(TP0/TP1);
+     `gdn_merge_inproj_plugin.py:195` 的 fail-closed 警告是"插件不重复合并",**不是失败**。
+- **机器可读**:`tools/bench-ladder.sh carriers [serve_log]` 输出上面三件事的单行 JSON;
+  plain screen 会把它嵌进 `screen.json` 的 `carriers`(`opt-ops-carriers.v1`),
+  serve 就绪后也会自动打人读摘要。其中 `Unknown vLLM env 警告` 单独记在
+  `unreliable_absence_signals` 且 `is_absence_signal=false`。
+- **纪律**:载体状态是**记录轴不是门禁** —— 只记录、不阻断 screen/serve、不要求重跑;
+  只有跨窗口绝对数值比较要求同载体状态,两臂载体状态不一致才是第二个变量。
+
 ## 2. 宿主与集成类
 
 ### 2.1 monkeypatch 面是弱契约
