@@ -88,11 +88,40 @@ pip install pytest-xdist
      `Gate fp32 cache populated: 40 MoE gates`(TP0/TP1)、`W3F2: GDN in_proj merge applied on 30 layer(s)`(TP0/TP1);
      `gdn_merge_inproj_plugin.py:195` 的 fail-closed 警告是"插件不重复合并",**不是失败**。
 - **机器可读**:`tools/bench-ladder.sh carriers [serve_log]` 输出上面三件事的单行 JSON;
-  plain screen 会把它嵌进 `screen.json` 的 `carriers`(`opt-ops-carriers.v1`),
+  plain screen 会把它嵌进 `screen.json` 的 `carriers`(`opt-ops-carriers.v2`),
   serve 就绪后也会自动打人读摘要。其中 `Unknown vLLM env 警告` 单独记在
   `unreliable_absence_signals` 且 `is_absence_signal=false`。
 - **纪律**:载体状态是**记录轴不是门禁** —— 只记录、不阻断 screen/serve、不要求重跑;
   只有跨窗口绝对数值比较要求同载体状态,两臂载体状态不一致才是第二个变量。
+
+#### 1.5.1 插件开关只能从 "serve 侧" 读,不能读调用 shell(2026-10-17 修)
+
+- **症状**:`screen.json.carriers.env` 里 `VLLM_HUST_GATE_FP32`/`VLLM_HUST_GDN_MERGE_INPROJ`
+  是空的,但同一份 carriers 的 marker 显示 `Gate fp32 cache populated` / `W3F2 ... applied` —— 自证冲突。
+- **原因**:`carriers.env` 原来读的是**调用 screen 的那个 shell** 的 `os.environ`,而
+  `export VLLM_HUST_*=1` 只发生在 `cmd_serve` 的进程里; screen 由 `opt bench screen` 另起 shell 调用,
+  未必继承。同理 `cohort_write` 曾经排在两个 export **之前**,会记成"未导出"。
+- **姿势**:`cmd_serve` 在起服前把 export 后的值原子写到与 serve 日志同 stem 的
+  `<serve log>.env.json`(`opt-ops-serve-env.v1`: `source`/`scope`/`serve_pid`/`keys`/`keys_set`/`keys_unset`),
+  探针按 `serve_log` 关联读取并记 `env_scope`/`env_source`; 读不到或与日志不匹配 → 值一律 `null`
+  + `env_scope=env_source=unknown` + `probe_errors`( **不用空串/`0` 冒充 off** )。
+  两个 `export VLLM_HUST_*` 必须排在 `cohort_write` 之前。
+
+#### 1.5.2 fail-closed 不等于"插件没生效",也不等于"运行树补丁没 applied"(2026-10-17 修)
+
+- **症状**:看到 `gdn_merge_inproj_plugin.py:195 ... the GDN merge carrier is fail-closed`,
+  同时日志又有 `W3F2: GDN in_proj merge applied on 30 layer(s)`,于是把合并记成"插件做的",
+  或反过来判"插件没生效"。
+- **原因**:两件事分属两个载体层。仓内 `gdn-merge-inproj` 插件**没有可安全消费合并权重的公开 seam**
+  (`AscendGatedDeltaNetAttention.forward` 内联算 `in_proj_qkvz + in_proj_ba`),
+  所以它 **fail-closed 拒接合并、模型保持 stock**; 日志里的 `W3F2 ... applied` 是
+  **运行树补丁**(`apply-runtime-patches.sh`) 干的。两者共存, 因果不可互换。
+  细节见 [../HOST_CONTRACT.md](../HOST_CONTRACT.md) 的 "GDN in_proj merge carrier" 段。
+- **姿势**:看 `carriers.attribution` 的**逐载体**字段, 不要看单一布尔:
+  `husk.cascade` / `husk.gate_fp32`(`effective`)、`husk.gdn_merge_inproj`
+  (`present-but-fail-closed`)、`runtime_tree.w3f2`(`applied`)、`runtime_tree.w3f3`
+  (`enabled`/`not-enabled`/`failed`)。归因口径: **运行树 W3F2 的合并不得归因给仓内插件**;
+  fail-closed 警告断言的是"没有重复合并",不是失败。
 
 ## 2. 宿主与集成类
 

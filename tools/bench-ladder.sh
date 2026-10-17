@@ -107,12 +107,24 @@ health_ok() { curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; }
 #      /usr/local/python3.12.13/bin/python = serve 用的那个; 不要用 /usr/bin/python3, 它看不到这个包）;
 #   ② vllm.general_plugins 里 husk 入口点（name/value 全量列出; 装不上/未注册等价于未生效）;
 #   ③ 本 serve 日志里的功能 marker 计数（cascade plugin loaded / Gate fp32 cache populated /
-#      W3F2: GDN in_proj merge applied / gdn merge fail-closed 警告）。
+#      W3F2/W3F3 补丁行 / gdn merge fail-closed 警告）。
+# 环境值从哪来（2026-10-17 修正 F1）: 之前探针读**调用 shell** 的 os.environ, 而 `opt bench screen`
+#   的调用 shell 未必继承 cmd_serve 里的 `export VLLM_HUST_*=1` → 会写出"两个键为空 + marker
+#   effective"的自证冲突。现在 env 只认 **serve 侧快照**：cmd_serve 起服时把 export 后的
+#   `VLLM_HUST_*` 原子写到与 serve log 同 stem 的 `<log>.env.json`（`opt-ops-serve-env.v1`），
+#   探针按 serve_log 关联读取; 读不到 → env 值一律 null + env_scope/env_source=unknown +
+#   probe_errors（**不用空字符串冒充 off**）。
+# 归因拆分（2026-10-17 修正 F2）: `attribution` 把「仓内 husk 插件」与「运行树补丁」**分开**记
+#   （husk.cascade / husk.gate_fp32 / husk.gdn_merge_inproj / runtime_tree.w3f2 / runtime_tree.w3f3）,
+#   **不再**用跨载体三元组混算一个 functional_markers。gdn_merge_inproj 仓内是
+#   `present-but-fail-closed`（宿主没有可安全消费合并权重的公开 seam, 见 HOST_CONTRACT.md GDN 段）,
+#   运行树 W3F2 若 applied 是**另一件事**, 两者共存但不得归因为插件做了合并。
 # 纪律（/root/opt-ops/AGENTS.md 实验纪律）: 载体状态是**记录轴不是门禁** → 本探针只写记录,
-#   **不返回失败码、不阻断 screen/serve**; 探针自身出错（包缺席 / 入口点枚举报错 / 日志缺失）
-#   一律 fail-closed 记 unknown/false, 绝不崩调用方。
+#   **不返回失败码、不阻断 screen/serve**; 探针自身出错（包缺席 / 入口点枚举报错 / 日志或 env 文件缺失）
+#   一律 fail-closed 记 unknown/null/false, 绝不崩调用方。
 # 覆盖: LADDER_CARRIER_PYTHON=<解释器>（默认 /usr/local/python3.12.13/bin/python, 缺失回退 $PY）、
-#   LADDER_SERVE_LOG=<日志>（默认读 /tmp/ladder-serve-log, 由 cmd_serve 写入）。
+#   LADDER_SERVE_LOG=<日志>（默认读 /tmp/ladder-serve-log, 由 cmd_serve 写入）、
+#   LADDER_SERVE_ENV=<env.json>（默认由 serve_log 推导 <log>.env.json）。
 carrier_python() {
   if [ -n "${LADDER_CARRIER_PYTHON:-}" ]; then printf '%s\n' "$LADDER_CARRIER_PYTHON"; return 0; fi
   if [ -x /usr/local/python3.12.13/bin/python ]; then
@@ -132,26 +144,93 @@ carrier_serve_log() {
   printf '%s\n' "$log"
 }
 
+# serve 侧 env 快照路径: 与 serve log **同 stem**（ladder-serve-<ts>.log → ladder-serve-<ts>.env.json）。
+# 同 stem 保证"一个 serve ⇔ 一份 env 快照"，不会跨 serve 串用; 显式覆盖 LADDER_SERVE_ENV。
+carrier_env_path() {
+  local log=${1:-} override=${LADDER_SERVE_ENV:-}
+  if [ -n "$override" ]; then printf '%s\n' "$override"; return 0; fi
+  [ -n "$log" ] || return 0
+  case "$log" in
+    *.log) printf '%s\n' "${log%.log}.env.json" ;;
+    *) printf '%s\n' "$log.env.json" ;;
+  esac
+}
+
+# 起服时落 serve 侧 env 快照（F1）: 只记 `VLLM_HUST_*` 相关键的**实际导出值**,
+# 原子写（temp + rename）且独占语义（同 stem 已存在则不覆盖, 记错误）; 失败只告警, 不阻断起服。
+carrier_write_serve_env() {   # $1=env.json 路径 $2=serve log $3=serve pid（可空）
+  local out=${1:?need env file} log=${2:-} pid=${3:-}
+  "$PY" - "$out" "$log" "$pid" <<'PYEOF' || echo "   （serve env 快照写入失败: $out；carriers.env 将记 unknown）" >&2
+import json
+import os
+import sys
+import time
+
+out, log, pid = sys.argv[1], sys.argv[2], sys.argv[3]
+KEYS = ("VLLM_HUST_GATE_FP32", "VLLM_HUST_GDN_MERGE_INPROJ", "VLLM_HUST_SHARED_GATE_PACK")
+# 空串 = 该键没导出/被显式清空 → 记 null（**不是** off；off 只能由 "0" 表达）
+keys = {k: (os.environ.get(k) or None) for k in KEYS}
+doc = {
+    "schema": "opt-ops-serve-env.v1",
+    "serve_log": log,
+    "scope": "serve-process",
+    "source": "bench-ladder.sh cmd_serve（export 之后、nohup 之前的进程环境快照）",
+    "written_at": time.strftime("%FT%TZ", time.gmtime()),
+    "serve_pid": int(pid) if str(pid).strip().isdigit() else None,
+    "keys": keys,
+    "keys_set": [k for k, v in keys.items() if v is not None],
+    "keys_unset": [k for k, v in keys.items() if v is None],
+    "env_all_husk": {k: v for k, v in sorted(os.environ.items())
+                     if k.startswith("VLLM_HUST_")},
+    "note": ("VLLM_HUST_* 的取值只在此文件里可信：screen/L1/L2 的调用 shell 未必继承 "
+             "cmd_serve 的 export。null = 该键未导出（不是 off）。"),
+}
+if os.path.exists(out):
+    print(f"   serve env 快照已存在, 不覆盖: {out}", file=sys.stderr)
+    raise SystemExit(1)
+tmp = f"{out}.tmp.{os.getpid()}"
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(doc, fh, ensure_ascii=False, indent=1)
+    fh.flush()
+    os.fsync(fh.fileno())
+os.replace(tmp, out)          # 原子: 读侧不会看到半个 JSON
+print(f"   serve env 快照 -> {out}"
+      f"（keys_set={','.join(doc['keys_set']) or '-'}；未导出={','.join(doc['keys_unset']) or '-'}）")
+PYEOF
+  return 0
+}
+
 # 探针解释器不可用/没输出 JSON 时的 fail-closed 记录（纯 bash, 不依赖任何 python）。
 carrier_probe_fallback() {
-  local py=${1:-unknown} log=${2:-} pyj logj
+  local py=${1:-unknown} log=${2:-} envf=${3:-} pyj logj envj
   pyj=$(printf '%s' "$py" | sed 's/\\/\\\\/g; s/"/\\"/g')
   logj=$(printf '%s' "$log" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  printf '%s\n' "{\"schema\": \"opt-ops-carriers.v1\", \"recorded_by\": \"bench-ladder.sh carrier_probe_fallback\", \
+  envj=$(printf '%s' "$envf" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '%s\n' "{\"schema\": \"opt-ops-carriers.v2\", \"recorded_by\": \"bench-ladder.sh carrier_probe_fallback\", \
 \"probe_python\": \"$pyj\", \"husk_package\": \"\", \"husk_package_found\": false, \
 \"husk_module_spec\": \"unknown\", \"husk_entry_points\": [], \"husk_entry_point_names\": [], \
-\"general_plugins_entry_points_total\": null, \"env\": {}, \"env_all_husk\": {}, \
+\"general_plugins_entry_points_total\": null, \
+\"env\": {\"VLLM_HUST_GATE_FP32\": null, \"VLLM_HUST_GDN_MERGE_INPROJ\": null, \
+\"VLLM_HUST_SHARED_GATE_PACK\": null}, \"env_scope\": \"unknown\", \"env_source\": \"unknown\", \
+\"env_file\": {\"path\": \"$envj\", \"present\": false}, \"env_all_husk\": {}, \
 \"serve_log\": \"$logj\", \"serve_log_present\": false, \"serve_log_markers\": {}, \
-\"unreliable_absence_signals\": {}, \"verdict\": {\"package\": \"unknown\", \
-\"entry_points\": \"unknown\", \"functional_markers\": \"unknown\", \"axis\": \"record-only\"}, \
-\"probe_errors\": [\"载体探针不可用: 解释器 $pyj 未输出 JSON（fail-closed: 记 unknown/false, 不阻断）\"]}"
+\"unreliable_absence_signals\": {}, \
+\"attribution\": {\"husk\": {\"package\": \"unknown\", \"entry_points\": \"unknown\", \
+\"cascade\": {\"state\": \"unknown\", \"basis\": \"探针不可用\"}, \
+\"gate_fp32\": {\"state\": \"unknown\", \"basis\": \"探针不可用\"}, \
+\"gdn_merge_inproj\": {\"state\": \"unknown\", \"basis\": \"探针不可用\"}}, \
+\"runtime_tree\": {\"w3f2\": {\"state\": \"unknown\", \"basis\": \"探针不可用\"}, \
+\"w3f3\": {\"state\": \"unknown\", \"basis\": \"探针不可用\"}}}, \
+\"verdict\": {\"axis\": \"record-only\", \"cross_carrier_merge\": \"not-computed\"}, \
+\"probe_errors\": [\"载体探针不可用: 解释器 $pyj 未输出 JSON（fail-closed: 记 unknown/null, 不阻断）\"]}"
 }
 
 carrier_probe_json() {   # 用法: carrier_probe_json [serve_log]; 输出单行 JSON, 永不返回非零
-  local log py raw last
+  local log envf py raw last
   log=$(carrier_serve_log "${1:-}")
+  envf=$(carrier_env_path "$log")
   py=$(carrier_python)
-  raw=$("$py" - "$py" "$log" <<'PYEOF'
+  raw=$("$py" - "$py" "$log" "$envf" <<'PYEOF'
 import importlib.metadata as md
 import importlib.util as iu
 import json
@@ -162,20 +241,29 @@ import time
 
 probe_py = sys.argv[1] if len(sys.argv) > 1 else "unknown"
 log = sys.argv[2] if len(sys.argv) > 2 else ""
+env_file = sys.argv[3] if len(sys.argv) > 3 else ""
 PACKAGE = "vllm_ascend_split_batch"
-ENV_KEYS = ("VLLM_HUST_GATE_FP32", "VLLM_HUST_GDN_MERGE_INPROJ")
+ENV_KEYS = ("VLLM_HUST_GATE_FP32", "VLLM_HUST_GDN_MERGE_INPROJ", "VLLM_HUST_SHARED_GATE_PACK")
 MARKERS = (
     ("cascade_plugin_loaded", r"cascade plugin loaded"),
     ("gate_fp32_cache_populated", r"Gate fp32 cache populated"),
-    ("w3f2_gdn_merge_applied", r"W3F2: GDN in_proj merge applied"),
     ("gdn_merge_inproj_fail_closed", r"GDN merge carrier is fail-closed"),
+    ("w3f2_gdn_merge_applied", r"W3F2: GDN in_proj merge applied"),
+    ("w3f2_gdn_merge_skipped", r"W3F2: GDN in_proj merge skipped"),
+    ("w3f3_shared_gate_pack_applied", r"W3F3: shared scalar-gate pack \([^)]*\) applied"),
+    ("w3f3_shared_gate_pack_failed", r"W3F3: shared scalar-gate pack failed"),
 )
 NOT_A_SIGNAL = (
     'vllm 的 "Unknown vLLM environment variable detected: VLLM_HUST_*" 警告在载体存在与不'
     "存在两种状态下都会出现（见 logs/ladder-serve-1017-081645.log:18-19），不是缺席判据"
 )
+GDN_NOTE = (
+    "仓内 gdn_merge_inproj 载体 fail-closed: 宿主 AscendGatedDeltaNetAttention.forward 没有可安全"
+    "消费合并权重的公开 seam, 插件拒绝合并、模型保持 stock（见 HOST_CONTRACT.md GDN 段）。"
+    "运行树 W3F2 补丁若 applied 是**另一件事**; 两者共存但不得把 W3F2 的合并归因给本插件。"
+)
 doc = {
-    "schema": "opt-ops-carriers.v1",
+    "schema": "opt-ops-carriers.v2",
     "recorded_at": time.strftime("%FT%TZ", time.gmtime()),
     "recorded_by": "bench-ladder.sh carrier_probe_json",
     "probe_python": probe_py,
@@ -185,14 +273,32 @@ doc = {
     "husk_entry_points": [],
     "husk_entry_point_names": [],
     "general_plugins_entry_points_total": None,
-    "env": {k: os.environ.get(k, "") for k in ENV_KEYS},
-    "env_all_husk": {k: v for k, v in os.environ.items() if k.startswith("VLLM_HUST_")},
+    # env: 只认 serve 侧快照; 未导出/未读到一律 null（不用 "" 冒充 off）
+    "env": {k: None for k in ENV_KEYS},
+    "env_scope": "unknown",
+    "env_source": "unknown",
+    "env_file": {"path": env_file, "present": False},
+    "env_all_husk": {},
     "serve_log": log,
     "serve_log_present": False,
     "serve_log_markers": {},
     "unreliable_absence_signals": {},
-    "verdict": {"package": "unknown", "entry_points": "unknown",
-                "functional_markers": "unknown", "axis": "record-only"},
+    # attribution: 仓内 husk 插件 与 运行树补丁 **分开**记, 不合并成单一布尔
+    "attribution": {
+        "husk": {
+            "package": "unknown",
+            "entry_points": "unknown",
+            "cascade": {"state": "unknown", "basis": ""},
+            "gate_fp32": {"state": "unknown", "basis": ""},
+            "gdn_merge_inproj": {"state": "unknown", "basis": "", "note": GDN_NOTE},
+        },
+        "runtime_tree": {
+            "w3f2": {"state": "unknown", "basis": ""},
+            "w3f3": {"state": "unknown", "basis": ""},
+        },
+    },
+    "verdict": {"axis": "record-only", "cross_carrier_merge": "not-computed",
+                "see": "attribution（husk 插件 / 运行树补丁 各自状态）"},
     "probe_errors": [],
 }
 errors = doc["probe_errors"]
@@ -203,17 +309,17 @@ def probe_package():
     try:
         spec = iu.find_spec(PACKAGE)
     except Exception as e:  # 包存在但父级 import 抛错等: 记 unknown, 不猜缺席
-        doc["verdict"]["package"] = "unknown"
+        doc["attribution"]["husk"]["package"] = "unknown"
         errors.append(f"find_spec({PACKAGE}) 失败: {type(e).__name__}: {e}")
         return
     if spec is None:
         doc["husk_module_spec"] = "absent"
-        doc["verdict"]["package"] = "absent"
+        doc["attribution"]["husk"]["package"] = "absent"
         return
     doc["husk_module_spec"] = getattr(spec, "origin", None) or "present"
     doc["husk_package"] = PACKAGE
     doc["husk_package_found"] = True
-    doc["verdict"]["package"] = "present"
+    doc["attribution"]["husk"]["package"] = "present"
 
 
 def probe_entry_points():
@@ -227,25 +333,73 @@ def probe_entry_points():
              for e in group),
             key=lambda d: (d["name"], d["value"]))
     except Exception as e:  # 枚举本身失败: 记 unknown（不是"没有入口点"）
-        doc["verdict"]["entry_points"] = "unknown"
+        doc["attribution"]["husk"]["entry_points"] = "unknown"
         errors.append(f"vllm.general_plugins 入口点枚举失败: {type(e).__name__}: {e}")
         return
     doc["general_plugins_entry_points_total"] = len(items)
     husk = [d for d in items if PACKAGE in d["value"]]
     doc["husk_entry_points"] = husk
     doc["husk_entry_point_names"] = [d["name"] for d in husk]
-    doc["verdict"]["entry_points"] = "present" if husk else "empty"
+    doc["attribution"]["husk"]["entry_points"] = "present" if husk else "empty"
+
+
+def probe_env():
+    """serve 侧 env 快照（F1）: 只认 cmd_serve 落的 <log>.env.json, 不读调用 shell。"""
+    doc["env_file"]["path"] = env_file
+    if not env_file:
+        errors.append("serve 日志路径未知 → 无法定位 serve env 快照 → env 记 unknown/null")
+        return
+    if not os.path.isfile(env_file):
+        errors.append(f"serve env 快照不存在: {env_file}"
+                      "（该 serve 若由 2026-10-17 之前的 cmd_serve 启动就不会写）→ env 记 unknown/null,"
+                      "不用空串冒充 off")
+        return
+    try:
+        with open(env_file, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            raise ValueError("env 快照不是 JSON 对象")
+    except Exception as e:
+        errors.append(f"serve env 快照不可读: {env_file}: {type(e).__name__}: {e} → env 记 unknown/null")
+        return
+    # 关联校验: 快照里记的 serve_log 必须指向同一份日志, 否则不采信（防止跨 serve 串用）
+    snap_log = data.get("serve_log")
+    if snap_log and log and os.path.abspath(snap_log) != os.path.abspath(log):
+        errors.append(f"serve env 快照(${snap_log}) 与 serve 日志({log}) 不匹配 → env 记 unknown/null")
+        return
+    keys = data.get("keys") or {}
+    doc["env"] = {k: (keys.get(k) if keys.get(k) not in ("", None) else None) for k in ENV_KEYS}
+    doc["env_scope"] = str(data.get("scope") or "unknown")
+    doc["env_source"] = f"serve-env-file:{env_file}"
+    doc["env_file"].update({
+        "present": True,
+        "schema": data.get("schema"),
+        "written_at": data.get("written_at"),
+        "serve_pid": data.get("serve_pid"),
+        "source": data.get("source"),
+        "keys_set": data.get("keys_set"),
+        "keys_unset": data.get("keys_unset"),
+    })
+    doc["env_all_husk"] = dict(data.get("env_all_husk") or {})
 
 
 def probe_log():
-    """本 serve 日志的 marker 计数（唯一可当"功能生效"的证据; 也是 absence 的反例检查）。"""
+    """本 serve 日志的 marker 计数 + 逐载体归因（F2: 不把运行树 marker 算成插件生效）。"""
+    husk = doc["attribution"]["husk"]
+    tree = doc["attribution"]["runtime_tree"]
     if not log:
-        doc["verdict"]["functional_markers"] = "unknown"
+        for slot in ("cascade", "gate_fp32", "gdn_merge_inproj"):
+            husk[slot]["basis"] = "serve 日志路径未知"
+        for slot in ("w3f2", "w3f3"):
+            tree[slot]["basis"] = "serve 日志路径未知"
         errors.append("serve 日志路径未知（cmd_serve 写 /tmp/ladder-serve-log 或给 LADDER_SERVE_LOG）"
                       "→ marker 记 unknown")
         return
     if not os.path.isfile(log):
-        doc["verdict"]["functional_markers"] = "unknown"
+        for slot in ("cascade", "gate_fp32", "gdn_merge_inproj"):
+            husk[slot]["basis"] = f"serve 日志不存在: {log}"
+        for slot in ("w3f2", "w3f3"):
+            tree[slot]["basis"] = f"serve 日志不存在: {log}"
         errors.append(f"serve 日志不存在: {log} → marker 记 unknown")
         return
     pats = {name: re.compile(pat) for name, pat in MARKERS}
@@ -268,14 +422,69 @@ def probe_log():
     doc["unreliable_absence_signals"] = {
         "unknown_vllm_env_warning": {"count": unknown_env, "is_absence_signal": False,
                                      "why": NOT_A_SIGNAL}}
-    need = ("cascade_plugin_loaded", "gate_fp32_cache_populated", "w3f2_gdn_merge_applied")
-    hits = [counts[n]["count"] for n in need]
-    doc["verdict"]["functional_markers"] = ("effective" if all(h > 0 for h in hits)
-                                            else "partial" if any(h > 0 for h in hits)
-                                            else "missing")
+    have = {name: counts[name]["count"] > 0 for name in counts}
+    eps = set(doc["husk_entry_point_names"] or [])
+    pkg_absent = doc["husk_module_spec"] == "absent"
+
+    def husk_slot(name, ep_name, marker, absent_state="absent"):
+        slot = husk[name]
+        if pkg_absent:
+            slot.update({"state": absent_state, "basis": "husk 包 find_spec=absent"})
+        elif have[marker]:
+            slot.update({"state": "effective",
+                         "basis": f"{marker}×{counts[marker]['count']}"
+                                  f"（首行 {counts[marker]['first_line']}）"})
+        elif ep_name in eps:
+            slot.update({"state": "present-not-observed",
+                         "basis": f"入口点 {ep_name} 在, 但日志无 {marker}（开关关/graph 未加载/尚未打点）"})
+        else:
+            slot.update({"state": absent_state,
+                         "basis": f"入口点 {ep_name} 不在 vllm.general_plugins 里"})
+
+    husk_slot("cascade", "cascade-attention", "cascade_plugin_loaded")
+    husk_slot("gate_fp32", "gate-fp32", "gate_fp32_cache_populated")
+    # gdn_merge_inproj 专职: fail-closed 才是"插件在但拒绝合并"; 不是 effective
+    gslot = husk["gdn_merge_inproj"]
+    if pkg_absent:
+        gslot.update({"state": "absent", "basis": "husk 包 find_spec=absent"})
+    elif have["gdn_merge_inproj_fail_closed"]:
+        gslot.update({"state": "present-but-fail-closed",
+                      "basis": f"gdn_merge_inproj_fail_closed×{counts['gdn_merge_inproj_fail_closed']['count']}"
+                               f"（首行 {counts['gdn_merge_inproj_fail_closed']['first_line']}）: "
+                               "插件拒接合并, 模型保持 stock"})
+    elif "gdn-merge-inproj" in eps:
+        gslot.update({"state": "present-not-observed",
+                      "basis": "入口点 gdn-merge-inproj 在, 日志无 fail-closed 警告"
+                               "（VLLM_HUST_GDN_MERGE_INPROJ 未开或尚未加载到该层）"})
+    else:
+        gslot.update({"state": "absent",
+                      "basis": "入口点 gdn-merge-inproj 不在 vllm.general_plugins 里"})
+
+    def tree_slot(name, on_markers, off_marker, on_state, off_state):
+        slot = tree[name]
+        hit_on = [m for m in on_markers if have.get(m)]
+        if hit_on:
+            m = hit_on[0]
+            slot.update({"state": on_state,
+                         "basis": f"{m}×{counts[m]['count']}（首行 {counts[m]['first_line']}）"})
+        elif off_marker and have.get(off_marker):
+            slot.update({"state": off_state,
+                         "basis": f"{off_marker}×{counts[off_marker]['count']}"})
+        else:
+            slot.update({"state": off_state,
+                         "basis": "日志里无对应补丁行（补丁未应用/未开/尚未加载）"})
+
+    tree_slot("w3f2", ("w3f2_gdn_merge_applied",), "w3f2_gdn_merge_skipped",
+              "applied", "not-applied")
+    tree_slot("w3f3", ("w3f3_shared_gate_pack_applied", "w3f3_shared_gate_pack_failed"), None,
+              "enabled", "not-enabled")
+    if have["w3f3_shared_gate_pack_failed"]:
+        tree["w3f3"].update({"state": "failed",
+                             "basis": f"w3f3_shared_gate_pack_failed×{counts['w3f3_shared_gate_pack_failed']['count']}"
+                                      "（fail-closed raise）"})
 
 
-for fn in (probe_package, probe_entry_points, probe_log):
+for fn in (probe_package, probe_entry_points, probe_env, probe_log):
     try:
         fn()
     except Exception as e:   # 兜底: 任一节崩溃只记错误, 不让调用方崩
@@ -287,7 +496,7 @@ PYEOF
   last=$(printf '%s\n' "$raw" | tail -1)
   case "$last" in
     \{*) printf '%s\n' "$last" ;;
-    *) carrier_probe_fallback "$py" "$log" ;;
+    *) carrier_probe_fallback "$py" "$log" "$envf" ;;
   esac
   return 0
 }
@@ -305,14 +514,14 @@ try:
         raise ValueError("not an object")
 except Exception:
     raise SystemExit(1)
-v = c.get("verdict") or {}
 print("== 载体（记录轴: 只记录不判定成败）==")
 print(f"   探针 Python: {c.get('probe_python')}")
 names = c.get("husk_entry_point_names") or []
 print(f"   husk 包: {c.get('husk_package') or '(未见)'}  find_spec={c.get('husk_module_spec')}"
       f"  入口点 {len(names)} 个" + ((": " + ", ".join(names)) if names else ""))
+print(f"   serve env（scope={c.get('env_scope')}, source={c.get('env_source')}）")
 for k, val in (c.get("env") or {}).items():
-    print(f"   env: {k}={val or '<unset>'}")
+    print(f"     {k}={val if val is not None else '<unknown/未导出>'}")
 print(f"   serve 日志: {c.get('serve_log') or '(未知)'}  present={c.get('serve_log_present')}")
 for name, hit in (c.get("serve_log_markers") or {}).items():
     print(f"     {name}: count={hit.get('count')} first_line={hit.get('first_line')}")
@@ -320,9 +529,19 @@ un = (c.get("unreliable_absence_signals") or {}).get("unknown_vllm_env_warning")
 if un:
     print(f"   注意: 日志里 Unknown vLLM env 警告 {un.get('count')} 次 —— **不是**缺席判据"
           "（载体存在/不存在都会出现）")
-print(f"   判定: package={v.get('package')} entry_points={v.get('entry_points')}"
-      f" functional_markers={v.get('functional_markers')} axis={v.get('axis')}")
-if v.get("functional_markers") != "effective":
+attr = c.get("attribution") or {}
+husk = attr.get("husk") or {}
+tree = attr.get("runtime_tree") or {}
+print("   归因（仓内 husk 插件 / 运行树补丁 分开记, 不合并）:")
+for slot in ("cascade", "gate_fp32", "gdn_merge_inproj"):
+    item = husk.get(slot) or {}
+    print(f"     husk.{slot}={item.get('state')}  ({item.get('basis')})")
+for slot in ("w3f2", "w3f3"):
+    item = tree.get(slot) or {}
+    print(f"     runtime_tree.{slot}={item.get('state')}  ({item.get('basis')})")
+v = c.get("verdict") or {}
+print(f"   总体: axis={v.get('axis')} cross_carrier_merge={v.get('cross_carrier_merge')}")
+if husk.get("gate_fp32", {}).get("state") != "effective":
     print("   提示: marker 计数是「此刻」的日志快照；模型/图还没加载完时 Gate fp32 与 W3F2"
           " 尚未打点 → 稍后重跑 `bench-ladder.sh carriers` 复核"
           "（screen.json 里的 carriers 取 screen 结束时刻）")
@@ -504,6 +723,20 @@ PYEOF
   # （/tmp、/srv/prof-archive）随之清空——实测 09:35 的重建直接销毁了 16G trace + 23G 解析
   # 中间产物，before 窗口零产物。放 PVC 后即使容器重建，trace 仍在，可直接重解析而不必重跑负载；
   # 磁盘压力由 cmd_profile 的 ≥20G 预检兜住。LADDER_PROF_ROOT 可覆盖（回 overlay 需自担风险）。
+  # 2026-10-14 固化(协议级): D4 gate-fp32 权重外提 (husk 插件 gate_fp32_plugin)。
+  # 依据: 设备 Cast[256,2048] 20480->0 / -148ms/窗; L2 out_tok_s +2.58% (3/3 对同向); L3 8/8。
+  # 记为吞吐/设备预算减负, 非降 TPOT (L1 在噪声底)。显式 VLLM_HUST_GATE_FP32=0 可关
+  # (插件仅在 ==1 时启用; 载体缺失/容器重建未 bootstrap 时 fail-open, 不影响起服)。
+  export VLLM_HUST_GATE_FP32="${VLLM_HUST_GATE_FP32:-1}"
+  # 2026-10-16 固化(协议级): F2 GDN in_proj 合并 (candidate F2-gdn-ba-qkvz-merge accepted 2026-10-16)。
+  # 依据: decode MatMulV2 -30.1/步 / -10.5% 时长; kernel 对照 -15.4%/pattern; L3 8/8 identical ×2;
+  #       TPOT L1 成对 -1.10% (无回归)。证据: L1 卡 f2_accepted_verdict_1016 + 候选台账。
+  # 显式 VLLM_HUST_GDN_MERGE_INPROJ=0 可关（做 OFF 对照窗时必须显式置 0）。
+  # 前提: 运行树补丁三件套已由 apply-runtime-patches.sh 应用（容器重建后先重放再起 serve）。
+  export VLLM_HUST_GDN_MERGE_INPROJ="${VLLM_HUST_GDN_MERGE_INPROJ:-1}"
+  # 2026-10-17(修订 F1): 这两个 export **必须**排在 cohort_write / env 快照之前 ——
+  #   cohort.json 的 carriers 与 <serve log>.env.json 记的都是"本 serve 实际继承的 env"，
+  #   放到后面会记成未导出，与 serve 实际生效值矛盾（screen 的 carriers 曾因此自证冲突）。
   local prof_root=${LADDER_PROF_ROOT:-/root/prof}
   mkdir -p "$prof_root" 2>/dev/null || prof_root=/root/prof
   local prof_dir="$prof_root/ladder-$(date +%m%d-%H%M%S)"
@@ -532,17 +765,6 @@ doc = {"schema": "opt-ops-profile-plan.v1", "tier": tier,
 json.dump(doc, open(out, "w"), ensure_ascii=False, indent=1)
 PYEOF
   fi
-  # 2026-10-14 固化(协议级): D4 gate-fp32 权重外提 (husk 插件 gate_fp32_plugin)。
-  # 依据: 设备 Cast[256,2048] 20480->0 / -148ms/窗; L2 out_tok_s +2.58% (3/3 对同向); L3 8/8。
-  # 记为吞吐/设备预算减负, 非降 TPOT (L1 在噪声底)。显式 VLLM_HUST_GATE_FP32=0 可关
-  # (插件仅在 ==1 时启用; 载体缺失/容器重建未 bootstrap 时 fail-open, 不影响起服)。
-  export VLLM_HUST_GATE_FP32="${VLLM_HUST_GATE_FP32:-1}"
-  # 2026-10-16 固化(协议级): F2 GDN in_proj 合并 (candidate F2-gdn-ba-qkvz-merge accepted 2026-10-16)。
-  # 依据: decode MatMulV2 -30.1/步 / -10.5% 时长; kernel 对照 -15.4%/pattern; L3 8/8 identical ×2;
-  #       TPOT L1 成对 -1.10% (无回归)。证据: L1 卡 f2_accepted_verdict_1016 + 候选台账。
-  # 显式 VLLM_HUST_GDN_MERGE_INPROJ=0 可关（做 OFF 对照窗时必须显式置 0）。
-  # 前提: 运行树补丁三件套已由 apply-runtime-patches.sh 应用（容器重建后先重放再起 serve）。
-  export VLLM_HUST_GDN_MERGE_INPROJ="${VLLM_HUST_GDN_MERGE_INPROJ:-1}"
   # 2026-10-13: 日志按启动时间命名，不再无限追加同一个 ladder-serve.log
   # （旧文件已被 L2/KB 按绝对路径引用，保持原样不动；新窗口各自独立落文件）。
   local log="$LOGS/ladder-serve-$(date +%m%d-%H%M%S).log"
@@ -552,8 +774,15 @@ PYEOF
     --tensor-parallel-size 2 --max-model-len 8192 --port "$PORT" \
     --no-enable-prefix-caching "${prof_args[@]}" "${extra[@]}" > "$log" 2>&1 < /dev/null &
   echo $! > "$LADDER_PIDFILE"
+  # 2026-10-17(F1): 落 serve 侧 env 快照（与 serve log 同 stem 的 <log>.env.json）。
+  # 这里**按 stem 硬推导**（不认 LADDER_SERVE_ENV 覆盖），保证"一个 serve ⇔ 一份快照"的关联；
+  # 该覆盖项只给探针/排障用。这是 carriers.env 的**唯一**来源：screen/L1/L2 的调用 shell
+  # 未必继承这里的 export，读调用 shell 会写出"键为空 + marker effective"的自证冲突。
+  # 失败只告警, 不阻断起服。
+  local serve_env="${log%.log}.env.json"
+  carrier_write_serve_env "$serve_env" "$log" "$(serve_pid)"
   cmd_wait 1800 || return $?
-  # 2026-10-17: 就绪后打载体 marker 摘要（人工核验: 包/入口点/开关/日志功能 marker 计数）。
+  # 2026-10-17: 就绪后打载体 marker 摘要（人工核验: 包/入口点/env 来源/日志逐载体归因）。
   # 只记录不阻断 —— 载体状态是记录轴（/root/opt-ops/AGENTS.md），起服失败另有其它门。
   carrier_summary "$(carrier_probe_json "$log")"
   "$PY" - "$SERVE_MODE_FILE" "$tier" <<'PYEOF'
@@ -1492,14 +1721,24 @@ try:
         raise ValueError("carriers 不是 JSON 对象")
 except Exception as e:
     carriers = {
-        "schema": "opt-ops-carriers.v1",
+        "schema": "opt-ops-carriers.v2",
         "recorded_by": "bench-ladder.sh cmd_screen fallback",
         "probe_python": "unknown", "husk_package": "", "husk_package_found": False,
         "husk_module_spec": "unknown", "husk_entry_points": [], "husk_entry_point_names": [],
-        "env": {}, "env_all_husk": {}, "serve_log": "", "serve_log_present": False,
+        "env": {"VLLM_HUST_GATE_FP32": None, "VLLM_HUST_GDN_MERGE_INPROJ": None,
+                "VLLM_HUST_SHARED_GATE_PACK": None},
+        "env_scope": "unknown", "env_source": "unknown",
+        "env_file": {"path": "", "present": False}, "env_all_husk": {},
+        "serve_log": "", "serve_log_present": False,
         "serve_log_markers": {}, "unreliable_absence_signals": {},
-        "verdict": {"package": "unknown", "entry_points": "unknown",
-                    "functional_markers": "unknown", "axis": "record-only"},
+        "attribution": {"husk": {"package": "unknown", "entry_points": "unknown",
+                                 "cascade": {"state": "unknown", "basis": "探针不可解析"},
+                                 "gate_fp32": {"state": "unknown", "basis": "探针不可解析"},
+                                 "gdn_merge_inproj": {"state": "unknown",
+                                                      "basis": "探针不可解析"}},
+                        "runtime_tree": {"w3f2": {"state": "unknown", "basis": "探针不可解析"},
+                                         "w3f3": {"state": "unknown", "basis": "探针不可解析"}}},
+        "verdict": {"axis": "record-only", "cross_carrier_merge": "not-computed"},
         "probe_errors": [f"carriers 不可解析: {type(e).__name__}: {e}"],
     }
 doc = {"schema": "opt-ops-screen.v1", "tag": tag, "mode": "plain",
@@ -1508,11 +1747,14 @@ doc = {"schema": "opt-ops-screen.v1", "tag": tag, "mode": "plain",
        "carriers_note": ("载体状态是**记录轴不是门禁**（/root/opt-ops/AGENTS.md 实验纪律）: "
                          "只记录、不阻断、不要求重跑; 只有跨窗口绝对数值比较需要同载体状态, "
                          "两臂载体状态不一致才是第二个变量。可靠判据 = find_spec + "
-                         "vllm.general_plugins 入口点 + serve 日志功能 marker; 日志里的 "
-                         "'Unknown vLLM environment variable' 警告不是缺席判据。"),
+                         "vllm.general_plugins 入口点 + serve 日志 marker; env 只认 serve 侧快照"
+                         "（<serve log>.env.json, env_scope/env_source 见 carriers）; 归因分开记"
+                         "（carriers.attribution.husk 插件 vs runtime_tree 补丁）, 不合并; "
+                         "日志里的 'Unknown vLLM environment variable' 警告不是缺席判据。"),
        "artifacts": {"l1": l1, "l2": l2, "l3": l3},
        "created_at": time.strftime("%FT%TZ", time.gmtime()),
-       "next": "L3 compare PASS + L1/L2 无明显回归后，候选晋级 ready 才可开 light L4"}
+       "next": ("候选晋级 `ready|validating` 后才可开 light L4"
+                "（前置: L3 compare PASS + L1/L2 无明显回归；台阶见 opt-ops/README 采集门）")}
 json.dump(doc, open(out, "x"), ensure_ascii=False, indent=1)
 print(f"screen report -> {out}")
 PYEOF

@@ -285,7 +285,7 @@ modes; stop the active server before switching.
 
 ### Carrier status is recorded, not gated
 
-`screen.json` carries a `carriers` block (`opt-ops-carriers.v1`), and
+`screen.json` carries a `carriers` block (`opt-ops-carriers.v2`), and
 `opt bench serve` prints the same summary right after `/health` is ready
 (`tools/bench-ladder.sh carriers [serve_log]` prints it as one JSON line). It records the
 three things that actually decide whether the plugin carrier is live:
@@ -295,17 +295,40 @@ three things that actually decide whether the plugin carrier is live:
    the package and will report a false absence);
 2. the husk entry points enumerable from the `vllm.general_plugins` group
    (name + value; an install that failed to register is equivalent to no carrier);
-3. functional markers counted from that run's serve log: `cascade plugin loaded`,
-   `Gate fp32 cache populated`, `W3F2: GDN in_proj merge applied`, plus the
-   `gdn_merge_inproj` fail-closed warning (that one means "no double merge", not failure).
+3. functional markers counted from that run's serve log.
+
+Plugin switches are read from the **serve side only**: `cmd_serve` writes the exported
+`VLLM_HUST_*` values to `<serve log>.env.json` (`opt-ops-serve-env.v1`, atomic write, never
+overwritten) before the server starts, and the probe reads them through `env_source` /
+`env_scope` (`serve-process`). The shell that later runs `opt bench screen` does **not**
+necessarily inherit those exports, so it is never used as the source. If the snapshot is
+missing or does not match the serve log, every value is `null` with
+`env_scope`/`env_source` = `unknown` and a `probe_errors` entry — an unset switch is never
+reported as `""` or as `0`.
+
+Attribution is **split per carrier** under `attribution` and is never merged into one boolean:
+
+| field | states | meaning |
+|---|---|---|
+| `husk.cascade` | `effective` / `present-not-observed` / `absent` / `unknown` | `cascade plugin loaded` seen per process |
+| `husk.gate_fp32` | same | `Gate fp32 cache populated` seen per worker |
+| `husk.gdn_merge_inproj` | `present-but-fail-closed` / `present-not-observed` / `absent` / `unknown` | the in-repo carrier refuses to merge (no safe public seam), model stays stock |
+| `runtime_tree.w3f2` | `applied` / `not-applied` / `unknown` | the deployment-tree patch merged `in_proj` (`W3F2: GDN in_proj merge applied`) |
+| `runtime_tree.w3f3` | `enabled` / `not-enabled` / `failed` / `unknown` | shared scalar-gate pack patch (`W3F3: …`) |
+
+`husk.gdn_merge_inproj = present-but-fail-closed` and `runtime_tree.w3f2 = applied` routinely
+coexist: the fail-closed path is the in-repo plugin declining a merge it cannot consume safely
+(see [HOST_CONTRACT.md](HOST_CONTRACT.md), GDN in_proj merge carrier), while W3F2 is a separate
+runtime-tree patch. **Never** attribute the W3F2 merge to this plugin, and never treat the
+fail-closed warning as a failure — it asserts the opposite (no double merge).
 
 `Unknown vLLM environment variable detected: VLLM_HUST_*` is **not** an absence signal —
 it shows up whether or not the carrier is installed, so it is recorded separately under
 `unreliable_absence_signals` with `is_absence_signal: false` (see
 [docs/pitfalls.md](docs/pitfalls.md) §1.5). Carrier state is a **recording axis**: the probe is
-fail-closed (absence, an entry-point enumeration error, or a missing log records
-`unknown`/`false`) and never changes `screen`/`serve` exit codes; only cross-window absolute
-comparisons require two windows to share a carrier state.
+fail-closed (absence, an entry-point enumeration error, missing log, or a missing env snapshot
+records `unknown`/`null`/`false`) and never changes `screen`/`serve` exit codes; only
+cross-window absolute comparisons require two windows to share a carrier state.
 
 ## Canonical MOD metadata
 
