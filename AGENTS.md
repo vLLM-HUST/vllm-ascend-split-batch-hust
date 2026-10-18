@@ -41,6 +41,15 @@ vllm-ascend 宿主的 default-off 插件壳:cascade 两段式 decode(eager+图�
    - "进统一 cohort"需先有 k+1 verification rows 的 dual-pad/graph bucket 合同
      + 该配置真实 replay correctness;**当前未立项**,未经裁定不得绕过上述守卫。
 
+## 算子交付检查点
+
+- 本仓是交付目标，不是实验附件。开工记录分支、起点 HEAD、本轮路径和已有 dirty 文件；任务句与动作约束见 `/root/AGENTS.md`「算子任务执行合同」。
+- 最小实现可测后、完整验证或明确阻塞后，各检查一次是否应提交。提交包含实现/测试/接入与回滚材料/结果边界；大 trace 留 L2，仓内保留摘要、解析入口和哈希，不复制逐调用明细制造无效审查负担。
+- 数值失败保持 default-off，把失败复现和证据提交入库；不得将失败项从报告删除，或将局部收益写成已验收。Git 提交与优化验收是两个状态。
+- 先跑测试，再审查 `git diff` 与 staged diff，仅 `git add <本轮明确路径>`。不提交无关 dirty 文件，不改正在执行的脚本。
+- commit 后用 `opt delivery --base <起点HEAD> --path <本轮路径> ... --check` 核验；工作台未部署时可用 `python3 tools/operator_delivery.py` 的相同参数。无范围不算通过，push 另需授权及远端 hash 核验。
+- `/root/opt-ops` 的流程修改必须有本仓可校验补丁及测试；运行树仅为部署副本。
+
 ## 常用命令
 
 ```bash
