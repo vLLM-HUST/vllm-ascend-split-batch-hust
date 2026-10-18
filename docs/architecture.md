@@ -92,6 +92,9 @@ manifest 与 entry point 打包完整性由构建检查保证,流程见 [release
 - active runner 的 `load_model`(D4 `gate-fp32` 与 F2 迁移载体 `gdn-merge-inproj`
   都只包这一个方法,各自幂等标记 + 各自 `uninstall()`;后者当前是 **fail-closed**,
   见 HOST_CONTRACT.md 的 GDN 段)
+- **提案补丁**（非插件入口）：`W1R-GMM` 的 `tuning_config` / counts dump
+  只改宿主 `routed_experts.apply_gmm1/apply_gmm2` 两处调用，承载目录
+  `host-proposals/W1R-gmm-tuning-config/`，见 HOST_CONTRACT.md 末节
 
 `gdn-merge-inproj`(`gdn_merge_inproj_plugin.py`)是已验收 F2(加载期
 `in_proj_ba`→`in_proj_qkvz` 权重拼接)从运行树补丁**迁移**到插件库的载体:加载期权重转换

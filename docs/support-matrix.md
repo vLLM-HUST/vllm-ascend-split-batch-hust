@@ -22,6 +22,8 @@
 | mlp-chunk（MLP token 分块） | 无 bundle manifest / `mlp-chunk` | — | `VLLM_HUST_MLP_CHUNKS`（默认 1 = 关）、`VLLM_HUST_MLP_CHUNK_MIN_TOKENS` | 插件可加载；**未收录 manifest**，即不经管理器发布面 |
 | gdn-merge-inproj（GDN `in_proj_ba`→`in_proj_qkvz` 加载期权重合并，F2 迁移载体） | `org.vllm-hust.gdn-merge-inproj` / `gdn-merge-inproj` | **import_only** | `VLLM_HUST_GDN_MERGE_INPROJ=1`（默认关） | **当前不生效且不改任何权重（fail-closed）**：宿主 `AscendGatedDeltaNetAttention.forward` 没有可安全消费合并权重的 seam，载体只打一条 warning；已验收的 F2 数字属于运行树补丁，**不随迁移继承**，须同口径重新 L4 验收（判定代码 `gdn_merge_inproj_plugin.forward_consumer_available`，blocker 见 [../HOST_CONTRACT.md](../HOST_CONTRACT.md) GDN 段） |
 | aot-cache-guard（AOTAutograd 缓存 guard） | 无 bundle manifest / `aot-cache-guard` | — | **默认开**（`VLLM_HUST_AOT_CACHE_GUARD=0` 关） | 验收前置修复；宿主自修后变 no-op |
+| W1R GMM `tuning_config`（**提案补丁**，非插件 entry） | 无 bundle manifest | **未发布（tier-2 proposal，未提交上游）** | `VLLM_HUST_GMM_TUNING_CONFIG`（默认关） | 只改 `apply_gmm1`/`apply_gmm2` 两处 GMM 的 `tuning_config`；承载目录 `host-proposals/W1R-gmm-tuning-config/`；**单值**（列表被拒）；未设时无设备差异、零 shape/IO/import，但每次 GMM 仍有两次早退 Python 调用（非字节等价） |
+| W1R GMM counts dump（**提案补丁**，非插件 entry） | 无 bundle manifest | **未发布（tier-2 proposal）** | `VLLM_HUST_GMM_COUNTS_DUMP=<path>`（默认关） | 只记录 group_list counts/形状/provenance，不改变输出；capture 内按 `sample_source` 跳过；**dump 产物不是计时产物**；active FULL graph 下 M=128 真实 decode counts **取不到** |
 | fi-gelu / fi-sampling | 无 bundle manifest / `fi-gelu`、`fi-sampling` | — | `VLLM_HUST_FI_GELU`、`VLLM_HUST_FI_SAMPLING` | 能力在、证据显示 e2e 收益在噪声带内，保持默认关 |
 
 ## 2. cascade 准入条件（任意一条不满足 → 回原生 FIA）

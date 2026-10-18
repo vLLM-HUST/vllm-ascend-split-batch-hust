@@ -224,6 +224,30 @@ GLIBC 环境缺口,fail-open 兜底,非代码冲突)。两点警示见证据文�
 底座不可载,0.28 主栈暂不启用(用户裁定),重启用条件=22.04 底座重建 wheel。
 完整证据:[evidence/host-028-2026-10-11.md](evidence/host-028-2026-10-11.md)。
 
+### 4.2 W1R GMM 补丁核对（tier-2 提案，未发布）
+
+`host-proposals/W1R-gmm-tuning-config/` 是**提案补丁**，不是插件能力；升级宿主时若
+`vllm_ascend/ops/fused_moe/routed_experts.py` 的 sha256 变化，必须重跑：
+
+```bash
+python3 host-proposals/W1R-gmm-tuning-config/gen_patch.py --check \
+  --host /vllm-workspace/vllm-ascend/vllm_ascend/ops/fused_moe/routed_experts.py
+```
+
+- **`--check` 只对未打补丁的宿主/镜像 blob 有效**：运行树处于部署态时会得到 drift（2）
+  的误导结果。此时二选一：①直接对镜像 blob 核；②先把运行树还原 —— 注意
+  `w1r-gmm-tuning` 层**已从 MANIFEST 移除**，脚本里没有该名字可回滚：可对已核过的
+  `patch.diff` 直接 `patch -R`（先 `--dry-run`），或按 `OWNERSHIP.md §5` 重新加层后
+  再用 `apply-runtime-patches.sh --rollback`。**不要**对未登记的层名执行静默命令。
+- `--check` 语义：0 = 磁盘 `patch.diff` 与现算一致且宿主仍是基线；2 = 宿主漂移（fail-closed，
+  先重做 P0 静态判定）；3 = 锚点缺失/重复；4 = 磁盘 patch 已过期（去掉 `--check` 重新生成）。
+- 重新生成后必须同步 `proposal_meta.json` 的 `hashes`（patch / patched），
+  并核对 `patch -R` 可回滚。
+- 该补丁的两个开关都 default-off；未设时**无设备差异、零 shape 读取、零 IO、零 import**，
+  但**每次 GMM 仍有两次早退 Python 调用**（tuning kwargs 查询 + dump 早退）——
+  **不得**表述为「宿主行为完全一致」或「字节等价」（宿主文件文本必然不同）。
+  CPU 门见 `tests/test_w1r_gmm_tuning_patch.py`。
+
 ## 5. 检查表
 
 **构建前**

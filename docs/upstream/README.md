@@ -1,24 +1,28 @@
-# docs/upstream/ — **已冻结（不再对外提交）**
+# docs/upstream/ — 历史上游素材 + 路径消歧（**不是**补丁落点）
 
-> 决定日期：2026-09-11（用户裁定）。纪律见工作区 `AGENTS.md` 硬性约束与
-> [../agent-guide.md](../agent-guide.md) §1 第 6 条。
+本目录保留**历史**的上游 PR 素材，并说明现行落点。
 
-## 状态
+## 1. 取代关系（R5）
 
-**本目录不再维护、不再提交上游。** 保留原因只有一个：这里的技术论据（冗余性构造证明、
-谓词面、验证清单）在本仓本地 patch 的维护中仍有参考价值——宿主升级重验时可能要重新推导
-同一谓词。名字 `upstream/` 是历史遗留，内容**只作技术论据留档**。
+- **2026-09-11 裁定**（"上游 PR 素材冻结、不做上游 PR"）**已被 2026-10-16 的
+  `/root/PURPOSE.md` v3 §8「代码落地合同」取代**：宿主私有面的能力不再"只留档不落地"，
+  而是走 **档2（上游提案）** 的合法通道 ——
+  [`host-proposals/`](../../host-proposals/README.md)（patch 原件 + 生成脚本 + CPU 测试 +
+  归属记录；运行树只放部署副本）。
+- 因此本目录**不再是**"提案/补丁落点"，只保留历史素材与索引；冻结决定只作用于本目录
+  自身，不构成对 `host-proposals/` 或任何上游仓的冻结。
 
-## 边界
+## 2. 历史素材索引（保留，不使其孤立）
 
-| 做 | 不做 |
-|---|---|
-| 本仓（插件侧）本地 patch，default-off、fail-open、三证据齐备后翻 `active` | 向 vllm / vllm-ascend 上游提交补丁或 PR |
-| 跟随 `vllm-hust` release 节奏做版本同步（重钉锚点与 `host.version_range`） | "推动宿主提供 typed contract" 这类上游化动作 |
-| 宿主升级时按 [../release.md](../release.md) §4 重核 monkeypatch/公开面签名 | 在宿主源码树里就地改代码 |
-
-## 现有素材
-
-| 文件 | 内容 | 状态 |
+| 文件 | 状态 | 说明 |
 |---|---|---|
-| [fia-decode-demask.md](fia-decode-demask.md) | decode FIA 冗余掩码省略：PR 描述草稿 + 论据链 + 上游化形态建议 | **冻结**，论据链可参考；PR 部分不再维护 |
+| [fia-decode-demask.md](fia-decode-demask.md) | **已冻结（2026-09-11）**，仍作本地 patch 的技术论据参考 | vllm-ascend decode FIA 冗余掩码省略的上游 PR 草稿；§PR 标题/§上游化形态/§验证清单不再维护、不提交 |
+
+> 若将来要把它重新变成可执行提案，按 `host-proposals/README.md` 的规则新建
+> `host-proposals/<id>/`，而不是解冻本目录。
+
+## 3. 路径消歧
+
+- 历史写法 `upstream/<id>/`：那是 2026-10-18 迁移前的旧路径，已删除；
+  现行路径为 `host-proposals/<id>/`。
+- 本目录不承载运行时代码，不被任何插件 entry / manifest 引用。

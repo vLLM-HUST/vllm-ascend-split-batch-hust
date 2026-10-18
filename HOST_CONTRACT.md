@@ -250,3 +250,43 @@ decode `MatMulV2` -30.1/step, device kernel time -15.4% per pattern, TPOT -1.10%
 runtime-tree patch**, not to this carrier: any performance number for this carrier
 must be re-accepted with a fresh L4 window on the same caliber. Nothing here may
 be extrapolated to another caliber, cohort, `capture_size` or the eager path.
+
+## W1R GMM `tuning_config` / counts dump (tier-2 upstream proposal, default-off)
+
+状态：**提案补丁，未提交上游**（承载目录 `host-proposals/W1R-gmm-tuning-config/`，
+`proposal_meta.json` 记录 `upstream_status` 与后续动作）。不是本仓插件 entry，
+因此**不出现在** manifest / `vllm.general_plugins` 列表里。
+
+- 宿主文件：`vllm_ascend/ops/fused_moe/routed_experts.py`
+  （sha256 `b17e5a10…`，`host.version_range == 0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27.d20260909`，点钉）。
+  基线可复现：`git -C <host repo> cat-file -p 74f0c0a27:vllm_ascend/ops/fused_moe/routed_experts.py | sha256sum`
+  → `b17e5a105d59fc280f244bdc4036b4cb41efd1d5a2ff1accca4b56620cc91ab7`。
+- 补丁点（**仅两处**，均为宿主私有方法体内部的 `npu_grouped_matmul` 调用）：
+  `AscendUnquantizedFusedMoEMethod.apply_gmm1` / `apply_gmm2`。
+- 为什么必需 tier-2：宿主没有 `tuning_config` 的公开配置面；插件侧若复制方法体
+  （host private source）违反本仓契约；全局 monkeypatch
+  `torch_npu.npu_grouped_matmul` 不是已列公开面，且会波及所有 GMM 调用方。
+- 开关（均 default-off；两者未设时**零 import / 零 IO / 零 shape 读取 / 无设备差异**，
+  但每次 GMM 仍有**两次早退 Python 调用**（tuning kwargs 查询 + dump 早退）；
+  宿主文件文本因注入块而不同，**不得声称字节等价**）：
+  - `VLLM_HUST_GMM_TUNING_CONFIG`：**单值**，∈ {1,2,8,32}（列表被显式拒绝，避免一臂多变）。
+    `tuning_config` 是 CANN 的 tiling hint：首值 = 「各专家预期处理的 token 数」；
+    torch_npu 只承诺首值语义。非法值在**首次 GMM 调用（起服 profile/dummy run，非 capture 内）**
+    即 fail-fast 抛 `ValueError`，错误缓存后每次继续抛出（不静默降级）。
+    `Unknown vLLM environment variable` 警告**不是**「开关未生效」判据。
+  - `VLLM_HUST_GMM_COUNTS_DUMP=<path>`：记录 group_list counts 与
+    形状/provenance 采样；**不改变计算输出**（hook 恒返回 None，op 结果原样返回）。
+    该文件是 **dump 产物，永远不是计时产物**（dump 窗带 env 门控 + IO，属第二变量）。
+    capture 策略：仅在 dump 开启时 lazy import 做官方检测 `torch.npu.is_current_stream_capturing()`；
+    为 capture 或检测失败 → **读取任何 device tensor 之前返回**，`sample_source` 记
+    `skipped_inside_capture` / `skipped_unknown_capture_state`；capture dummy 行绝不写成真实 counts，
+    FULL graph replay 不执行 Python。TP=2 时路径支持 `{rank}`，无占位符则自动追加 `.rank<RANK>`。
+- 回滚：**该层已从 `apply-runtime-patches.sh` 的 MANIFEST 移除**，脚本里没有可用的
+  `--rollback w1r-gmm-tuning`。若运行树仍是部署态，二选一：①直接对**已核过的**
+  `host-proposals/W1R-gmm-tuning-config/patch.diff` 执行 `patch -R`（先 `patch -R --dry-run`）；
+  ②按 `OWNERSHIP.md §5` 先把层重新加回 MANIFEST，再用 `apply-runtime-patches.sh --rollback`。
+  当前该层已**从 MANIFEST 移除**（blocker `fixture-unreachable-fullgraph-decode`），
+  重新启用条件与步骤见 `host-proposals/W1R-gmm-tuning-config/OWNERSHIP.md` §5。
+  `gen_patch.py --check` 只对**未打补丁的宿主/镜像 blob** 有意义（部署态见上一条回滚说明）。
+- CPU 门：`tests/test_w1r_gmm_tuning_patch.py`（补丁正/反向、生成器 byte-identical、
+  fail-closed、零模块级 import/IO、白名单解析、dump schema 与 invariant）。

@@ -24,7 +24,9 @@ vllm-ascend 宿主的 default-off 插件壳:cascade 两段式 decode(eager+图�
 4. `provenance/` 只读;提取代码保留 Huawei 版权头与溯源。
 5. **不要以 `/vllm-workspace` 为 CWD 跑任何 python/vllm 命令**(目录会遮蔽
    真实 vllm 包)。
-6. **cohort 与归属(2026-09-28/29 上游裁定,长期核心约束)**——详见
+6. **注释**:代码只写必须写的注释,不写解释性段落/改动沿革/"为什么这样改";需要解释的写进提交信息或 `docs/`。文档只写约束与判据,不写沿革。
+7. **可比性口径**:两组数字可比只看**算子形状事实**(M/K/N、专家 counts、相位、callsite)+**权重标签**(model/precision/权重格式);不同则只比方向。
+8. **cohort 与归属(2026-09-28/29 上游裁定,长期核心约束)**——详见
    [docs/cohort-and-ownership.md](docs/cohort-and-ownership.md):
    - 中央团队只保留"分类与发布边界";**下列四项由本仓 owner 负责**:
      ① independent cohort definition;② kernel-wheel licensing/distribution;

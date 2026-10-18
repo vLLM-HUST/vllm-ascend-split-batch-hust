@@ -25,6 +25,7 @@
 | 使用方法、env 开关、验证证据 | [../README.md](../README.md) |
 | 能力 × 准入条件 × 代码位置 | [support-matrix.md](support-matrix.md) |
 | **cohort 边界（我们能声称什么）× 四项归属** | [cohort-and-ownership.md](cohort-and-ownership.md)（约束入口 [../AGENTS.md](../AGENTS.md) 硬约束 6） |
+| 宿主提案补丁（tier-2，未提交上游） | [`host-proposals/README.md`](../host-proposals/README.md)（章程）+ `host-proposals/<id>/`（`proposal_meta.json` = env 语法/哈希/版本点钉/上游状态）；`docs/upstream/` 只是路径消歧 stub |
 | 宿主 seam 与 monkeypatch 面清单 | [../HOST_CONTRACT.md](../HOST_CONTRACT.md) |
 | 历史实现溯源（索引 + 逐条核对结论） | [../PROVENANCE.md](../PROVENANCE.md) / [provenance-verification.md](provenance-verification.md) / [../provenance/](../provenance/)(只读) |
 | 算子落点:CCE(`fa_fp32_stage1` / `lse_merge`)在仓库外 wheel;**Triton/纯 Python 载体在本仓** | `ops/kernels/ascend-kernel/README.md`(工作区,仓库外) + 本仓 `src/vllm_ascend_split_batch/` |
