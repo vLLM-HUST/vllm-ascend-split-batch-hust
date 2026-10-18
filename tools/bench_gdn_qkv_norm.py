@@ -80,13 +80,39 @@ def graph_check(norm):
             'stable_output_addresses': True, 'scope': 'isolated kernel graph only'}
 
 
+def replay_capture(path, norm, device='npu'):
+    from vllm_ascend_split_batch.gdn_qkv_norm_diagnostic import tensor_difference
+
+    saved = torch.load(path, map_location='cpu', weights_only=True)
+    host = saved['input']
+    if host.shape != (16, 4096) or host.dtype != torch.bfloat16:
+        raise ValueError('replay requires the captured T16 bf16 packed input')
+    x = host.to(device)
+    actual = candidate.unpack_norm(x)
+    expected = baseline(x, norm)
+    for a, b in zip(expected, saved['expected'], strict=True):
+        torch.testing.assert_close(a.cpu(), b, rtol=0, atol=0, equal_nan=True)
+    return {
+        'source': str(path),
+        'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+        'saved_baseline_matches': True,
+        'captured': {key: tensor_difference(a, b) for key, a, b in zip(
+            ('q', 'k', 'v'), saved['actual'], saved['expected'], strict=True)},
+        'replayed': {key: tensor_difference(a, b) for key, a, b in zip(
+            ('q', 'k', 'v'), actual, expected, strict=True)},
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--iters', type=int, default=40)
     parser.add_argument('--profile', action='store_true')
     parser.add_argument('--graph-only', action='store_true')
+    parser.add_argument('--replay', type=Path)
     args = parser.parse_args()
+    if args.replay and (args.profile or args.graph_only):
+        parser.error('--replay is correctness-only; no profile/graph-only')
     if args.iters < 1:
         parser.error('--iters must be positive')
     if args.out.exists():
@@ -122,6 +148,16 @@ def main():
         torch.npu.set_device(0)
         triton.runtime.driver.active.utils.get_device_properties(0)
         torch.manual_seed(0)
+        if args.replay:
+            report['scope'] = 'real-input differential replay only; no timing'
+            report['weights']['input'] = 'captured real model input'
+            report['replay'] = replay_capture(args.replay, l2norm.l2norm_fwd)
+            different = any(d['different']
+                            for d in report['replay']['replayed'].values())
+            report['status'] = 'divergence' if different else 'ok'
+            if different:
+                raise SystemExit(3)
+            return
         if args.graph_only:
             report['scope'] = 'graph replay correctness only; no timing'
             report['graph_check'] = graph_check(l2norm.l2norm_fwd)
