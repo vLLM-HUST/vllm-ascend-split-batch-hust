@@ -1,8 +1,8 @@
 {
   "schema": "gdn-progress.v1",
   "candidate": "gdn-unpack-qk-l2norm-fusion",
-  "stage": "ready",
-  "deployment": "default-off; pinned host proposal only; live runtime unchanged",
+  "stage": "blocked",
+  "deployment": "default-off; reversible runtime patch deployed for paired validation; both services stopped",
   "shape": {
     "T": 16,
     "row_stride": 4096,
@@ -37,10 +37,21 @@
     "ruff": "PASS"
   },
   "interpretation": "Eager and kernel times are independent measurements. Diagnostic trace has five calls per arm, not model L4. No model throughput claim.",
+  "full_model_results": {
+    "cpu": "782 passed, 11 skipped; Ruff PASS",
+    "isolated_graph_replay": "PASS: 8 changing-input replays",
+    "standard_l3": "PASS: 8/8",
+    "mmlu_profile_responses": "PASS: 16/16 exact responses; matching prompt/doc hashes",
+    "fixed_batch_l3": "FAIL: A/B 2/16; A/A and B/B 16/16; candidate across independent plain/profile services 16/16",
+    "l4": "Collected both ranks and both arms; 540 target calls/rank/arm, 6 kernels -> 1",
+    "rank0_target_kernel_mean_us": [30.304666666666666, 10.519962962962962],
+    "rank1_target_kernel_mean_us": [29.43311111111111, 9.647444444444444],
+    "acceptance": "BLOCKED by fixed-batch numerical regression; L4 timing is diagnostic, not an accepted optimization"
+  },
   "missing_gates": [
-    "full-model L3 + opt bench compare",
-    "FULL graph capture/replay correctness",
-    "matched full-model L4 with all-kernel denominator"
+    "Identify and repair fixed-batch full-model numerical divergence; do not weaken exact per-ID comparison",
+    "Full-model graph correctness across all covered request protocols",
+    "Repeated matched L4 after correctness repair, if candidate remains viable"
   ],
   "prior_method": {
     "id": "gdn-qkv-unpack-single-pass",
@@ -49,7 +60,8 @@
     "result": "T16 repaired copy is numerically correct but eager-chain slower:284.635 ->308.525us",
     "not_retried": true
   },
-  "next_action": "Keep disabled; validate graph replay and full-model L3/L4 in a separately budgeted service window before activation. Do not broaden shapes or rerun rejected copy.",
+  "next_action": "Keep disabled. Capture the first divergent real-model intermediate under the fixed indexed batch, compare native/fused Q/K/V and recurrent state, then repair before any further performance claim. Do not rerun rejected copy.",
+  "model_validation_evidence": "validation/model-validation/manifest.json",
   "evidence": "validation/manifest.json",
   "evidence_limits": "Compact original JSON/log/CSV snapshots are bundled. Raw full profiler timelines and larger L2 archive remain at source paths in manifest; receipt commit_push field describes pre-publication state."
 }

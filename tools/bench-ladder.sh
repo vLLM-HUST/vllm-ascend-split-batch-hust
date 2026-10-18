@@ -889,6 +889,13 @@ cmd_l2() {
 
 cmd_l3() {
   local ts; ts=$(date +%m%d-%H%M%S)
+  if [ "${1:-}" = "gdn16" ]; then
+    shift
+    local gdn_dir; gdn_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    "$PY" "$gdn_dir/bench_gdn_l3.py" "$@" --port "$PORT" \
+      --out "$RECORDS/${ts}-gdn16-l3.json"
+    return $?
+  fi
   "$PY" "$SCRIPTS/ladder-l3.py" capture --port "$PORT" --out "$RECORDS/${ts}-l3.json"
 }
 
@@ -1841,7 +1848,7 @@ case "${1:-help}" in
   wait) shift; cmd_wait "$@" ;;
   l1) shift; cmd_l1 "$@" ;;
   l2) shift; cmd_l2 "$@" ;;
-  l3) cmd_l3 ;;
+  l3) shift; cmd_l3 "$@" ;;
   compare) cmd_compare "$2" "$3" ;;
   smoke) shift; cmd_smoke "$@" ;;
   l0) shift; cmd_l0 "$@" ;;

@@ -60,11 +60,32 @@ def timed(fn, iters):
     }
 
 
+def graph_check(norm):
+    x = torch.randn(16, 4096, dtype=torch.bfloat16, device='npu')
+    for _ in range(3):
+        candidate.unpack_norm(x)
+    torch.npu.synchronize()
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        actual = candidate.unpack_norm(x)
+    pointers = [t.data_ptr() for t in actual]
+    for step in range(8):
+        value = torch.randn_like(x) * (0.0 if step == 0 else 10.0 ** (step - 4))
+        x.copy_(value)
+        graph.replay()
+        torch.npu.synchronize()
+        check_outputs(actual, baseline(value, norm))
+        assert [t.data_ptr() for t in actual] == pointers
+    return {'status': 'PASS', 'replays': 8, 'changing_input': True,
+            'stable_output_addresses': True, 'scope': 'isolated kernel graph only'}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--iters', type=int, default=40)
     parser.add_argument('--profile', action='store_true')
+    parser.add_argument('--graph-only', action='store_true')
     args = parser.parse_args()
     if args.iters < 1:
         parser.error('--iters must be positive')
@@ -101,6 +122,11 @@ def main():
         torch.npu.set_device(0)
         triton.runtime.driver.active.utils.get_device_properties(0)
         torch.manual_seed(0)
+        if args.graph_only:
+            report['scope'] = 'graph replay correctness only; no timing'
+            report['graph_check'] = graph_check(l2norm.l2norm_fwd)
+            report['status'] = 'ok'
+            return
         x = torch.randn(16, 4096, dtype=torch.bfloat16).npu()
         for case in ['random', 'zero', 'small', 'special', 'offset']:
             host = torch.randn(16, 4096, dtype=torch.bfloat16)
