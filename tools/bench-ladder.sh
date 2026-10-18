@@ -17,7 +17,7 @@
 #   compare <A> <B>       L3 对比两次捕获（不一致 = 数值回归）
 #   smoke [N]             MMLU-Pro smoke N 题（默认 4, harness venv lm_eval）
 #   screen <tag>          plain serve 晋级筛选：L1×3 + L2×3 + L3×1，生成 screen.json；
-#                         LADDER_LOAD_CALIBER 必填，作为 opt profile 的 --screen-report 门票
+#                         LADDER_LOAD_CALIBER 可选（v4：仅导航，不再作门票）
 #                         screen.json 还带 carriers（载体记录轴: find_spec + vllm.general_plugins
 #                         入口点 + VLLM_HUST_* + 本 serve 日志 marker 计数; 只记录不当门）
 #   carriers [serve_log]  打印载体状态记录（单行 JSON）; serve 就绪后也会自动打人读摘要
@@ -25,8 +25,8 @@
 #                         L4 窗口：light 只交付目标算子/all-kernel/通信并删 DB；deep 额外交付
 #                         per-shape×dtype。两档都在交付后立即离线解析和瘦身。
 #                         负载口径 LADDER_PROFILE_LOAD=synthetic(默认)|mmlu-pro|external（后者用
-#                         LADDER_PROFILE_LOAD_CMD 跑任意自定负载，须给 LADDER_LOAD_CALIBER=<已登记口径 id>）；
-#                         两口径不外推；产物带 load_caliber 标记，入库卡须声明口径
+#                         LADDER_PROFILE_LOAD_CMD 跑任意自定负载）；
+#                         产物带形状事实(window_coverage)与权重标签(cohort)；不同形状/权重只比方向
 #   slim <asc|窗目录> [ts] [--opstat <p>]  解析后瘦身：抢救 csv + pt db + communication*.json 到
 #                         records/raw/<窗>/ + 删中间物（默认; LADDER_SLIM=0 关; LADDER_SLIM_RESCUE_DB=0 关 pt db 抢救）
 #                         交付门（默认保护, **逐 rank**, 无 force 逃生口）: 未交付 rank（输入不全 or
@@ -980,19 +980,11 @@ PYEOF
       calib_detail="lm-eval ${LADDER_EVAL_TASK:-mmlu_pro_smoke}(第一 ${load_n} 条, 5-shot CoT, num_concurrent=${LADDER_EVAL_CONC:-5}, max_gen_toks=2048, chat) — 数据集派生评测流量口径"
       ;;
     external)
-      # 外部负载命令 + 必须先登记的口径 id（登记表: /root/opt-ops/state/load-caliber.json 的 calibers）
+      # 外部负载命令（v4：口径 id 可空，仅作导航）
       [ -n "${LADDER_PROFILE_LOAD_CMD:-}" ] || { echo "external 模式必须给 LADDER_PROFILE_LOAD_CMD='<负载命令>'"; return 1; }
       calib_id=${LADDER_LOAD_CALIBER:-}
-      [ -n "$calib_id" ] || { echo "external 模式必须给 LADDER_LOAD_CALIBER=<已登记的口径 id>"; return 1; }
       calib_detail=${LADDER_LOAD_CALIBER_DETAIL:-"外部负载命令: $LADDER_PROFILE_LOAD_CMD"}
-      if ! grep -q "\"$calib_id\"" /root/opt-ops/state/load-caliber.json 2>/dev/null; then
-        echo "!! 口径 $calib_id 未登记在 state/load-caliber.json 的 calibers 里："
-        echo "   产物会带 declared=false（'占比排名不得外推'），caliber-lint 也会当未登记处理。"
-        echo "   先登记口径（id + 负载特征参数 + 不可外推声明），再开窗。"
-        echo "   示例: 见 /root/opt-ops/state/load-caliber.json 的 calibers / calibers_planned"
-      else
-        echo "   口径 $calib_id 已登记（load-caliber.json）"
-      fi
+      [ -n "$calib_id" ] && echo "   口径 id（导航，不设门）: $calib_id"
       ;;
     *)
       echo "未知 LADDER_PROFILE_LOAD=$load_mode（synthetic | mmlu-pro | external）"; return 1 ;;
@@ -1352,42 +1344,21 @@ rank_inputs_ok() {
   return 1
 }
 
-# 口径 id 是否**已登记**（load-caliber.json 的 calibers）且 ≠ unmarked。0/1。
-# 登记表路径可覆盖: LADDER_CALIBER_REGISTRY（默认 /root/opt-ops/state/load-caliber.json）。
-caliber_registered() {
-  local cid=${1:-}
-  { [ -n "$cid" ] && [ "$cid" != "unmarked" ]; } || return 1
-  "$PY" - "$cid" "${LADDER_CALIBER_REGISTRY:-/root/opt-ops/state/load-caliber.json}" <<'PYEOF'
-import json, sys
-cid, registry = sys.argv[1], sys.argv[2]
-try:
-    cal = json.load(open(registry)).get("calibers")
-except Exception:
-    sys.exit(1)
-ids = set(cal.keys()) if isinstance(cal, dict) else set((c or {}).get("id") for c in (cal or []))
-sys.exit(0 if cid in ids else 1)
-PYEOF
-}
-
 # window_opstat_ok <asc_dir> [opstat_hint]: 找与 asc_dir 关联、范围有效的 opstat; 打印命中路径, 0/1。
 # 范围有效 = load_caliber.id 已登记且 ≠ unmarked（"仅非空字符串/占位 unmarked"不算有效）。
 # hint = 显式 --opstat 路径（仍校验范围有效; 若其自带 asc_dir 须与目标一致）。
 window_opstat_ok() {
   local asc_dir=${1:?need asc_dir} hint=${2:-}
-  "$PY" - "$asc_dir" "$RECORDS" "${LADDER_CALIBER_REGISTRY:-/root/opt-ops/state/load-caliber.json}" "$hint" <<'PYEOF'
+  "$PY" - "$asc_dir" "$RECORDS" "$hint" <<'PYEOF'
 import glob, json, os, sys
-asc_dir, records, registry, hint = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+asc_dir, records, hint = sys.argv[1], sys.argv[2], sys.argv[3]
 
 def caliber_ok(doc):
-    cid = str(((doc or {}).get("load_caliber") or {}).get("id") or "").strip()
-    if not cid or cid == "unmarked":
-        return False
-    try:
-        cal = json.load(open(registry)).get("calibers")
-    except Exception:
-        return False
-    ids = set(cal.keys()) if isinstance(cal, dict) else set((c or {}).get("id") for c in (cal or []))
-    return cid in ids
+    """v4：范围有效 = 自带形状事实(window_coverage/prefill_token_volume) + 权重标签(cohort.model)。"""
+    doc = doc or {}
+    wc = (doc.get("load_caliber") or {}).get("window_coverage") or doc.get("shape_facts") or {}
+    wl = doc.get("weight_label") or (doc.get("cohort") or {})
+    return bool(wc.get("schema") or wc.get("prefill_token_volume")) and bool(wl.get("model"))
 
 def ok(path):
     try:
@@ -1631,13 +1602,7 @@ PYEOF
 )
     detail="recover-profile: 沿用关联 opstat 的负载口径（$(basename "$assoc")）"
   fi
-  if ! caliber_registered "${caliber:-}"; then
-    echo "!! recover-profile: 负载口径未提供或未登记（caliber='${caliber:-}'）→ 拒绝生成。"
-    echo "   请显式提供**已登记**口径: LADDER_LOAD_CALIBER=<id>（或 --caliber <id>）;"
-    echo "   口径登记见 /root/opt-ops/state/load-caliber.json（不得用 unmarked 成功）。"
-    return 1
-  fi
-  [ -n "$detail" ] || detail="recover-profile: 显式提供口径 $caliber"
+  [ -n "$detail" ] || detail="recover-profile: 口径 $caliber（导航，不设门）"
   [ -n "$ts" ] || ts=$(date +%m%d-%H%M%S)
   # 2026-10-17 窗口覆盖元数据: 与 live profile 走**同一 producer contract**（同一字段名/同一来源）。
   # 老窗口通常没有 load-manifest.json → 不补造、不猜: 传空 manifest, 由 ladder-opstat 产
@@ -1657,6 +1622,7 @@ PYEOF
   fi
   if ! window_opstat_ok "$asc_dir" "$out_json" >/dev/null; then
     echo "!! recover-profile: 产物未落盘/范围无效/未关联（$out_json）→ 不报恢复完成。"
+    echo "   范围有效 = 自带形状事实(load_caliber.window_coverage/prefill_token_volume) + 权重标签(cohort.model)；口径 id 仅导航。"
     return 1
   fi
   # 覆盖元数据: 同一 producer contract; 老窗口补不出执行体证据 → 明确 declared=false（不猜）。
@@ -1672,9 +1638,7 @@ cmd_screen() {
   local tag=${1:?need unique tag} reps=${LADDER_SCREEN_REPEATS:-3}
   [[ "$reps" =~ ^[0-9]+$ ]] && [ "$reps" -ge 3 ] || {
     echo "LADDER_SCREEN_REPEATS 必须 >=3（单变量取中位）" >&2; return 2; }
-  local caliber=${LADDER_LOAD_CALIBER:-}
-  caliber_registered "$caliber" || {
-    echo "screen 要求 LADDER_LOAD_CALIBER=<已登记口径>，不得用 unmarked" >&2; return 3; }
+  local caliber=${LADDER_LOAD_CALIBER:-}   # v4: 仅导航，不再作 screen 门票
   health_ok || { echo "plain serve 未就绪；先 opt bench serve" >&2; return 1; }
   local mode=unknown
   [ -s "$SERVE_MODE_FILE" ] && mode=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("mode","unknown"))' "$SERVE_MODE_FILE" 2>/dev/null || echo unknown)
