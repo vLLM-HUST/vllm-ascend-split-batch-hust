@@ -26,7 +26,7 @@ def output_views(flat):
 def launch_into(x, flat):
     from .gdn_qkv_norm_kernel import unpack_norm_kernel
 
-    unpack_norm_kernel[(3, 16)](x, flat)
+    unpack_norm_kernel[(3, 16)](x, flat, multibuffer=True)
 
 
 def unpack_norm(x):
