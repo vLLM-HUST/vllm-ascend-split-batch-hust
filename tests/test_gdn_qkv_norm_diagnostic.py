@@ -10,6 +10,7 @@ torch = pytest.importorskip('torch')
 
 from vllm_ascend_split_batch.gdn_qkv_norm_diagnostic import (  # noqa: E402
     NormDiagnostic,
+    attention_class_for_model,
     tensor_difference,
 )
 
@@ -110,3 +111,84 @@ def test_invalid_budget_and_missing_context(tmp_path):
     probe = NormDiagnostic(tmp_path, 0)
     with pytest.raises(RuntimeError, match='context'):
         probe.observe(torch.zeros(1), values(), values())
+
+
+def test_rebound_host_class_not_definition_class(tmp_path):
+    api = SimpleNamespace(unpack_norm=lambda x: values())
+
+    class Carrier:
+        def _forward_core(self, x):
+            return api.unpack_norm(x)
+
+    class Bound:
+        prefix = 'bound-layer'
+        _forward_core = Carrier._forward_core
+
+        def rearrange_mixed_qkv(self, x):
+            return values()
+
+    model = SimpleNamespace(modules=lambda: iter([Bound(), Bound()]))
+    cls = attention_class_for_model(model, Carrier._forward_core)
+    assert cls is Bound
+    probe = NormDiagnostic(tmp_path, 0)
+    probe.install(api, cls, lambda t: t)
+    Bound()._forward_core(torch.zeros(16, 4096, dtype=torch.bfloat16))
+    assert list(probe.slots) == ['bound-layer']
+    assert probe.current_layer is None
+
+
+@pytest.mark.parametrize('ambiguous', [False, True])
+def test_model_binding_fails_closed(ambiguous):
+    def core(self):
+        pass
+
+    class A:
+        _forward_core = core
+
+    class B:
+        _forward_core = core
+
+    layers = [A(), B()] if ambiguous else []
+    with pytest.raises(RuntimeError, match='bound GDN class'):
+        attention_class_for_model(SimpleNamespace(modules=lambda: iter(layers)), core)
+
+
+def test_v_is_bitwise_and_metadata_is_embedded(tmp_path):
+    scope = {'model': 'test-model', 'precision': 'bf16'}
+    probe = NormDiagnostic(tmp_path, 0, metadata=scope)
+    probe.current_layer = SimpleNamespace(prefix='layer')
+    actual, expected = values(), values()
+    actual[2][0, 0, 0, 0] = -0.0
+    probe.observe(torch.zeros(16, 4096, dtype=torch.bfloat16), actual, expected)
+    probe.end_step({})
+    report = json.loads((tmp_path / 'rank0-summary.json').read_text())
+    assert report['counts'] == [0, 0, 1]
+    assert report['differences']['v']['different'] == 1
+    payload = torch.load(tmp_path / 'rank0-first.pt', weights_only=True)
+    assert payload['metadata']['model_scope'] == scope
+
+
+def test_coverage_survives_inactive_last_step(tmp_path):
+    probe = NormDiagnostic(tmp_path, 0, max_steps=2)
+    observe(probe, 'layer')
+    probe.end_step({})
+    probe.begin_step()
+    probe.end_step({})
+    report = json.loads((tmp_path / 'rank0-summary.json').read_text())
+    assert report['status'] == 'NO_DIVERGENCE'
+    assert report['covered_steps'] == 1
+    assert report['seen_layers'] == ['layer']
+
+
+def test_graph_warmup_inference_buffers_reset_outside_inference(tmp_path):
+    probe = NormDiagnostic(tmp_path, 0)
+    with torch.inference_mode():
+        observe(probe, 'layer', different=True)
+    assert probe.slots['layer']['active'].is_inference()
+    probe.begin_step()
+    assert probe.slots['layer']['active'].item() == 0
+    with torch.inference_mode():
+        observe(probe, 'layer', different=True)
+    probe.end_step({'request': 1})
+    report = json.loads((tmp_path / 'rank0-summary.json').read_text())
+    assert report['status'] == 'DIVERGENCE'

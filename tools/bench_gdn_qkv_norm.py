@@ -96,10 +96,16 @@ def replay_capture(path, norm, device='npu'):
         'source': str(path),
         'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
         'saved_baseline_matches': True,
-        'captured': {key: tensor_difference(a, b) for key, a, b in zip(
-            ('q', 'k', 'v'), saved['actual'], saved['expected'], strict=True)},
-        'replayed': {key: tensor_difference(a, b) for key, a, b in zip(
-            ('q', 'k', 'v'), actual, expected, strict=True)},
+        'metadata': saved.get('metadata', {}),
+        'captured': {
+            key: tensor_difference(a, b, bitwise=key == 'v')
+            for key, a, b in zip(
+                ('q', 'k', 'v'), saved['actual'], saved['expected'], strict=True)
+        },
+        'replayed': {
+            key: tensor_difference(a, b, bitwise=key == 'v')
+            for key, a, b in zip(('q', 'k', 'v'), actual, expected, strict=True)
+        },
     }
 
 

@@ -7,13 +7,29 @@ import json
 from pathlib import Path
 
 
-def tensor_difference(actual, expected):
+def attention_class_for_model(model, core):
+    classes = {type(layer) for layer in model.modules()
+               if getattr(type(layer), '_forward_core', None) is core}
+    if len(classes) != 1:
+        raise RuntimeError(f'expected one bound GDN class, found {len(classes)}')
+    return classes.pop()
+
+
+def equality_mask(a, b, *, bitwise=False):
+    import torch
+
+    if bitwise:
+        return a.view(torch.int16) == b.view(torch.int16)
+    return (a == b) | (torch.isnan(a) & torch.isnan(b))
+
+
+def tensor_difference(actual, expected, *, bitwise=False):
     import torch
 
     if actual.shape != expected.shape or actual.dtype != expected.dtype:
         raise ValueError('diagnostic shape/dtype mismatch')
     a, b = actual.detach().cpu(), expected.detach().cpu()
-    same = (a == b) | (torch.isnan(a) & torch.isnan(b))
+    same = equality_mask(a, b, bitwise=bitwise)
     indices = (~same).nonzero()
     first = indices[0].tolist() if len(indices) else None
     finite = torch.isfinite(a) & torch.isfinite(b)
@@ -29,7 +45,7 @@ def tensor_difference(actual, expected):
 
 
 class NormDiagnostic:
-    def __init__(self, directory, rank, max_steps=128):
+    def __init__(self, directory, rank, max_steps=128, metadata=None):
         if max_steps < 1:
             raise ValueError('max_steps must be positive')
         self.directory = Path(directory)
@@ -37,6 +53,9 @@ class NormDiagnostic:
         self.rank = rank
         self.max_steps = max_steps
         self.steps = 0
+        self.covered_steps = 0
+        self.seen_layers = set()
+        self.metadata = dict(metadata or {})
         self.finished = False
         self.current_layer = None
         self.slots = {}
@@ -60,14 +79,17 @@ class NormDiagnostic:
         for i, (a, b) in enumerate(zip(actual, expected, strict=True)):
             slot['actual'][i].copy_(a)
             slot['expected'][i].copy_(b)
-            same = (a == b) | (torch.isnan(a) & torch.isnan(b))
+            same = equality_mask(a, b, bitwise=i == 2)
             slot['counts'][i].copy_((~same).sum())
         slot['active'].fill_(1)
 
     def begin_step(self):
+        import torch
+
         if not self.finished:
-            for slot in self.slots.values():
-                slot['active'].zero_()
+            with torch.inference_mode():
+                for slot in self.slots.values():
+                    slot['active'].zero_()
 
     def end_step(self, scheduled_tokens):
         import torch
@@ -84,8 +106,13 @@ class NormDiagnostic:
             counts = slot['counts'].cpu().tolist()
             if any(counts) and first is None:
                 first = (name, slot, counts)
+        self.covered_steps += bool(active)
+        self.seen_layers.update(active)
         report = {
             'schema': 'gdn-norm-first-divergence.v1',
+            'model_scope': self.metadata,
+            'covered_steps': self.covered_steps,
+            'seen_layers': sorted(self.seen_layers),
             'rank': self.rank, 'step': self.steps,
             'scheduled_tokens': scheduled_tokens,
             'active_layers': active,
@@ -95,18 +122,18 @@ class NormDiagnostic:
             name, slot, counts = first
             report.update(layer=name, counts=counts, status='DIVERGENCE')
             report['differences'] = {
-                key: tensor_difference(a, b)
+                key: tensor_difference(a, b, bitwise=key == 'v')
                 for key, a, b in zip(
                     ('q', 'k', 'v'), slot['actual'], slot['expected'], strict=True)
             }
-            payload = {'input': slot['input'].cpu(),
+            payload = {'metadata': report, 'input': slot['input'].cpu(),
                        'actual': tuple(t.cpu() for t in slot['actual']),
                        'expected': tuple(t.cpu() for t in slot['expected'])}
             with (self.directory / f'rank{self.rank}-first.pt').open('xb') as f:
                 torch.save(payload, f)
             self.finished = True
         elif self.steps >= self.max_steps:
-            report['status'] = 'NO_DIVERGENCE' if active else 'NO_COVERAGE'
+            report['status'] = 'NO_DIVERGENCE' if self.seen_layers else 'NO_COVERAGE'
             self.finished = True
         else:
             return
