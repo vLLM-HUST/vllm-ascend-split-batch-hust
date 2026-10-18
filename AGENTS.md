@@ -44,6 +44,7 @@ vllm-ascend 宿主的 default-off 插件壳:cascade 两段式 decode(eager+图�
 ## 算子交付检查点
 
 - 本仓是交付目标，不是实验附件。开工记录分支、起点 HEAD、本轮路径和已有 dirty 文件；任务句与动作约束见 `/root/AGENTS.md`「算子任务执行合同」。
+- 算子默认执行 L0 → plain L3 + compare → light L4；不强制 L1/L2 screen。端到端问题显式跑完整 screen；无 screen 的采集条件以 `/root/opt-ops/AGENTS.md` 为准。历史报告保留，不为新流程重采旧数据。
 - 最小实现可测后、完整验证或明确阻塞后，各检查一次是否应提交。提交包含实现/测试/接入与回滚材料/结果边界；大 trace 留 L2，仓内保留摘要、解析入口和哈希，不复制逐调用明细制造无效审查负担。
 - 数值失败保持 default-off，把失败复现和证据提交入库；不得将失败项从报告删除，或将局部收益写成已验收。Git 提交与优化验收是两个状态。
 - 先跑测试，再审查 `git diff` 与 staged diff，仅 `git add <本轮明确路径>`。不提交无关 dirty 文件，不改正在执行的脚本。
