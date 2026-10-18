@@ -38,6 +38,8 @@
 #                         则明确失败并说明"需另行受控解析", 不写任何文件
 #   l0 [op] [bench-l0 flags]  L0 算子微基准（bench-l0.py; op=all 列全部;
 #                             余下参数原样透传, 如 --sig 4 --decode-tokens 11912 --iters 100）
+#                             op=GdnQkvUnpack 走 tools/bench_gdn_qkv_unpack.py
+#                             （rearrange_mixed_qkv 配对 A/B; 落 <ts>-l0-gdn-qkv-unpack.json）
 #   run <tag> [steps]     一条龙: l1,l2,l3,smoke -> records/ladder/<tag>/（默认全四步）
 #                         产出: run.json 索引 + steps.log + smoke 目录 + 单页实验门禁报告
 #                         （不再拷贝 l1/l2/l3 json; 权威产物是 records/ladder/<ts>-*.json）
@@ -905,6 +907,20 @@ cmd_l0() {
   local ts; ts=$(date +%m%d-%H%M%S)
   local op=${1:-all}
   [ $# -gt 0 ] && shift
+  if [ "$op" = "GdnQkvNorm" ]; then
+    local norm_dir; norm_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    "$PY" "$norm_dir/bench_gdn_qkv_norm.py" "$@" \
+      --out "$RECORDS/${ts}-l0-gdn-qkv-norm.json"
+    return $?
+  fi
+  if [ "$op" = "GdnQkvUnpack" ]; then
+    # rearrange_mixed_qkv（split+reshape×3+cat 4 launch）配对 A/B：单算子单入口,
+    # 其余算子仍走 bench-l0.py; 产物同落 records/ladder 的带时间戳新文件
+    local self_dir; self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    "$PY" "$self_dir/bench_gdn_qkv_unpack.py" "$@" \
+      --out "$RECORDS/${ts}-l0-gdn-qkv-unpack.json"
+    return $?
+  fi
   # 余下参数原样透传给 bench-l0.py（--sig/--decode-tokens/--iters...）;
   # 自带 --out 放最后, 保证落 L2 的带时间戳新文件（只追加, 不覆盖既有归档）
   "$PY" "$SCRIPTS/bench-l0.py" --op "$op" "$@" \
