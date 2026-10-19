@@ -751,7 +751,7 @@ PYEOF
     prof_args=(--profiler-config.profiler=torch
                --profiler-config.torch_profiler_dir="$prof_dir"
                --profiler-config.torch_profiler_record_shapes="$rs"
-               --profiler-config.torch_profiler_with_stack=false
+               --profiler-config.torch_profiler_with_stack="${LADDER_PROFILE_WITH_STACK:-false}"
                --profiler-config.torch_profiler_with_memory=false
                --profiler-config.ignore_frontend=true)
     [ "$max_iters" -gt 0 ] && prof_args+=(--profiler-config.max_iterations="$max_iters")
