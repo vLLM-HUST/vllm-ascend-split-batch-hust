@@ -13,13 +13,12 @@ decode, unsupported graph modes, and unknown capture sizes. It must never lazily
 capture an unbounded key set or modify global forward context outside a scoped
 context manager.
 
-## GDN QKV norm development carrier (default-off)
+## GDN QKV norm tier-2 proposal (default-off)
 
-`gdn-qkv-norm` performs read-only validation of the existing tier-2 host
-proposal only; it installs no patch and registers no fusion rule. Disabled
-loading must not resolve the host or import device libraries. Explicit enabled
-loading rejects an incompatible host/config rather than claiming activation.
-The bundle remains `import_only` and its hash guard is not a public dispatch API.
+No `gdn-qkv-norm` plugin or bundle entry is exposed. The accepted kernel
+requires the separately reviewed reversible host proposal; the package does
+not install it. Registration is withdrawn pending a reachable narrow dispatch
+boundary. Source hashes are proposal provenance, not a public registration API.
 
 Prefer IR/CustomOp registration or graph replacement after proving callsite
 reachability. The CPU export probe in `tools/probe_gdn_registration.py` checks

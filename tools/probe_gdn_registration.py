@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
+import importlib.util
 import inspect
 import json
 from importlib.metadata import version
@@ -19,6 +21,23 @@ def graph_boundary(graph) -> dict:
         "opaque_gdn_core": opaque,
         "decision": "outer_fx_cannot_match_core_internals" if opaque else "inspect",
         "limit": "CPU export of the actual registered op, not a serving graph dump",
+    }
+
+
+def core_calls(source: str) -> dict:
+    tree = ast.parse(source)
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef)
+               and n.name == "AscendGatedDeltaNetAttention")
+    core = next(n for n in cls.body if isinstance(n, ast.FunctionDef)
+                and n.name == "_forward_core")
+    calls = sorted({ast.unparse(n.func) for n in ast.walk(core)
+                    if isinstance(n, ast.Call)})
+    return {
+        "core_line": core.lineno,
+        "calls": calls,
+        "direct_l2norm": "l2norm_fwd" in calls,
+        "instance_unpack": "self.rearrange_mixed_qkv" in calls,
+        "limit": "static call inventory, not proof of all possible extension points",
     }
 
 
@@ -44,6 +63,8 @@ def probe() -> dict:
         torch.empty(16, 16, 128, dtype=torch.bfloat16),
     )
     exported = torch.export.export(CoreCall(), args)
+    ascend = importlib.util.find_spec("vllm_ascend")
+    source = Path(ascend.origin).parent / "ops/gdn.py"
     return {
         "schema": "gdn-registration-probe.v1",
         "versions": {name: version(name) for name in
@@ -60,6 +81,8 @@ def probe() -> dict:
         "core_schema": str(torch.ops.vllm.qwen_gdn_attention_core.default._schema),
         "export_code": exported.graph_module.code,
         "boundary": graph_boundary(exported.graph),
+        "ascend_source": str(source),
+        "inner_core": core_calls(source.read_text()),
         "device_execution": False,
         "release_accepted": False,
     }

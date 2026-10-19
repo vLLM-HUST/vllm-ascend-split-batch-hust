@@ -56,30 +56,23 @@ agents, release process, pitfall history, progress log) lives in
 [docs/](docs/README.md) — start there. Repo-level agent rules:
 [AGENTS.md](AGENTS.md).
 
-## GDN QKV norm bundle (development, default-off)
+## GDN QKV norm (tier-2, default-off)
 
-`org.vllm-hust.gdn-qkv-norm` / general plugin `gdn-qkv-norm` guards the
-existing tier-2 `host-proposals/GDN-qkv-norm` development seam; it is not the
-long-term registration contract. The preferred registration route must first
-pass the graph-visibility and dispatch gates in `docs/release.md`. It does **not** install that host
-patch. The descriptor remains `import_only`; manager enable is blocked pending
-release validation. This source-tree capability is not a claim about the
-published 0.1.3 wheel.
+The accepted kernel and reversible host proposal live in
+`host-proposals/GDN-qkv-norm`. There is no `gdn-qkv-norm` general plugin or
+bundle entry point: registration is withdrawn while the target unpack/norm
+combination remains inside an opaque core without a proven narrow dispatch.
+Do not treat a packaged kernel as plug-and-play callsite replacement.
 
-Explicit development activation requires `VLLM_HUST_GDN_QKV_NORM=1` and
-`USE_DEFAULT_FLA_NORM=0` before process startup. The loader verifies the exact
-host source and rejects conflicting config or a host already loaded disabled.
-With the switch unset it performs no host probe or device imports. If using
-`VLLM_PLUGINS`, include `gdn-qkv-norm` alongside the other required plugins.
-
-Scope: Qwen3.5-35B-A3B bf16/ND, TP2, pure non-spec decode T16, FULL graph;
-unsupported inputs retain native fallback. Acceptance evidence is in
-`host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019/receipt.json`.
-Read-only preflight: `python -m vllm_ascend_split_batch.gdn_qkv_norm_plugin`.
-A `ready` result is not proof of kernel execution or release acceptance.
-Rollback requires disabling the env and restarting/recapturing; remove the
-host patch only through its separately reviewed reverse-patch procedure.
-The delivery contract is in [docs/release.md](docs/release.md#算子-bundle-最短交付路径).
+Scope: Qwen3.5-35B-A3B bf16/ND, TP2, pure non-spec decode T16, FULL graph.
+Existing tier-2 activation requires the reviewed host patch plus
+`VLLM_HUST_GDN_QKV_NORM=1` and `USE_DEFAULT_FLA_NORM=0` before startup;
+unsupported inputs retain native fallback. No automatic patching is provided.
+Rollback requires disabling the env and restarting/recapturing; reverse the
+host patch only through its separately reviewed procedure.
+Acceptance evidence: `host-proposals/GDN-qkv-norm/validation/`.
+Registration decision: `host-proposals/GDN-qkv-norm/registration-closure.json`.
+Delivery gates: [docs/release.md](docs/release.md#算子-bundle-最短交付路径).
 
 ## Cascade attention plugin (default-off)
 

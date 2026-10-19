@@ -44,32 +44,17 @@
 - 接入成立后补匹配/不匹配、跨流和执行 scope、形状/相位守卫测试，
   再走新接入的 L3+compare 与 graph replay；不继承旧接入的数值 PASS。
 
-### GDN QKV norm tier-2 开发接缝合同
+### GDN QKV norm tier-2 交付边界
 
-以下薄 loader 仅保护既有补丁验证路径，不是注册方案的长期发布契约。
-`org.vllm-hust.gdn-qkv-norm` 的 `gdn-qkv-norm` 入口只做只读 preflight。
-关闭时不查询宿主、不 import torch/Triton；开启时要求 norm env 为 `0`、
-插件 allowlist 未排除本入口、实际解析的 `vllm_ascend.ops.gdn` 全文件哈希等于
-`gdn_qkv_norm_plugin.HOST_SHA256`，已加载模块的融合 flag 必须为真。
-哈希由 `host-proposals/GDN-qkv-norm/gen_patch.py` 的输出经测试绑定；
-任何宿主变动须重新审查，不能自动刷新哈希放行。
+没有已证实可达的细粒度 dispatch 时，停止 bundle 注册，不保留只做源码哈希
+检查却不注册融合的入口。GDN 的 kernel、可逆 host proposal 与已有算子证据
+仍保留；不开新性能窗口，不改宿主，不将历史 kernel 验收转写为注册接入 PASS。
+结论与重开条件见 `host-proposals/GDN-qkv-norm/registration-closure.json`。
 
-该 bundle 的版本范围只声明 `==0.25.1rc2.dev125`，另外依赖精确接缝哈希；
-不继承 cascade 的宽兼容声明。`activation.environment` 配置
-`VLLM_HUST_GDN_QKV_NORM=1` 和 `USE_DEFAULT_FLA_NORM=0`，
-不得与要求另一 norm 路径的 bundle 混用。preflight 的 `ready` 只证明接缝存在，
-不证明模型已命中 T16 分支，更不等同于 release PASS。
-
-```bash
-# 使用实际 serving Python；不 import 宿主或设备栈、不起服
-VLLM_HUST_GDN_QKV_NORM=1 USE_DEFAULT_FLA_NORM=0 \
-  python -m vllm_ascend_split_batch.gdn_qkv_norm_plugin
-# 返回 0：disabled 或 ready（看 JSON）；返回 3：blocked
-```
-
-`import_only` 阶段管理器必须拒绝 enable；手动 env 是开发验证路径，
-不代表管理器发布完成。正式升 `active` 前仍需最终 wheel 的管理器真实起服、
-关闭态模型冒烟与回滚证据，以及未解决的 coverage 完整性问题归因。
+tier-2 开关仍为 `VLLM_HUST_GDN_QKV_NORM=1` 且 `USE_DEFAULT_FLA_NORM=0`，
+依赖人工审查的宿主补丁；默认关闭。关闭后重启并重新捕获图，宿主补丁单独回滚。
+只有宿主版本提供可达窄边界或得到新机制证据，才重新立项 bundle 接入；
+届时重新验证调用链、L3+compare、graph replay 和管理器生命周期。
 
 ## 0. 状态纪律(先于一切)
 

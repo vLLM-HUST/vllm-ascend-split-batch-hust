@@ -48,7 +48,6 @@ test = [
 "org.vllm-hust.zerocost-wiring" = "vllm_ascend_split_batch.zerocost"
 "org.vllm-hust.gate-fp32" = "vllm_ascend_split_batch.gate_fp32"
 "org.vllm-hust.gdn-merge-inproj" = "vllm_ascend_split_batch.gdn_merge_inproj"
-"org.vllm-hust.gdn-qkv-norm" = "vllm_ascend_split_batch.gdn_qkv_norm_bundle"
 
 [project.entry-points."vllm.general_plugins"]
 "cascade-attention" = "vllm_ascend_split_batch.cascade_plugin:load"
@@ -59,7 +58,6 @@ test = [
 "mlp-chunk" = "vllm_ascend_split_batch.mlp_chunk_plugin:load"
 "gate-fp32" = "vllm_ascend_split_batch.gate_fp32_plugin:load"
 "gdn-merge-inproj" = "vllm_ascend_split_batch.gdn_merge_inproj_plugin:load"
-"gdn-qkv-norm" = "vllm_ascend_split_batch.gdn_qkv_norm_plugin:load"
 "rope-fix" = "vllm_ascend_split_batch.rope_fix_plugin:load"
 "zerocost-wiring" = "vllm_ascend_split_batch.zerocost_wiring:load"
 
