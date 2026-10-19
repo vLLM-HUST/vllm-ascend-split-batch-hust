@@ -13,6 +13,21 @@ decode, unsupported graph modes, and unknown capture sizes. It must never lazily
 capture an unbounded key set or modify global forward context outside a scoped
 context manager.
 
+## GDN QKV norm development carrier (default-off)
+
+`gdn-qkv-norm` performs read-only validation of the existing tier-2 host
+proposal only; it installs no patch and registers no fusion rule. Disabled
+loading must not resolve the host or import device libraries. Explicit enabled
+loading rejects an incompatible host/config rather than claiming activation.
+The bundle remains `import_only` and its hash guard is not a public dispatch API.
+
+Prefer IR/CustomOp registration or graph replacement after proving callsite
+reachability. The CPU export probe in `tools/probe_gdn_registration.py` checks
+the actual registered core boundary, not production graph visibility. An opaque
+core cannot be matched internally by an outer FX rule. Layer-level replacement
+must not disguise a copied whole-forward implementation as operator registration.
+Registration and release gates are defined in `docs/release.md`.
+
 ## Cascade attention components (implemented, default-off)
 
 The cascade plugin (`cascade_plugin.py`, `cascade_graph_plugin.py`,

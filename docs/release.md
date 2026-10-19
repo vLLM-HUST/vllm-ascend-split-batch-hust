@@ -3,6 +3,74 @@
 基于 [bidkv 打包发布指南](https://github.com/vLLM-HUST/vllm-hust-docs/blob/main/operations/bidkv-packaging-and-release-guide.md)
 裁剪,补充本插件特有事项。Bundle ID: `org.vllm-hust.split-batch-full-graph`。
 
+## 算子 bundle 最短交付路径
+
+- **注册契约优先**：先核对实际版本的 IR/CustomOp dispatch 与图替换 API，
+  用真实调用点的图探针确认目标子图可见；API 存在不等于调用链可达。
+  优先注册实现或 fusion rule，未匹配时保留原生路径；源码字节校验只用于
+  尚未迁移的 tier-2 补丁，不作为正式注册实现的接口契约。
+- **先接入、后验收**：开发阶段即提供独立 `import_only` bundle、
+  `general_plugins` 注册入口、env 门控、接口能力检查及 fallback 测试。
+  L0 / L3+compare / light L4 使用待交付的同一 kernel、callsite 与配置；
+  不在验收后另写一份融合或迁移到另一条调用链。
+- **一个实现、两个发布对象**：Python/Triton kernel 随插件 wheel 发布；
+  若宿主没有可替换的融合边界，接缝由仓内可逆 host proposal 单独交付。
+  bundle 只核验接缝，不在加载时改写宿主文件、替换整个 forward，
+  不全局跳过 norm，也不把依赖宿主补丁的方案称为纯 wheel 即插即用。
+- **验收材料复用**：证据绑定形状/权重、实现及宿主哈希、配置、插件 commit；
+  相同执行路径复用已有 L0/L3/L4，不因补 descriptor 重跑性能窗口。
+  接入或计算语义变化则按明确缺口补 L3+compare、graph replay，必要时补 L4。
+  发布生命周期检查与算子验收分开；端到端声明仍遵守相应发布判据。
+- **发布收尾**：最终 wheel 隔离安装 → 发现/关闭态检查 → 候选启用的 env
+  预览及真实起服 → 双 rank 生效和正确性 → disable/restart 回归原生路径 →
+  审核三证据与完整性 → 提交 `active`。最终字节与被测字节的差异须审查；
+  `active` 只允许显式 enable，不改变 default-off。推送/发布仍另需授权。
+- **回滚单位是进程与图**：关闭 env 后重启并重新 capture；不承诺已捕获图热切换。
+  保留独立的 `patch -R` 校验，不将卸载插件等同于撤销宿主补丁。
+
+### GDN 注册接入验证门
+
+`tools/probe_gdn_registration.py --output <新JSON路径>` 使用实际 serving Python，
+先导入 `torch_npu` 后核对 npugraph_ex API，并对真实注册的
+`qwen_gdn_attention_core` 做 CPU export；不加载模型、不执行 NPU kernel。
+该探针不是生产编译图，也不证明 pattern 已命中。
+
+- 外层图仅含 opaque core 时，禁止将内部 unpack/norm 的 pattern 注册记为生效。
+  必须另证内部计算可进入编译图，或经已有细粒度 dispatch 点接入。
+- `PluggableLayer.register_oot` 是层级注册，不是 unpack/norm 注册点；
+  必须核对实际实例类、Ascend 已有注册冲突和 worker patch 时序。
+  不通过覆盖全层 forward、分解含 KV/通信副作用的 opaque core 或全局 norm bypass 绕行。
+- `torch.ops._C_ascend` 只解决 kernel 调用；不能代替调用点可达性证明。
+- 接入成立后补匹配/不匹配、跨流和执行 scope、形状/相位守卫测试，
+  再走新接入的 L3+compare 与 graph replay；不继承旧接入的数值 PASS。
+
+### GDN QKV norm tier-2 开发接缝合同
+
+以下薄 loader 仅保护既有补丁验证路径，不是注册方案的长期发布契约。
+`org.vllm-hust.gdn-qkv-norm` 的 `gdn-qkv-norm` 入口只做只读 preflight。
+关闭时不查询宿主、不 import torch/Triton；开启时要求 norm env 为 `0`、
+插件 allowlist 未排除本入口、实际解析的 `vllm_ascend.ops.gdn` 全文件哈希等于
+`gdn_qkv_norm_plugin.HOST_SHA256`，已加载模块的融合 flag 必须为真。
+哈希由 `host-proposals/GDN-qkv-norm/gen_patch.py` 的输出经测试绑定；
+任何宿主变动须重新审查，不能自动刷新哈希放行。
+
+该 bundle 的版本范围只声明 `==0.25.1rc2.dev125`，另外依赖精确接缝哈希；
+不继承 cascade 的宽兼容声明。`activation.environment` 配置
+`VLLM_HUST_GDN_QKV_NORM=1` 和 `USE_DEFAULT_FLA_NORM=0`，
+不得与要求另一 norm 路径的 bundle 混用。preflight 的 `ready` 只证明接缝存在，
+不证明模型已命中 T16 分支，更不等同于 release PASS。
+
+```bash
+# 使用实际 serving Python；不 import 宿主或设备栈、不起服
+VLLM_HUST_GDN_QKV_NORM=1 USE_DEFAULT_FLA_NORM=0 \
+  python -m vllm_ascend_split_batch.gdn_qkv_norm_plugin
+# 返回 0：disabled 或 ready（看 JSON）；返回 3：blocked
+```
+
+`import_only` 阶段管理器必须拒绝 enable；手动 env 是开发验证路径，
+不代表管理器发布完成。正式升 `active` 前仍需最终 wheel 的管理器真实起服、
+关闭态模型冒烟与回滚证据，以及未解决的 coverage 完整性问题归因。
+
 ## 0. 状态纪律(先于一切)
 
 - manifest 保持 `import_only`,直到三项证据齐备:default-off 零回归冒烟、
