@@ -18,8 +18,13 @@ from torch_npu._C import _profiler as native
 from torch_npu.version import git_version
 
 faulthandler.enable()
-root = Path(torch_npu.__file__).parent
-library = root / 'lib/libtorch_npu.so'
+def loaded_library(maps):
+    paths = {line.split(maxsplit=5)[-1].strip()
+             for line in maps.splitlines() if line.endswith('/libtorch_npu.so')}
+    if len(paths) != 1:
+        raise RuntimeError('expected exactly one mapped libtorch_npu.so')
+    return Path(paths.pop())
+library = loaded_library(Path('/proc/self/maps').read_text())
 with library.open('rb') as stream:
     digest = hashlib.file_digest(stream, 'sha256').hexdigest()
 print(json.dumps({'python': sys.executable, 'torch': torch.__version__,

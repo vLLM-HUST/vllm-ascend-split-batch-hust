@@ -1,3 +1,4 @@
+import ast
 import importlib.util
 import json
 import subprocess
@@ -110,3 +111,29 @@ def test_cpu_preflight_keeps_required_capture_options():
         'opt bench serve')
     assert 'export LADDER_SLIM=0' in collector
     assert 'export LADDER_PROFILE_WITH_STACK=true' in collector
+
+
+def test_collector_preflight_uses_serve_python():
+    ladder = (ROOT / 'tools/bench-ladder.sh').read_text()
+    serve_python = next(line.removeprefix('PY=') for line in ladder.splitlines()
+                        if line.startswith('PY='))
+    collector = (ROOT / 'tools/collect_comm_mechanism.sh').read_text()
+    assert (f'{serve_python} "$script_dir/check_comm_profiler_stop.py" '
+            '--output "$preflight"') in collector
+
+
+def test_identity_hashes_mapped_library_not_package_default():
+    checker = load(ROOT / 'tools/check_comm_profiler_stop.py', 'comm_gil_identity')
+    functions = [node for node in ast.parse(checker.PROBE).body
+                 if isinstance(node, ast.FunctionDef)
+                 and node.name == 'loaded_library']
+    namespace = {'Path': Path}
+    exec(compile(ast.Module(body=functions, type_ignores=[]), '<probe>', 'exec'),
+         namespace)
+    locate = namespace['loaded_library']
+    mappings = ('100-200 r--p 0 00:00 1 /optional/build/libtorch_npu.so\n'
+                '200-300 r-xp 0 00:00 1 /optional/build/libtorch_npu.so\n')
+    assert locate(mappings) == Path('/optional/build/libtorch_npu.so')
+    for invalid in ['', mappings + '300-400 r-xp 0 00:00 2 /old/libtorch_npu.so\n']:
+        with pytest.raises(RuntimeError, match='exactly one'):
+            locate(invalid)

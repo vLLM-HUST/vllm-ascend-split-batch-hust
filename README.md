@@ -358,8 +358,10 @@ FULL graph, and `LADDER_SLIM=0` must not be disabled to pass it.
 The optional point-pinned torch_npu source repair and apply/rollback commands are
 in [`host-proposals/comm-trace-stop-gil/proposal_meta.json`](host-proposals/comm-trace-stop-gil/proposal_meta.json).
 Source patching and the isolated native clear regression are not proof that the
-installed library is repaired. The selected runtime library must pass
-`python tools/check_comm_profiler_stop.py --output <new-evidence-directory>`;
+installed library is repaired. Preflight must use the same Python interpreter
+as `tools/bench-ladder.sh` serve, not the offline parsing environment. The selected
+runtime library must pass
+`/usr/local/python3.12.13/bin/python tools/check_comm_profiler_stop.py --output <new-evidence-directory>`;
 a CPU preflight pass does not accept dual-rank pairing, callsites, graph device
 boundaries, numerical correctness, or performance.
 
