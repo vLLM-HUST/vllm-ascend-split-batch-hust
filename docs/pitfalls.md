@@ -269,3 +269,24 @@ fail-open 刷屏(143+ 次),引擎永远到不了 ready。
 **定性**:config 面问题,非正确性缺陷——封顶后 144 次 capture(3 桶 × 48 层)
 全成功、0 fail-open。§3 启用验证日志:
 `knowledge/evidence/cascade/logs/v1-active-enablement/serve-active-enablement.log`。
+
+### 3.6 triton-ascend kernel 多指针参数在 ttir_to_linalg 段 segfault(2026-10-18)
+
+**症状**:`gdn_qkv_norm_kernel` 尝试把三段输出拆成多块独立显存时,两种
+kernel 签名都在编译期直接段错误(进程退出码 139,无 Python 栈):
+①`unpack_norm_kernel(X, Y, K=None, V=None)`(可选指针参数 + 分支选目标);
+②独立 `unpack_norm_separate_kernel(X, Q, K, V)`(4 指针 + `dst = Q if
+segment == 0 else K`)。栈顶均在
+`triton/backends/ascend/compiler.py:247 ttir_to_linalg`。
+
+**对照**:原 2 指针签名 `unpack_norm_kernel(X, Y)` 加 `multibuffer=True`
+编译与图捕获均正常;两种 segfault 形态与 multibuffer 无关(未启用时同样崩)。
+
+**规避**:需要多输出布局时不要给 kernel 加指针参数;保持单输出指针 +
+`multibuffer=True`,由 host 侧复制/切 view(本仓 `launch_separate` 即此
+形态,仅作诊断工具,默认路径不用)。根因未查(bisheng/MLIR 下游),升级
+triton-ascend 后需重验。
+
+**证据**:`/root/包体恢复/records/probes/20261018T164700Z_gdn_separate/
+separate-graph.log`、`separate-graph-r2.log`(两份 fault handler 栈);
+`multibuffer-graph.json`(2 指针 + multibuffer 正常)。

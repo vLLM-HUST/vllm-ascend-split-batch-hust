@@ -27,7 +27,7 @@
     "phase": "pure non-spec decode; PCP world_size=1; no grad"
   },
   "fallback": "native unpack and native q/k norm on every unsupported branch; speculative/mixed/prefill unchanged",
-  "implementation": "src/vllm_ascend_split_batch/gdn_qkv_norm.py and gdn_qkv_norm_kernel.py",
+  "implementation": "src/vllm_ascend_split_batch/gdn_qkv_norm.py (launch_into passes multibuffer=True) and gdn_qkv_norm_kernel.py",
   "tests": [
     "tests/test_gdn_qkv_norm.py",
     "tests/test_gdn_qkv_norm_patch.py",
@@ -40,15 +40,17 @@
   },
   "evidence": [
     "/root/包体恢复/records/ladder/1018-125822-l0-gdn-qkv-norm.json",
-    "/root/包体恢复/records/probes/20261018T130700Z_gdn_norm_trace_analysis.json"
+    "/root/包体恢复/records/probes/20261018T130700Z_gdn_norm_trace_analysis.json",
+    "host-proposals/GDN-qkv-norm/validation/multibuffer-determinism-20261018/receipt.json",
+    "host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019/receipt.json"
   ],
   "deployment_gate": [
     "Exact source hash, forward and reverse patch checks",
-    "Fullgraph capture/replay correctness not yet verified",
-    "Full-model L3 and opt bench compare PASS",
-    "Matched model L4 target counts/durations and all-kernel denominator"
+    "Fullgraph capture/replay correctness: PASS (isolated 8/8; in-model FULL windows captured and L3-identical)",
+    "Full-model L3 and opt bench compare PASS: 16/16 fixed batch, 8/8 standard (production cohort, multibuffer=True)",
+    "Matched model L4 target counts/durations and all-kernel denominator: PASS, both ranks (validation/l4-multibuffer-20261019/receipt.json)"
   ],
   "rollback": "patch -R -p1 < host-proposals/GDN-qkv-norm/patch.diff; verified on a temporary copy only",
-  "decision": "scoped complete implementation warranted by L0 + device trace; NOT accepted/released or installed into live runtime",
+  "decision": "Optimization accepted 2026-10-19: paired same-day L4 (6->1 kernels/call, per-call active -69.2%/-67.6%) with L3 exact equality (16/16 batch, 8/8 standard) and L0 exact+graph replay; plugin remains default-off pending bundle release gate",
   "delete_when": "host source changes or candidate is superseded; fail closed until source and evidence are revalidated"
 }

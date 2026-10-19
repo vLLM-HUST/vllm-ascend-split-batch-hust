@@ -1,8 +1,8 @@
 {
   "schema": "gdn-progress.v1",
   "candidate": "gdn-unpack-qk-l2norm-fusion",
-  "stage": "blocked",
-  "deployment": "default-off; reversible runtime patch deployed for paired validation; both services stopped",
+  "stage": "accepted",
+  "deployment": "default-off; reversible runtime patch deployed for paired validation; both services stopped; bundle activation is a separate release gate",
   "shape": {
     "T": 16,
     "row_stride": 4096,
@@ -44,14 +44,18 @@
     "mmlu_profile_responses": "PASS: 16/16 exact responses; matching prompt/doc hashes",
     "fixed_batch_l3": "FAIL: A/B 2/16; A/A and B/B 16/16; candidate across independent plain/profile services 16/16",
     "l4": "Collected both ranks and both arms; 540 target calls/rank/arm, 6 kernels -> 1",
-    "rank0_target_kernel_mean_us": [30.304666666666666, 10.519962962962962],
-    "rank1_target_kernel_mean_us": [29.43311111111111, 9.647444444444444],
+    "rank0_target_kernel_mean_us": [
+      30.304666666666666,
+      10.519962962962962
+    ],
+    "rank1_target_kernel_mean_us": [
+      29.43311111111111,
+      9.647444444444444
+    ],
     "acceptance": "BLOCKED by fixed-batch numerical regression; L4 timing is diagnostic, not an accepted optimization"
   },
   "missing_gates": [
-    "Identify and repair fixed-batch full-model numerical divergence; do not weaken exact per-ID comparison",
-    "Full-model graph correctness across all covered request protocols",
-    "Repeated matched L4 after correctness repair, if candidate remains viable"
+    "Bundle release gate: manifest import_only -> active requires default-off smoke, correctness and performance evidence bundle sign-off; plugin stays default-off until then"
   ],
   "prior_method": {
     "id": "gdn-qkv-unpack-single-pass",
@@ -60,8 +64,39 @@
     "result": "T16 repaired copy is numerically correct but eager-chain slower:284.635 ->308.525us",
     "not_retried": true
   },
-  "next_action": "Keep disabled. Capture the first divergent real-model intermediate under the fixed indexed batch, compare native/fused Q/K/V and recurrent state, then repair before any further performance claim. Do not rerun rejected copy.",
+  "next_action": "Optimization accepted; no further operator work. Release-gate material (activation decision, host proposal refresh for upstream tree versions) is owned outside this candidate.",
   "model_validation_evidence": "validation/model-validation/manifest.json",
   "evidence": "validation/manifest.json",
-  "evidence_limits": "Compact original JSON/log/CSV snapshots are bundled. Raw full profiler timelines and larger L2 archive remain at source paths in manifest; receipt commit_push field describes pre-publication state."
+  "evidence_limits": "Compact original JSON/log/CSV snapshots are bundled. Raw full profiler timelines and larger L2 archive remain at source paths in manifest; receipt commit_push field describes pre-publication state.",
+  "resolution": {
+    "root_cause": "fused unpack_norm_kernel without multibuffer produced a stable but different trajectory from native; launching the same kernel with multibuffer=True removes it",
+    "attribution": "single-variable: multibuffer=True alone, production FULL cohort, no deterministic env; deterministic PIECEWISE protocol additionally equalizes arms but changes global numerics",
+    "fixed_batch_l3": "PASS 16/16 identical vs fresh baseline; both arm captures byte-identical (sha 312b5644dbdd)",
+    "standard_l3": "PASS 8/8 identical",
+    "l4_paired": {
+      "A_kernels_per_call": 6,
+      "B_kernels_per_call": 1,
+      "per_call_active_us": {
+        "rank0": [
+          29.888,
+          9.212
+        ],
+        "rank1": [
+          29.735,
+          9.645
+        ]
+      },
+      "reduction_pct": {
+        "rank0": 69.2,
+        "rank1": 67.6
+      },
+      "windows": {
+        "A": "/root/prof/ladder-1019-021225",
+        "B": "/root/prof/ladder-1019-022857"
+      },
+      "limits": "540 vs 570 captured calls (32-iteration truncation); per-call comparison only; totals not compared"
+    },
+    "evidence": "validation/l4-multibuffer-20261019/receipt.json"
+  },
+  "toolchain_note": "Triton kernel signatures with extra pointer parameters (optional K=None/V=None or a separate 4-pointer kernel) segfault triton-ascend ttir_to_linalg; see docs/pitfalls.md"
 }
