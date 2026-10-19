@@ -830,30 +830,5 @@
    }
   ]
  },
- "free_attribution": {
-  "free_total_ms": 2656.798,
-  "caliber": "v1-host-boundary-deprecated",
-  "caliber_note": "v1: host \u8fb9\u754c\u7528 aclmdlRIExecuteAsync \u65f6\u95f4\u6233\u505a\u4ee3\u7406\uff0c\u5b9e\u6d4b exe \u843d\u5728 free gap \u5185\u90e8 \u2192 tail \u88ab\u7cfb\u7edf\u6027\u4f4e\u4f30\uff0c'94% \u5728\u56fe\u91cd\u653e\u5185\u90e8/host \u4e0d\u662f\u74f6\u9888' \u5df2\u8bc1\u4f2a\u3002host_boundary_* / internal_free_ms / internal_pct_of_step_free \u5c5e\u8be5\u5931\u6548\u5bb6\u65cf\uff0c\u4e0d\u5f97\u4f5c D1/D5 \u88c1\u51b3\u8bc1\u636e\uff1b\u5e94\u8d70 stream-pair \u7684 v2\uff08records/ladder/1014-060000-free-attribution-v2-corrected.json\uff09\u3002",
-  "host_api_covered_ms": 2546.925,
-  "host_api_covered_pct": 95.86,
-  "host_idle_ms": 109.873,
-  "host_idle_pct": 4.14,
-  "sync_stream_ms": 7.71,
-  "launch_ms": 327.168,
-  "graph_replay": {
-   "n_steps": 18,
-   "region_ms": 424.54,
-   "free_ms": 29.176,
-   "free_pct": 6.87,
-   "step_median_ms": 23.189,
-   "host_boundary_ms": 8.447,
-   "host_boundary_lead_ms": 8.579,
-   "host_boundary_tail_ms": -0.132,
-   "internal_free_ms": 20.726,
-   "internal_pct_of_step_free": 71.04,
-   "step_median_internal_free_us": 1142.0
-  },
-  "non_graph_free_ms": 2627.622
- },
  "asc_dir": "/root/prof/ladder-1019-022857/recover-copy-1019-0240_ascend_pt"
 }

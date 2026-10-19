@@ -852,31 +852,6 @@
    }
   ]
  },
- "free_attribution": {
-  "free_total_ms": 1984.835,
-  "caliber": "v1-host-boundary-deprecated",
-  "caliber_note": "v1: host 边界用 aclmdlRIExecuteAsync 时间戳做代理，实测 exe 落在 free gap 内部 → tail 被系统性低估，'94% 在图重放内部/host 不是瓶颈' 已证伪。host_boundary_* / internal_free_ms / internal_pct_of_step_free 属该失效家族，不得作 D1/D5 裁决证据；应走 stream-pair 的 v2（records/ladder/1014-060000-free-attribution-v2-corrected.json）。",
-  "host_api_covered_ms": 1888.174,
-  "host_api_covered_pct": 95.13,
-  "host_idle_ms": 96.661,
-  "host_idle_pct": 4.87,
-  "sync_stream_ms": 7.72,
-  "launch_ms": 232.866,
-  "graph_replay": {
-   "n_steps": 18,
-   "region_ms": 425.673,
-   "free_ms": 29.439,
-   "free_pct": 6.92,
-   "step_median_ms": 23.207,
-   "host_boundary_ms": 9.096,
-   "host_boundary_lead_ms": 9.219,
-   "host_boundary_tail_ms": -0.124,
-   "internal_free_ms": 20.34,
-   "internal_pct_of_step_free": 69.09,
-   "step_median_internal_free_us": 1097.4
-  },
-  "non_graph_free_ms": 1955.396
- },
  "asc_dir": "/root/prof/ladder-1019-022857/dp0_pp0_tp1_dcp0_ep1_rank1_1213890_20261019023410359_ascend_pt",
  "trace_tier": "light",
  "capture_scope": {
