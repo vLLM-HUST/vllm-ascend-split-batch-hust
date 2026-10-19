@@ -10,6 +10,9 @@ export LADDER_PROFILE_MMLU_N=16
 export LADDER_EVAL_CONC=16
 export LADDER_LOAD_CALIBER=mmlu-pro-gdn-high-concurrency-longctx
 export LADDER_SERVE_EXTRA='--compilation-config {"mode":"VLLM_COMPILE","cudagraph_mode":"FULL","cudagraph_capture_sizes":[1,2,4,8,16,32]} --worker-cls vllm_ascend_split_batch.comm_trace_worker.CommTraceWorker'
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+preflight="/root/包体恢复/records/probes/$(date -u +%Y%m%dT%H%M%SZ)_comm-stop-preflight-$$"
+/root/venvs/rv1/bin/python "$script_dir/check_comm_profiler_stop.py" --output "$preflight"
 opt bench serve --profile deep
 opt bench profile --candidate comm-free-current-window-diagnostic \
   --trace-tier deep \

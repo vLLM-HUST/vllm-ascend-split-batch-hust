@@ -348,6 +348,21 @@ fail-closed (absence, an entry-point enumeration error, missing log, or a missin
 records `unknown`/`null`/`false`) and never changes `screen`/`serve` exit codes; only
 cross-window absolute comparisons require two windows to share a carrier state.
 
+## CommTrace stop safety
+
+`tools/collect_comm_mechanism.sh` requires an isolated CPU-only native profiler
+stop/finalize preflight before starting vLLM. A crash, timeout, or incomplete
+preflight exits with code 3 and retains its evidence; shapes, stack, modules,
+FULL graph, and `LADDER_SLIM=0` must not be disabled to pass it.
+
+The optional point-pinned torch_npu source repair and apply/rollback commands are
+in [`host-proposals/comm-trace-stop-gil/proposal_meta.json`](host-proposals/comm-trace-stop-gil/proposal_meta.json).
+Source patching and the isolated native clear regression are not proof that the
+installed library is repaired. The selected runtime library must pass
+`python tools/check_comm_profiler_stop.py --output <new-evidence-directory>`;
+a CPU preflight pass does not accept dual-rank pairing, callsites, graph device
+boundaries, numerical correctness, or performance.
+
 ## Canonical MOD metadata
 
 Repository identity, directly responsible maintainers, advisor status, default-off
