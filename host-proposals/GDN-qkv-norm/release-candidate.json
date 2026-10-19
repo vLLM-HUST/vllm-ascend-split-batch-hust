@@ -1,0 +1,24 @@
+{
+  "id": "gdn-qkv-norm-bundle-release",
+  "route": "028/meta-exp-fixed-cost",
+  "caliber": "mmlu-pro-gdn-high-concurrency-longctx",
+  "cohort": "028-qwen35-35b-a3b-tp2-fullgraph",
+  "scenario": "Existing accepted T16 decode shape; no new scenario",
+  "op": "",
+  "phase": "bundle release",
+  "method": "Dedicated bundle may become active for explicit enable; env remains default-off. Default-on requires a separate decision.",
+  "stage": "proposed",
+  "next_action": "Read-only carrier/seam feasibility and source identity audit; record feasible interface or exact blocker, then scope implementation and release validation budget.",
+  "stop_condition": "No suitable seam, source mismatch, unresolved evidence integrity, L3 mismatch, or need to widen supported scope: keep default-off/import_only and record blocker; no new NPU window under this plan.",
+  "budget": {
+    "npu_min": "none: offline assessment only",
+    "serve_starts": "none permitted in this assessment",
+    "resamples": "none permitted in this assessment",
+    "scope": "offline assessment only"
+  },
+  "evidence": [
+    "/root/包体恢复/records/probes/20261019T031100Z_gdn_release_assessment.json"
+  ],
+  "reason": "Operator candidate remains accepted; dedicated bundle carrier and lifecycle evidence absent. Assessment only, release blocked.",
+  "reopen_condition": "Not reopening operator methods; implementation follows seam feasibility and integrity review."
+}
