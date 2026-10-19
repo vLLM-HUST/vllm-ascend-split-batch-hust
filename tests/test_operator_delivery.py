@@ -96,6 +96,76 @@ def test_cli_unscoped_is_not_successful_check(repo):
     assert json.loads(result.stdout)["state"] == "UNSCOPED"
 
 
+def test_preexisting_same_file_dirty_is_proven_by_three_way_merge(repo):
+    path, git, _ = repo
+    original = "".join(f"line {i}\n" for i in range(30))
+    (path / "kernel.py").write_text(original)
+    git("commit", "-qam", "fixture")
+    base = git("rev-parse", "HEAD")
+    dirty = original.replace("line 25\n", "user work\n")
+    (path / "kernel.py").write_text(dirty)
+    baseline = delivery.capture_dirty_baseline(path, ["kernel.py"])
+    task = original.replace("line 2\n", "task change\n")
+    (path / "kernel.py").write_text(task)
+    git("commit", "-qam", "task")
+    combined = task.replace("line 25\n", "user work\n")
+    (path / "kernel.py").write_text(combined)
+    before = git("status", "--porcelain")
+    assert delivery.collect(path, base, ["kernel.py"])["state"] == "INCOMPLETE"
+    result = delivery.collect(path, base, ["kernel.py"], baseline)
+    assert result["state"] == "COMMITTED_LOCAL"
+    assert result["checks"][0]["dirty"] is True
+    assert result["checks"][0]["preexisting_dirty_preserved"] is True
+    assert git("status", "--porcelain") == before
+    (path / "kernel.py").write_text(combined + "unfinished task\n")
+    assert delivery.collect(path, base, ["kernel.py"], baseline)["state"] == (
+        "INCOMPLETE"
+    )
+    (path / "kernel.py").write_text(combined)
+    git("add", "kernel.py")
+    assert delivery.collect(path, base, ["kernel.py"], baseline)["state"] == (
+        "INCOMPLETE"
+    )
+
+
+def test_baseline_cannot_be_used_for_another_base(repo):
+    path, git, base = repo
+    (path / "kernel.py").write_text("user work\n")
+    baseline = delivery.capture_dirty_baseline(path, ["kernel.py"])
+    git("commit", "-qam", "task")
+    with pytest.raises(ValueError, match="starting HEAD"):
+        delivery.collect(path, git("rev-parse", "HEAD"), ["kernel.py"], baseline)
+    assert delivery.collect(path, base, ["missing.py"], baseline)["state"] == (
+        "INCOMPLETE"
+    )
+
+
+def test_conflicting_dirty_baseline_does_not_pass(repo):
+    path, git, base = repo
+    (path / "kernel.py").write_text("user work\n")
+    baseline = delivery.capture_dirty_baseline(path, ["kernel.py"])
+    assert delivery.collect(path, base, ["kernel.py"], baseline)["state"] == (
+        "INCOMPLETE"
+    )
+    (path / "kernel.py").write_text("committed task\n")
+    git("commit", "-qam", "task")
+    (path / "kernel.py").write_text("user work\n")
+    assert delivery.collect(path, base, ["kernel.py"], baseline)["state"] == (
+        "INCOMPLETE"
+    )
+
+
+def test_baseline_rejects_staged_or_untracked_files(repo):
+    path, git, _ = repo
+    (path / "new.py").write_text("untracked\n")
+    with pytest.raises(ValueError):
+        delivery.capture_dirty_baseline(path, ["new.py"])
+    (path / "kernel.py").write_text("staged\n")
+    git("add", "kernel.py")
+    with pytest.raises(ValueError):
+        delivery.capture_dirty_baseline(path, ["kernel.py"])
+
+
 def test_not_a_repo_is_error(tmp_path):
     result = subprocess.run(
         [sys.executable, str(TOOL), "--repo", str(tmp_path), "--json"],

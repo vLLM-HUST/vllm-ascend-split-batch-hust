@@ -54,6 +54,35 @@ def test_delivery_dispatch_preserves_scope_and_rc(opt, monkeypatch):
     ]
 
 
+def test_dirty_baseline_is_explicitly_forwarded(opt, monkeypatch):
+    calls = []
+    monkeypatch.setattr(opt, 'run', lambda argv, **kw: (
+        calls.append(argv) or SimpleNamespace(returncode=0)))
+    args = opt.build_parser().parse_args([
+        'delivery', '--base', 'b' * 40, '--path', 'shared.py',
+        '--dirty-baseline', '/tmp/start.json', '--check',
+    ])
+    assert opt.dispatch(args) == 0
+    assert calls[0][-3:] == ['--dirty-baseline', '/tmp/start.json', '--check']
+
+
+def test_note_omitted_body_is_not_forwarded_as_empty(opt, monkeypatch):
+    calls = []
+    monkeypatch.setattr(opt, 'run', lambda argv, **kw: (
+        calls.append(argv) or SimpleNamespace(returncode=0)))
+    args = opt.build_parser().parse_args([
+        'note', 'update', '--id', 'test_card', '--route', '028/test',
+    ])
+    opt.dispatch(args)
+    assert '--body' not in calls[-1]
+    args = opt.build_parser().parse_args([
+        'note', 'update', '--id', 'test_card', '--route', '028/test',
+        '--body', '',
+    ])
+    opt.dispatch(args)
+    assert calls[-1][-2:] == ['--body', '']
+
+
 def test_status_payload_reads_versioned_helper(opt):
     report = opt.delivery_view()
     assert report['state'] == 'UNSCOPED'
