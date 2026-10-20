@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-torch = pytest.importorskip('torch')
+torch = pytest.importorskip("torch")
 
 from vllm_ascend_split_batch import gdn_qkv_norm as api  # noqa: E402
 from vllm_ascend_split_batch.gdn_qkv_unpack.reference import (  # noqa: E402
@@ -18,7 +18,11 @@ from vllm_ascend_split_batch.gdn_qkv_unpack.reference import (  # noqa: E402
 
 def unpack(x):
     return rearrange_mixed_qkv_reference(
-        x, q_dim=1024, v_dim=2048, head_k_dim=128, head_v_dim=128,
+        x,
+        q_dim=1024,
+        v_dim=2048,
+        head_k_dim=128,
+        head_v_dim=128,
     )
 
 
@@ -27,9 +31,9 @@ def norm(x):
     return (f * torch.rsqrt((f * f).sum(-1, keepdim=True) + 1e-6)).to(x.dtype)
 
 
-@pytest.mark.parametrize('tokens', [17, 825, 1489, 1587, 2048])
-@pytest.mark.parametrize('prefix', [1, 16])
-@pytest.mark.parametrize('dtype', [torch.bfloat16, torch.float16, torch.float32])
+@pytest.mark.parametrize("tokens", [17, 825, 1489, 1587, 2048])
+@pytest.mark.parametrize("prefix", [1, 16])
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 def test_mixed_prefix_reuse_layout_and_alias(tokens, prefix, dtype):
     torch.manual_seed(0)
     x = torch.randn(tokens, 4096, dtype=dtype)
@@ -47,29 +51,30 @@ def test_mixed_prefix_reuse_layout_and_alias(tokens, prefix, dtype):
     for i in [0, 1]:
         torch.testing.assert_close(norm(reused[i]), norm(again[i]), rtol=0, atol=0)
         assert norm(reused[i]).untyped_storage().data_ptr() != (
-            reused[i].untyped_storage().data_ptr())
+            reused[i].untyped_storage().data_ptr()
+        )
     for new, old in zip(full, suffix, strict=True):
         torch.testing.assert_close(new[:, prefix:], old, rtol=0, atol=0)
     torch.testing.assert_close(x, saved, rtol=0, atol=0)
 
 
 def test_wrapper_mapping_and_output_lifetime(monkeypatch):
-    monkeypatch.setattr(api, 'validate', lambda x: None)
+    monkeypatch.setattr(api, "validate", lambda x: None)
 
     def launch(x, flat):
         q, k, v = unpack(x)
-        for dst, src in zip(api.output_views(flat), (norm(q), norm(k), v),
-                            strict=True):
+        for dst, src in zip(api.output_views(flat), (norm(q), norm(k), v), strict=True):
             dst.copy_(src)
 
-    monkeypatch.setattr(api, 'launch_into', launch)
+    monkeypatch.setattr(api, "launch_into", launch)
     x = torch.randn(16, 4096, dtype=torch.bfloat16)
     before = x.clone()
     first = api.unpack_norm(x)
     saved = [t.clone() for t in first]
     second = api.unpack_norm(torch.zeros_like(x))
     assert first[0].untyped_storage().data_ptr() != (
-        second[0].untyped_storage().data_ptr())
+        second[0].untyped_storage().data_ptr()
+    )
     assert len({t.untyped_storage().data_ptr() for t in first}) == 1
     assert [t.storage_offset() for t in first] == [0, 16384, 32768]
     for a, b in zip(first, saved, strict=True):
@@ -77,37 +82,49 @@ def test_wrapper_mapping_and_output_lifetime(monkeypatch):
     torch.testing.assert_close(x, before, rtol=0, atol=0)
 
 
-@pytest.mark.parametrize('change', [
-    {'shape': (17, 4096)}, {'stride': lambda: (6176, 1)},
-    {'dtype': torch.float32}, {'requires_grad': True},
-    {'device': SimpleNamespace(type='cpu')},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"shape": (17, 4096)},
+        {"stride": lambda: (6176, 1)},
+        {"dtype": torch.float32},
+        {"requires_grad": True},
+        {"device": SimpleNamespace(type="cpu")},
+    ],
+)
 def test_guard_rejects_unsupported(change):
-    attrs = dict(shape=(16, 4096), stride=lambda: (4096, 1),
-                 dtype=torch.bfloat16, requires_grad=False,
-                 device=SimpleNamespace(type='npu'))
+    attrs = dict(
+        shape=(16, 4096),
+        stride=lambda: (4096, 1),
+        dtype=torch.bfloat16,
+        requires_grad=False,
+        device=SimpleNamespace(type="npu"),
+    )
     attrs.update(change)
     with pytest.raises(ValueError):
         api.validate(SimpleNamespace(**attrs))
 
 
 def test_import_has_no_device_or_triton_side_effect():
-    script = '''
+    script = """
 import sys
 import vllm_ascend_split_batch.gdn_qkv_norm
 assert 'triton' not in sys.modules
 assert 'torch_npu' not in sys.modules
 assert 'torch' not in sys.modules
-'''
-    p = subprocess.run([sys.executable, '-c', script], capture_output=True,
-                       text=True, timeout=30)
+"""
+    p = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30
+    )
     assert p.returncode == 0, p.stderr
 
 
-@pytest.mark.skipif(os.environ.get('GDN_TEST_OFFLINE_COMPILE') != '1',
-                    reason='requires Ascend offline compiler')
+@pytest.mark.skipif(
+    os.environ.get("GDN_TEST_OFFLINE_COMPILE") != "1",
+    reason="requires Ascend offline compiler",
+)
 def test_fused_kernel_offline_compile(tmp_path):
-    script = '''
+    script = """
 import sys
 from pathlib import Path
 import triton
@@ -122,7 +139,11 @@ ir = compiled.asm['ttadapter']
 Path(sys.argv[1]).write_text(ir)
 assert 'sync_block_lock' not in ir
 assert 'arith.cmpf' not in ir
-'''
-    p = subprocess.run([sys.executable, '-c', script, str(tmp_path / 'fused.ir')],
-                       capture_output=True, text=True, timeout=120)
+"""
+    p = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path / "fused.ir")],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
     assert p.returncode == 0, p.stdout + p.stderr

@@ -167,7 +167,7 @@ def test_light_profile_is_bounded_and_minimal() -> None:
     assert "LADDER_PROFILE_MAX_ITERS:-32" in body
     assert "--profiler-config.max_iterations" in body
     assert "--profiler-config.ignore_frontend=true" in body
-    assert 'LADDER_PROFILE_WITH_STACK:-false' in body
+    assert "LADDER_PROFILE_WITH_STACK:-false" in body
     assert "--profiler-config.torch_profiler_with_memory=false" in body
 
 

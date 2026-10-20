@@ -15,7 +15,7 @@ import pytest
 @pytest.mark.parametrize("dtype", ["bf16", "fp16", "fp32"])
 @pytest.mark.parametrize("single_tile", [False, True])
 def test_boundary_mask_lowers_to_bounded_copy(dtype, single_tile, tmp_path):
-    script = r'''
+    script = r"""
 import sys
 from pathlib import Path
 import triton
@@ -47,10 +47,16 @@ assert "memref.subview" in ir
 assert "tensor.extract_slice" in ir
 assert "arith.minsi" in ir
 assert "arith.maxsi" in ir
-'''
+"""
     result = subprocess.run(
-        [sys.executable, "-c", script, dtype, str(single_tile),
-         str(tmp_path / "kernel.ttadapter")],
+        [
+            sys.executable,
+            "-c",
+            script,
+            dtype,
+            str(single_tile),
+            str(tmp_path / "kernel.ttadapter"),
+        ],
         capture_output=True,
         text=True,
         timeout=120,
@@ -61,11 +67,15 @@ assert "arith.maxsi" in ir
 def test_boundary_mask_remains_integer():
     import ast
 
-    path = (Path(__file__).resolve().parents[1] / "src" /
-            "vllm_ascend_split_batch/gdn_qkv_unpack/kernels.py")
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "vllm_ascend_split_batch/gdn_qkv_unpack/kernels.py"
+    )
     tree = ast.parse(path.read_text())
     masks = [
-        node.value for node in ast.walk(tree)
+        node.value
+        for node in ast.walk(tree)
         if isinstance(node, ast.Assign)
         and any(isinstance(t, ast.Name) and t.id == "mask" for t in node.targets)
     ]
