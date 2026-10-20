@@ -6,13 +6,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from _deployment import deployed_file
 
 OPT = Path("/root/opt-ops/scripts/opt.py")
 
 
 @pytest.fixture
 def opt(monkeypatch):
-    if not OPT.exists():
+    if not deployed_file(OPT):
         pytest.skip("opt-ops deployment not installed")
     monkeypatch.syspath_prepend(str(OPT.parent))
     spec = importlib.util.spec_from_file_location("opt_delivery_test", OPT)

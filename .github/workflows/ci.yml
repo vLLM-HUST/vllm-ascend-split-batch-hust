@@ -14,6 +14,12 @@ on:
     branches: [main]
   pull_request:
 
+# The red-leg diagnostic step force-pushes `ci-diag-<python>` branches.  The
+# default token is read-only, so that push failed (exit 128) on every red leg of
+# runs 39436494902/39437446481/39437993180 and masked the leg's own verdict.
+permissions:
+  contents: write
+
 jobs:
   package:
     strategy:
@@ -43,7 +49,7 @@ jobs:
           path: pytest-results-${{ matrix.python }}.xml
           if-no-files-found: ignore
       - name: push pytest diagnostics branch
-        if: failure()
+        if: failure() && github.event_name == 'push'
         run: |
           set -eu
           git config user.email "ci-bot@vllm-hust.invalid"
