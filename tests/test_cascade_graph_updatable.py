@@ -36,7 +36,14 @@ import logging
 import _device_stack  # noqa: F401  -- device stack present, or skip
 import pytest
 
-from vllm_ascend_split_batch import cascade_graph_plugin as gp
+try:
+    from vllm_ascend_split_batch import cascade_graph_plugin as gp
+except Exception as e:  # noqa: BLE001  -- device-less stacks raise non-ImportError too
+    pytest.skip(
+        reason=f"needs the full vllm-ascend stack: {type(e).__name__}: {e}",
+        allow_module_level=True,
+    )
+    raise  # unreachable
 
 # Archived 0.25-line cascade bundle; see tests/_cascade_kernel.py.
 pytestmark = pytest.mark.legacy_kernel

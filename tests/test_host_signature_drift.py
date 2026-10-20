@@ -47,7 +47,15 @@ import pytest
 
 # Resolve the device_op <-> ops circular import exactly as the plugin's
 # ``load()`` does, otherwise importing the worker module fails.
-importlib.import_module("vllm_ascend.ops")
+try:
+    importlib.import_module("vllm_ascend.ops")
+except Exception as e:  # noqa: BLE001  -- device-less stacks raise non-ImportError too
+    pytest.skip(
+        reason=f"signature drift tests run on the NPU host with the full "
+        f"vllm-ascend stack installed: {type(e).__name__}: {e}",
+        allow_module_level=True,
+    )
+    raise  # unreachable
 
 cascade_plugin = pytest.importorskip(
     "vllm_ascend_split_batch.cascade_plugin",
