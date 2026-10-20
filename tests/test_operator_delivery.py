@@ -18,7 +18,8 @@ spec.loader.exec_module(delivery)
 def repo(tmp_path):
     def git(*args):
         return subprocess.check_output(
-            ["git", "-C", str(tmp_path), *args], text=True,
+            ["git", "-C", str(tmp_path), *args],
+            text=True,
         ).strip()
 
     git("init", "-q")
@@ -90,7 +91,8 @@ def test_cli_unscoped_is_not_successful_check(repo):
     path, _, _ = repo
     result = subprocess.run(
         [sys.executable, str(TOOL), "--repo", str(path), "--check", "--json"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 3
     assert json.loads(result.stdout)["state"] == "UNSCOPED"
@@ -169,7 +171,8 @@ def test_baseline_rejects_staged_or_untracked_files(repo):
 def test_not_a_repo_is_error(tmp_path):
     result = subprocess.run(
         [sys.executable, str(TOOL), "--repo", str(tmp_path), "--json"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 4
     assert json.loads(result.stdout)["state"] == "ERROR"

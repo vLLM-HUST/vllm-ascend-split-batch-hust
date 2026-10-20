@@ -155,8 +155,20 @@ def run_inprocess(tool, tmp_path: Path, *args: str, out_name: str = "product.jso
     return rc, doc
 
 
-SMALL = ("--device", "cpu", "--tokens", "2", "--row-strides", "4096",
-         "--iters", "2", "--repeats", "1", "--warmup", "0")
+SMALL = (
+    "--device",
+    "cpu",
+    "--tokens",
+    "2",
+    "--row-strides",
+    "4096",
+    "--iters",
+    "2",
+    "--repeats",
+    "1",
+    "--warmup",
+    "0",
+)
 # .py 假候选都是自包含的 fn(mixed_qkv) 契约
 PACKED = ("--candidate-arg-style", "packed")
 
@@ -164,16 +176,20 @@ PACKED = ("--candidate-arg-style", "packed")
 # ------------------------------------------------------------------ 配对调度
 def test_ab_schedule_alternates_order(tool) -> None:
     sched = tool.ab_schedule(("baseline", "candidate"), 3)
-    assert sched == [["baseline", "candidate"],
-                     ["candidate", "baseline"],
-                     ["baseline", "candidate"]]
+    assert sched == [
+        ["baseline", "candidate"],
+        ["candidate", "baseline"],
+        ["baseline", "candidate"],
+    ]
     assert tool.ab_schedule(("baseline",), 2) == [["baseline"], ["baseline"]]
 
 
 def test_timer_scope_is_explicit_event_chain(tool) -> None:
     """设备轴不是纯 kernel 时长：scope 逐字声明含 host 供给空洞的 eager 链。"""
-    assert (tool.TIMER_SCOPE_NPU
-            == "npu_event_elapsed_eager_chain_including_host_submission_gaps")
+    assert (
+        tool.TIMER_SCOPE_NPU
+        == "npu_event_elapsed_eager_chain_including_host_submission_gaps"
+    )
     row = tool.timed(lambda: None, 3, "cpu")
     assert row["timer_scope"] == tool.TIMER_SCOPE_CPU
     assert row["iters"] == 3
@@ -222,9 +238,11 @@ def test_contract_accepts_single_backing(tool) -> None:
 
 def test_contract_rejects_separate_buffers(tool) -> None:
     dims = tool.Dims()
-    outs = (torch.zeros(1, 4, 8, 128, dtype=torch.bfloat16),
-            torch.zeros(1, 4, 8, 128, dtype=torch.bfloat16),
-            torch.zeros(1, 4, 16, 128, dtype=torch.bfloat16))
+    outs = (
+        torch.zeros(1, 4, 8, 128, dtype=torch.bfloat16),
+        torch.zeros(1, 4, 8, 128, dtype=torch.bfloat16),
+        torch.zeros(1, 4, 16, 128, dtype=torch.bfloat16),
+    )
     doc = tool.output_contract(outs, 4, dims)
     assert doc["same_backing"] is False
     assert doc["ok"] is False
@@ -249,8 +267,12 @@ def test_input_specials_are_injected(tool) -> None:
     x = tool.build_input(8, dims.width, "bfloat16", 0, True, "cpu")
     flat = tool.int_view_cpu(x, "bfloat16")
     bits = tool.SPECIAL_BITS["bfloat16"]
-    for offset, name in ((0, "pos_zero"), (1, "neg_zero"), (dims.width + 2, "qnan"),
-                         (2 * dims.width + 3, "neg_qnan")):
+    for offset, name in (
+        (0, "pos_zero"),
+        (1, "neg_zero"),
+        (dims.width + 2, "qnan"),
+        (2 * dims.width + 3, "neg_qnan"),
+    ):
         assert int(flat[offset]) == tool._signed(bits[name], torch.int16)
 
 
@@ -260,10 +282,32 @@ def test_cli_ok_product_carries_shape_facts(tmp_path: Path) -> None:
     cand = write_candidate(tmp_path, "good", GOOD_CANDIDATE)
     out = tmp_path / "ok.json"
     proc = subprocess.run(
-        [sys.executable, str(TOOL), "--candidate", cand, *PACKED, "--device", "cpu",
-         "--tokens", "2,16", "--row-strides", "4096,6176", "--iters", "2",
-         "--repeats", "3", "--warmup", "0", "--out", str(out)],
-        capture_output=True, text=True, check=False, timeout=900)
+        [
+            sys.executable,
+            str(TOOL),
+            "--candidate",
+            cand,
+            *PACKED,
+            "--device",
+            "cpu",
+            "--tokens",
+            "2,16",
+            "--row-strides",
+            "4096,6176",
+            "--iters",
+            "2",
+            "--repeats",
+            "3",
+            "--warmup",
+            "0",
+            "--out",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=900,
+    )
     assert proc.returncode == 0, proc.stderr
     doc = json.loads(out.read_text(encoding="utf-8"))
 
@@ -274,16 +318,20 @@ def test_cli_ok_product_carries_shape_facts(tmp_path: Path) -> None:
     assert doc["hardware"]["device"] == "cpu"
     assert doc["fidelity"]["model"] == "Qwen3.5-35B-A3B"
     assert doc["fidelity"]["precision"]["perf"] == "bfloat16"
-    assert doc["fidelity"]["precision"]["supplement_correctness"] == ["float16",
-                                                                     "float32"]
+    assert doc["fidelity"]["precision"]["supplement_correctness"] == [
+        "float16",
+        "float32",
+    ]
     assert doc["fidelity"]["weight_format"]["do_not_infer"] == "NZ/ND"
     assert doc["caliber"]["format"]["declared"] == "ND"
     assert "890-924" in doc["goal"]["callsite"]["canonical"]
 
     # 计时口径：Event 是 eager 链时长（含 host 供给空洞），不冒充 FULL/L4
     timing = doc["caliber"]["timing"]
-    assert timing["timer_scope"]["npu"] == \
-        "npu_event_elapsed_eager_chain_including_host_submission_gaps"
+    assert (
+        timing["timer_scope"]["npu"]
+        == "npu_event_elapsed_eager_chain_including_host_submission_gaps"
+    )
     assert timing["device_available"] is False
     assert "FULL/图模式时长" in timing["does_not_measure"]
     assert any("eager" in note for note in doc["not_claimed"])
@@ -302,8 +350,10 @@ def test_cli_ok_product_carries_shape_facts(tmp_path: Path) -> None:
     assert code_cand["package"]["inside_repo"] is False
     assert code_cand["package"]["files"] == {}
 
-    labels = {layout["row_stride"]: layout["label"]
-              for layout in doc["caliber"]["input_layouts"]}
+    labels = {
+        layout["row_stride"]: layout["label"]
+        for layout in doc["caliber"]["input_layouts"]
+    }
     assert labels == {4096: "measured-layout", 6176: "synthetic-supplementary"}
     scope = doc["shape_scope"]
     assert scope["measured"] == ["T16-rs4096"]
@@ -327,12 +377,16 @@ def test_cli_ok_product_carries_shape_facts(tmp_path: Path) -> None:
 
     perf = c16["perf"]
     assert perf["dtype"] == "bfloat16"
-    assert perf["timer_scope"] == \
-        "host_wall_perf_counter_elapsed_including_host_submission"
+    assert (
+        perf["timer_scope"]
+        == "host_wall_perf_counter_elapsed_including_host_submission"
+    )
     assert perf["shape_role"] == "measured-shape"
-    assert perf["schedule"] == [["baseline", "candidate"],
-                                ["candidate", "baseline"],
-                                ["baseline", "candidate"]]
+    assert perf["schedule"] == [
+        ["baseline", "candidate"],
+        ["candidate", "baseline"],
+        ["baseline", "candidate"],
+    ]
     for arm in ("baseline", "candidate"):
         assert len(perf["arms"][arm]["runs"]) == 3
     assert len(perf["paired_delta_pct"]) == 3
@@ -342,8 +396,9 @@ def test_cli_ok_product_carries_shape_facts(tmp_path: Path) -> None:
 
 
 def test_cli_baseline_only_declares_no_ab(tool, tmp_path: Path) -> None:
-    rc, doc = run_inprocess(tool, tmp_path, "--baseline-only", *SMALL,
-                            out_name="base.json")
+    rc, doc = run_inprocess(
+        tool, tmp_path, "--baseline-only", *SMALL, out_name="base.json"
+    )
     assert rc == 0
     assert doc["status"] == "baseline-only"
     assert doc["arms"]["requested"] == ["baseline"]
@@ -353,8 +408,14 @@ def test_cli_baseline_only_declares_no_ab(tool, tmp_path: Path) -> None:
 
 
 def test_cli_candidate_missing_is_rc1_without_numbers(tool, tmp_path: Path) -> None:
-    rc, doc = run_inprocess(tool, tmp_path, "--candidate", "no_such_module_xyz:unpack",
-                            *SMALL, out_name="missing.json")
+    rc, doc = run_inprocess(
+        tool,
+        tmp_path,
+        "--candidate",
+        "no_such_module_xyz:unpack",
+        *SMALL,
+        out_name="missing.json",
+    )
     assert rc == 1
     assert doc["status"] == "candidate-missing"
     assert doc["cells"] == []
@@ -363,8 +424,9 @@ def test_cli_candidate_missing_is_rc1_without_numbers(tool, tmp_path: Path) -> N
 
 def test_cli_contract_violation_is_rc1(tool, tmp_path: Path) -> None:
     cand = write_candidate(tmp_path, "sep", SEPARATE_BUFFERS_CANDIDATE)
-    rc, doc = run_inprocess(tool, tmp_path, "--candidate", cand, *PACKED, *SMALL,
-                            out_name="sep.json")
+    rc, doc = run_inprocess(
+        tool, tmp_path, "--candidate", cand, *PACKED, *SMALL, out_name="sep.json"
+    )
     assert rc == 1
     assert doc["status"] == "failed"
     entry = doc["cells"][0]["numeric"]["bfloat16"]
@@ -374,8 +436,9 @@ def test_cli_contract_violation_is_rc1(tool, tmp_path: Path) -> None:
 
 def test_cli_value_mismatch_is_rc1(tool, tmp_path: Path) -> None:
     cand = write_candidate(tmp_path, "swap", SWAPPED_QKV_CANDIDATE)
-    rc, doc = run_inprocess(tool, tmp_path, "--candidate", cand, *PACKED, *SMALL,
-                            out_name="swap.json")
+    rc, doc = run_inprocess(
+        tool, tmp_path, "--candidate", cand, *PACKED, *SMALL, out_name="swap.json"
+    )
     assert rc == 1
     entry = doc["cells"][0]["numeric"]["bfloat16"]
     assert entry["candidate_vs_baseline"]["ok"] is False
@@ -384,11 +447,26 @@ def test_cli_value_mismatch_is_rc1(tool, tmp_path: Path) -> None:
 
 def test_cli_candidate_error_stops_without_retry(tool, tmp_path: Path) -> None:
     cand = write_candidate(tmp_path, "raise", RAISING_CANDIDATE)
-    rc, doc = run_inprocess(tool, tmp_path, "--candidate", cand, *PACKED,
-                            "--device", "cpu", "--tokens", "2,4",
-                            "--row-strides", "4096,6176",
-                            "--iters", "1", "--repeats", "1", "--warmup", "0",
-                            out_name="raise.json")
+    rc, doc = run_inprocess(
+        tool,
+        tmp_path,
+        "--candidate",
+        cand,
+        *PACKED,
+        "--device",
+        "cpu",
+        "--tokens",
+        "2,4",
+        "--row-strides",
+        "4096,6176",
+        "--iters",
+        "1",
+        "--repeats",
+        "1",
+        "--warmup",
+        "0",
+        out_name="raise.json",
+    )
     assert rc == 1
     assert doc["status"] == "failed"
     assert len(doc["cells"]) == 1, "失败必须立即停（不换配置重试）"
@@ -400,14 +478,25 @@ def test_cli_dims_arg_style_is_supported(tool, tmp_path: Path) -> None:
     body = GOOD_CANDIDATE.replace(
         "def unpack_mixed_qkv(mixed_qkv):",
         "def unpack_mixed_qkv(mixed_qkv, q_dim=1024, k_dim=1024, v_dim=2048,\n"
-        "                     head_k_dim=128, head_v_dim=128):", 1)
+        "                     head_k_dim=128, head_v_dim=128):",
+        1,
+    )
     body = body.replace(
         "    q_dim, k_dim, v_dim, head_k, head_v = 1024, 1024, 2048, 128, 128\n",
-        "    head_k, head_v = head_k_dim, head_v_dim\n", 1)
+        "    head_k, head_v = head_k_dim, head_v_dim\n",
+        1,
+    )
     cand = write_candidate(tmp_path, "dims", body)
-    rc, doc = run_inprocess(tool, tmp_path, "--candidate", cand,
-                            "--candidate-arg-style", "dims", *SMALL,
-                            out_name="dims.json")
+    rc, doc = run_inprocess(
+        tool,
+        tmp_path,
+        "--candidate",
+        cand,
+        "--candidate-arg-style",
+        "dims",
+        *SMALL,
+        out_name="dims.json",
+    )
     assert rc == 0, doc
     assert doc["status"] == "ok"
     assert doc["cells"][0]["numeric"]["bfloat16"]["ok"] is True
@@ -415,10 +504,26 @@ def test_cli_dims_arg_style_is_supported(tool, tmp_path: Path) -> None:
 
 # ------------------------------------------------------------------ 预算
 def test_cli_budget_stop_is_time_limited(tool, tmp_path: Path) -> None:
-    rc, doc = run_inprocess(tool, tmp_path, "--baseline-only", "--device", "cpu",
-                            "--tokens", "2", "--row-strides", "4096", "--iters", "1",
-                            "--repeats", "1", "--warmup", "0",
-                            "--wall-budget-min", "0.0001", out_name="budget.json")
+    rc, doc = run_inprocess(
+        tool,
+        tmp_path,
+        "--baseline-only",
+        "--device",
+        "cpu",
+        "--tokens",
+        "2",
+        "--row-strides",
+        "4096",
+        "--iters",
+        "1",
+        "--repeats",
+        "1",
+        "--warmup",
+        "0",
+        "--wall-budget-min",
+        "0.0001",
+        out_name="budget.json",
+    )
     assert rc == 5
     assert doc["status"] == "time-limited"
     assert doc["budget"]["exhausted"] is True
@@ -427,15 +532,33 @@ def test_cli_budget_stop_is_time_limited(tool, tmp_path: Path) -> None:
     assert "elapsed_s" in doc["budget"]
 
 
-def test_cli_budget_stop_mid_run_keeps_only_complete_cells(tool,
-                                                           tmp_path: Path) -> None:
+def test_cli_budget_stop_mid_run_keeps_only_complete_cells(
+    tool, tmp_path: Path
+) -> None:
     """软预算只在 cell 边界生效：cell 内的编译/校验/测量绝不被截断。"""
     cand = write_candidate(tmp_path, "slow", SLOW_CANDIDATE)
-    rc, doc = run_inprocess(tool, tmp_path, "--candidate", cand, *PACKED,
-                            "--device", "cpu", "--tokens", "2,4",
-                            "--row-strides", "4096",
-                            "--iters", "1", "--repeats", "1", "--warmup", "0",
-                            "--wall-budget-min", "0.05", out_name="slow.json")
+    rc, doc = run_inprocess(
+        tool,
+        tmp_path,
+        "--candidate",
+        cand,
+        *PACKED,
+        "--device",
+        "cpu",
+        "--tokens",
+        "2,4",
+        "--row-strides",
+        "4096",
+        "--iters",
+        "1",
+        "--repeats",
+        "1",
+        "--warmup",
+        "0",
+        "--wall-budget-min",
+        "0.05",
+        out_name="slow.json",
+    )
     assert rc == 5
     assert doc["status"] == "time-limited"
     assert doc["budget"]["exhausted"] is True
@@ -448,24 +571,53 @@ def test_cli_budget_stop_mid_run_keeps_only_complete_cells(tool,
 
 
 def test_cli_usage_errors_are_rc2(tool, tmp_path: Path) -> None:
-    rc, doc = run_inprocess(tool, tmp_path, "--baseline-only", "--device", "cpu",
-                            "--tokens", "0", "--iters", "1", "--repeats", "1",
-                            "--warmup", "0", out_name="u1.json")
+    rc, doc = run_inprocess(
+        tool,
+        tmp_path,
+        "--baseline-only",
+        "--device",
+        "cpu",
+        "--tokens",
+        "0",
+        "--iters",
+        "1",
+        "--repeats",
+        "1",
+        "--warmup",
+        "0",
+        out_name="u1.json",
+    )
     assert rc == 2 and doc is None
-    rc, doc = run_inprocess(tool, tmp_path, "--baseline-only", "--device", "cpu",
-                            "--tokens", "2", "--row-strides", "1024",
-                            "--iters", "1", "--repeats", "1", "--warmup", "0",
-                            out_name="u2.json")
+    rc, doc = run_inprocess(
+        tool,
+        tmp_path,
+        "--baseline-only",
+        "--device",
+        "cpu",
+        "--tokens",
+        "2",
+        "--row-strides",
+        "1024",
+        "--iters",
+        "1",
+        "--repeats",
+        "1",
+        "--warmup",
+        "0",
+        out_name="u2.json",
+    )
     assert rc == 2 and doc is None
 
 
 def test_default_candidate_wiring_resolves_on_cpu(tool) -> None:
     """默认候选指向仓内单遍实现；解析（不调用）在 CPU 上必须成立且记录来源 sha。"""
-    pytest.importorskip("vllm_ascend_split_batch.gdn_qkv_unpack",
-                        reason="候选实现包尚未落地")
+    pytest.importorskip(
+        "vllm_ascend_split_batch.gdn_qkv_unpack", reason="候选实现包尚未落地"
+    )
     assert tool.DEFAULT_CANDIDATE.endswith(":rearrange_mixed_qkv")
-    fn, info = tool.resolve_candidate(tool.DEFAULT_CANDIDATE,
-                                      tool.DEFAULT_CANDIDATE_ARG_STYLE, tool.Dims())
+    fn, info = tool.resolve_candidate(
+        tool.DEFAULT_CANDIDATE, tool.DEFAULT_CANDIDATE_ARG_STYLE, tool.Dims()
+    )
     assert callable(fn)
     assert info["callable_module_file"].endswith("gdn_qkv_unpack/api.py")
     assert info["module_file"].endswith("gdn_qkv_unpack/__init__.py")
@@ -473,10 +625,12 @@ def test_default_candidate_wiring_resolves_on_cpu(tool) -> None:
 
 def test_code_provenance_hashes_whole_candidate_package(tool) -> None:
     """溯源必须覆盖候选包全部 .py（含 kernel），且确认路径属本仓。"""
-    pytest.importorskip("vllm_ascend_split_batch.gdn_qkv_unpack",
-                        reason="候选实现包尚未落地")
-    _, info = tool.resolve_candidate(tool.DEFAULT_CANDIDATE,
-                                     tool.DEFAULT_CANDIDATE_ARG_STYLE, tool.Dims())
+    pytest.importorskip(
+        "vllm_ascend_split_batch.gdn_qkv_unpack", reason="候选实现包尚未落地"
+    )
+    _, info = tool.resolve_candidate(
+        tool.DEFAULT_CANDIDATE, tool.DEFAULT_CANDIDATE_ARG_STYLE, tool.Dims()
+    )
     prov = tool.code_provenance(info)
     doc = prov["candidate"]
     assert doc["inside_repo"] is True and doc["callable_inside_repo"] is True
@@ -492,8 +646,9 @@ def test_code_provenance_hashes_whole_candidate_package(tool) -> None:
     }
     for rel, digest in files.items():
         assert rel.endswith(".py") and len(digest) == 64
-    assert files["src/vllm_ascend_split_batch/gdn_qkv_unpack/kernels.py"] == \
-        tool.sha256_file(f"{pkg['dir']}/kernels.py")
+    assert files[
+        "src/vllm_ascend_split_batch/gdn_qkv_unpack/kernels.py"
+    ] == tool.sha256_file(f"{pkg['dir']}/kernels.py")
 
 
 # ------------------------------------------------------------------ 派发接线
@@ -503,7 +658,12 @@ def test_ladder_dispatches_gdn_qkv_unpack() -> None:
     assert "bench_gdn_qkv_unpack.py" in body
     # 其余算子仍走 bench-l0.py（行为不变）
     assert '"$PY" "$SCRIPTS/bench-l0.py" --op "$op" "$@"' in body
-    proc = subprocess.run(["bash", str(LADDER), "l0", "GdnQkvUnpack", "--help"],
-                          capture_output=True, text=True, check=False, timeout=300)
+    proc = subprocess.run(
+        ["bash", str(LADDER), "l0", "GdnQkvUnpack", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
     assert proc.returncode == 0, proc.stderr
     assert "bench_gdn_qkv_unpack" in proc.stdout

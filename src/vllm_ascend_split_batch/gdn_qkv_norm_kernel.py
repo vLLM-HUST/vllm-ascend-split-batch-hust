@@ -19,10 +19,8 @@ def unpack_norm_kernel(X, Y):
         x = tl.load(X + token * 4096 + segment * 1024 + offset)
         xf = x.to(tl.float32)
         norm = tl.rsqrt(tl.sum(xf * xf, 1) + 1.0e-6)
-        tl.store(Y + segment * 16384 + token * 1024 + offset,
-                 xf * norm[:, None])
+        tl.store(Y + segment * 16384 + token * 1024 + offset, xf * norm[:, None])
     else:
         v_offset = tl.arange(0, 2048)
         value = tl.load(X + token * 4096 + 2048 + v_offset)
         tl.store(Y + 32768 + token * 2048 + v_offset, value)
-

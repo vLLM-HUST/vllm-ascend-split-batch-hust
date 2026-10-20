@@ -157,9 +157,7 @@ def test_patch_applies_and_reverts(patched_text, tmp_path):
     target.write_bytes(HOST_ORIG.read_bytes())
     orig_sha = _sha(target.read_text(encoding="utf-8"))
 
-    applied = subprocess.run(
-        ["patch", "-s", str(target), str(PATCH_DIFF)], check=False
-    )
+    applied = subprocess.run(["patch", "-s", str(target), str(PATCH_DIFF)], check=False)
     assert applied.returncode == 0, applied.stderr
     applied_text = target.read_text(encoding="utf-8")
     assert _sha(applied_text) == _meta()["hashes"]["patched_sha256"]
@@ -228,13 +226,9 @@ def test_tuning_kwargs_zero_diff_and_fail_fast(helper_ns, monkeypatch):
         helper_ns["_hust_w1r_tuning_kwargs"]()
 
 
-def test_dump_disabled_returns_before_any_shape_read(
-    helper_ns, monkeypatch, tmp_path
-):
+def test_dump_disabled_returns_before_any_shape_read(helper_ns, monkeypatch, tmp_path):
     monkeypatch.delenv("VLLM_HUST_GMM_COUNTS_DUMP", raising=False)
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     result = helper_ns["_hust_w1r_maybe_dump"](
         ExplodingShapeTensor([128, 2048]),
         ExplodingShapeTensor([256, 2048, 512]),
@@ -255,9 +249,7 @@ def test_dump_eager_sample_schema(helper_ns, monkeypatch, tmp_path):
     monkeypatch.setenv(
         "VLLM_HUST_LOAD_CALIBER_ID", "mmlu-pro-gdn-high-concurrency-longctx"
     )
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     helper_ns["_hust_w1r_capture_state"] = lambda: False
     counts = [1] * 64 + [0] * 192
     helper_ns["_hust_w1r_maybe_dump"](
@@ -288,9 +280,7 @@ def test_dump_cumsum_group_list_is_normalized(helper_ns, monkeypatch, tmp_path):
     out = tmp_path / "dump.jsonl"
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP", str(out))
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP_MAX_PER_KEY", "1")
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     helper_ns["_hust_w1r_capture_state"] = lambda: False
     # 4 experts, 10 tokens: bounds 3,7,7,10 -> counts 3,4,0,3
     helper_ns["_hust_w1r_maybe_dump"](
@@ -314,9 +304,7 @@ def test_dump_weight_list_and_need_trans(helper_ns, monkeypatch, tmp_path):
     out = tmp_path / "dump.jsonl"
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP", str(out))
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP_MAX_PER_KEY", "2")
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     helper_ns["_hust_w1r_capture_state"] = lambda: False
     # need_trans=True -> weight laid out [E, N, K] = [256, 512, 2048]
     helper_ns["_hust_w1r_maybe_dump"](
@@ -340,9 +328,7 @@ def test_dump_weight_list_of_2d_experts(helper_ns, monkeypatch, tmp_path):
     out = tmp_path / "dump.jsonl"
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP", str(out))
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP_MAX_PER_KEY", "1")
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     helper_ns["_hust_w1r_capture_state"] = lambda: False
     per_expert = [FakeTensor([2048, 512]) for _ in range(4)]
     helper_ns["_hust_w1r_maybe_dump"](
@@ -368,9 +354,7 @@ def test_dump_unsupported_group_list_type_keeps_raw_only(
     out = tmp_path / "dump.jsonl"
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP", str(out))
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP_MAX_PER_KEY", "1")
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     helper_ns["_hust_w1r_capture_state"] = lambda: False
     helper_ns["_hust_w1r_maybe_dump"](
         FakeTensor([8, 2048]),
@@ -394,9 +378,7 @@ def test_dump_skips_inside_capture_without_device_read(
     """F2: inside capture the hook must not touch the device tensor."""
     out = tmp_path / "dump.jsonl"
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP", str(out))
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     helper_ns["_hust_w1r_capture_state"] = lambda: True
     group_list = FakeTensor([256], [1] * 128 + [0] * 128)
     helper_ns["_hust_w1r_maybe_dump"](
@@ -414,14 +396,10 @@ def test_dump_skips_inside_capture_without_device_read(
     assert sample["counts"] is None
 
 
-def test_dump_unknown_capture_state_also_skips(
-    helper_ns, monkeypatch, tmp_path
-):
+def test_dump_unknown_capture_state_also_skips(helper_ns, monkeypatch, tmp_path):
     out = tmp_path / "dump.jsonl"
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP", str(out))
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     helper_ns["_hust_w1r_capture_state"] = lambda: None
     group_list = FakeTensor([256], [1] * 128 + [0] * 128)
     helper_ns["_hust_w1r_maybe_dump"](
@@ -446,9 +424,7 @@ def test_dump_warns_once_and_only_counts_successful_writes(
     target = tmp_path / "sub" / "dump.jsonl"
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP", str(target))
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP_MAX_PER_KEY", "1")
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     helper_ns["_hust_w1r_capture_state"] = lambda: False
     state = helper_ns["_HUST_W1R_STATE"]
     dump = helper_ns["_hust_w1r_maybe_dump"]
@@ -509,16 +485,12 @@ def test_dump_warns_once_and_only_counts_successful_writes(
 def test_dump_per_rank_path(helper_ns, monkeypatch, tmp_path):
     monkeypatch.setenv("RANK", "1")
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP", str(tmp_path / "d.jsonl"))
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     assert helper_ns["_hust_w1r_dump_path"]().endswith("d.jsonl.rank1")
 
     template = tmp_path / "d-{rank}.jsonl"
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP", str(template))
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     assert helper_ns["_hust_w1r_dump_path"]().endswith("d-1.jsonl")
 
 
@@ -526,9 +498,7 @@ def test_dump_creates_parent_directory(helper_ns, monkeypatch, tmp_path):
     nested = tmp_path / "a" / "b" / "dump.jsonl"
     monkeypatch.setenv("VLLM_HUST_GMM_COUNTS_DUMP", str(nested))
     monkeypatch.delenv("RANK", raising=False)
-    helper_ns["_HUST_W1R_STATE"].update(
-        {"dump_path": None, "dump_path_ready": False}
-    )
+    helper_ns["_HUST_W1R_STATE"].update({"dump_path": None, "dump_path_ready": False})
     assert helper_ns["_hust_w1r_dump_path"]() == str(nested)
     assert nested.parent.is_dir()
 

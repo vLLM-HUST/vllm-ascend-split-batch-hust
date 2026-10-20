@@ -26,12 +26,19 @@ def graph_boundary(graph) -> dict:
 
 def core_calls(source: str) -> dict:
     tree = ast.parse(source)
-    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef)
-               and n.name == "AscendGatedDeltaNetAttention")
-    core = next(n for n in cls.body if isinstance(n, ast.FunctionDef)
-                and n.name == "_forward_core")
-    calls = sorted({ast.unparse(n.func) for n in ast.walk(core)
-                    if isinstance(n, ast.Call)})
+    cls = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.ClassDef) and n.name == "AscendGatedDeltaNetAttention"
+    )
+    core = next(
+        n
+        for n in cls.body
+        if isinstance(n, ast.FunctionDef) and n.name == "_forward_core"
+    )
+    calls = sorted(
+        {ast.unparse(n.func) for n in ast.walk(core) if isinstance(n, ast.Call)}
+    )
     return {
         "core_line": core.lineno,
         "calls": calls,
@@ -67,13 +74,16 @@ def probe() -> dict:
     source = Path(ascend.origin).parent / "ops/gdn.py"
     return {
         "schema": "gdn-registration-probe.v1",
-        "versions": {name: version(name) for name in
-                     ("torch", "torch-npu", "vllm", "vllm-ascend")},
+        "versions": {
+            name: version(name)
+            for name in ("torch", "torch-npu", "vllm", "vllm-ascend")
+        },
         "apis": {
             "register_op": str(inspect.signature(register_op)),
             "register_impl": str(inspect.signature(IrOp.register_impl)),
-            "register_replacement": str(inspect.signature(
-                npugraph_ex.register_replacement)),
+            "register_replacement": str(
+                inspect.signature(npugraph_ex.register_replacement)
+            ),
             "register_oot": str(inspect.signature(PluggableLayer.register_oot)),
         },
         "ir_ops": sorted(IrOp.registry),

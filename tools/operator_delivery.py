@@ -22,7 +22,9 @@ CONTRACT = {
 def git(repo, *args):
     result = subprocess.run(
         ["git", "--no-optional-locks", "-C", str(repo), *args],
-        capture_output=True, text=True, timeout=15,
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
     if result.returncode:
         raise ValueError(result.stderr.strip() or "git command failed")
@@ -51,29 +53,37 @@ def capture_dirty_baseline(repo, paths):
         if git(repo, "status", "--porcelain=v1", "--", literal) != " M " + path:
             raise ValueError("baseline accepts only unstaged modified tracked files")
         file = repo / path
-        if (not file.is_file() or file.is_symlink()
-                or file.resolve() != file.absolute()):
+        if not file.is_file() or file.is_symlink() or file.resolve() != file.absolute():
             raise ValueError("baseline requires regular non-symlink files")
         files[path] = {
             "content": base64.b64encode(file.read_bytes()).decode("ascii"),
             "mode": file.stat().st_mode & 0o777,
         }
-    return {"schema": "operator-dirty-baseline.v1", "repo": str(repo),
-            "base": git(repo, "rev-parse", "HEAD"), "files": files}
+    return {
+        "schema": "operator-dirty-baseline.v1",
+        "repo": str(repo),
+        "base": git(repo, "rev-parse", "HEAD"),
+        "files": files,
+    }
 
 
 def preserved_dirty(repo, path, baseline):
     entry = baseline.get("files", {}).get(path)
     file = repo / path
-    if (not entry or not file.is_file() or file.is_symlink()
-            or file.resolve() != file.absolute()
-            or file.stat().st_mode & 0o777 != entry["mode"]):
+    if (
+        not entry
+        or not file.is_file()
+        or file.is_symlink()
+        or file.resolve() != file.absolute()
+        or file.stat().st_mode & 0o777 != entry["mode"]
+    ):
         return False
     literal = ":(literal)" + path
     if git(repo, "status", "--porcelain=v1", "--", literal) != " M " + path:
         return False
-    trees = [git(repo, "ls-tree", rev, "--", literal)
-             for rev in (baseline["base"], "HEAD")]
+    trees = [
+        git(repo, "ls-tree", rev, "--", literal) for rev in (baseline["base"], "HEAD")
+    ]
     if not all(trees) or trees[0].split()[0] != trees[1].split()[0]:
         return False
     with tempfile.TemporaryDirectory(prefix="delivery-merge-") as tmp:
@@ -81,13 +91,16 @@ def preserved_dirty(repo, path, baseline):
         for dest, rev in zip(paths[:2], ("HEAD", baseline["base"]), strict=True):
             result = subprocess.run(
                 ["git", "-C", str(repo), "show", f"{rev}:{path}"],
-                capture_output=True, timeout=15, check=True,
+                capture_output=True,
+                timeout=15,
+                check=True,
             )
             dest.write_bytes(result.stdout)
         paths[2].write_bytes(base64.b64decode(entry["content"], validate=True))
         merged = subprocess.run(
             ["git", "merge-file", "-p", *map(str, paths)],
-            capture_output=True, timeout=15,
+            capture_output=True,
+            timeout=15,
         )
     return merged.returncode == 0 and merged.stdout == file.read_bytes()
 
@@ -96,12 +109,17 @@ def collect(repo=REPO, base=None, paths=(), dirty_baseline=None):
     repo = Path(repo).resolve()
     validate_scope(repo, paths)
     report = {
-        "schema": "operator-delivery.v1", "repo": str(repo),
+        "schema": "operator-delivery.v1",
+        "repo": str(repo),
         "branch": git(repo, "branch", "--show-current"),
-        "head": git(repo, "rev-parse", "HEAD"), "base": base,
-        "paths": list(paths), "contract": CONTRACT,
-        "state": "UNSCOPED", "acceptance": "NOT_CHECKED",
-        "remote": "NOT_VERIFIED", "checks": [],
+        "head": git(repo, "rev-parse", "HEAD"),
+        "base": base,
+        "paths": list(paths),
+        "contract": CONTRACT,
+        "state": "UNSCOPED",
+        "acceptance": "NOT_CHECKED",
+        "remote": "NOT_VERIFIED",
+        "checks": [],
         "next_action": "记录起点 HEAD 和本轮路径；收尾用 opt delivery --check 核验",
     }
     if not base or not paths:
@@ -110,28 +128,41 @@ def collect(repo=REPO, base=None, paths=(), dirty_baseline=None):
     git(repo, "merge-base", "--is-ancestor", base, "HEAD")
     report["base"] = base
     if dirty_baseline is not None:
-        if (not isinstance(dirty_baseline, dict)
-                or dirty_baseline.get("schema") != "operator-dirty-baseline.v1"
-                or dirty_baseline.get("repo") != str(repo)
-                or dirty_baseline.get("base") != base
-                or not isinstance(dirty_baseline.get("files"), dict)):
+        if (
+            not isinstance(dirty_baseline, dict)
+            or dirty_baseline.get("schema") != "operator-dirty-baseline.v1"
+            or dirty_baseline.get("repo") != str(repo)
+            or dirty_baseline.get("base") != base
+            or not isinstance(dirty_baseline.get("files"), dict)
+        ):
             raise ValueError("dirty baseline must match repository and starting HEAD")
         validate_scope(repo, dirty_baseline["files"])
     for path in paths:
         literal = ":(literal)" + path
         dirty = bool(git(repo, "status", "--porcelain=v1", "--", literal))
         changed = bool(git(repo, "diff", "--name-only", base, "HEAD", "--", literal))
-        preserved = (dirty and dirty_baseline is not None
-                     and preserved_dirty(repo, path, dirty_baseline))
-        report["checks"].append({"path": path, "dirty": dirty,
-                                 "preexisting_dirty_preserved": preserved,
-                                 "changed_since_base": changed})
-    committed = all((not c["dirty"] or c["preexisting_dirty_preserved"])
-                    and c["changed_since_base"] for c in report["checks"])
+        preserved = (
+            dirty
+            and dirty_baseline is not None
+            and preserved_dirty(repo, path, dirty_baseline)
+        )
+        report["checks"].append(
+            {
+                "path": path,
+                "dirty": dirty,
+                "preexisting_dirty_preserved": preserved,
+                "changed_since_base": changed,
+            }
+        )
+    committed = all(
+        (not c["dirty"] or c["preexisting_dirty_preserved"]) and c["changed_since_base"]
+        for c in report["checks"]
+    )
     report["state"] = "COMMITTED_LOCAL" if committed else "INCOMPLETE"
     report["next_action"] = (
         "本轮路径已落本地提交；另核验测试、证据、验收状态及获授权的远端 push"
-        if committed else "核对未提交或未相对起点变更的路径；只处理本轮文件"
+        if committed
+        else "核对未提交或未相对起点变更的路径；只处理本轮文件"
     )
     return report
 
@@ -155,14 +186,27 @@ def main():
             with args.capture_dirty_baseline.open("x") as stream:
                 json.dump(baseline, stream, ensure_ascii=False, indent=2)
                 stream.write("\n")
-            print(json.dumps({"state": "BASELINE_CAPTURED",
-                              "base": baseline["base"], "paths": args.path}))
+            print(
+                json.dumps(
+                    {
+                        "state": "BASELINE_CAPTURED",
+                        "base": baseline["base"],
+                        "paths": args.path,
+                    }
+                )
+            )
             return 0
-        baseline = (json.loads(args.dirty_baseline.read_text())
-                    if args.dirty_baseline else None)
+        baseline = (
+            json.loads(args.dirty_baseline.read_text()) if args.dirty_baseline else None
+        )
         report = collect(args.repo, args.base, args.path, baseline)
-    except (ValueError, TypeError, KeyError, OSError,
-            subprocess.SubprocessError) as exc:
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+        OSError,
+        subprocess.SubprocessError,
+    ) as exc:
         print(json.dumps({"state": "ERROR", "error": str(exc)}, ensure_ascii=False))
         return 4
     if args.json:
