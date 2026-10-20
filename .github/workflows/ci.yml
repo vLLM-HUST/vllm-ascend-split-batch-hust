@@ -34,6 +34,13 @@ jobs:
       - run: ruff format --check .
       # Device- and host-dependent tests skip via tests/_device_stack.py; the
       # host-tree guards are deselected here and run on the NPU host instead.
-      - run: pytest -q -m "not host_tree"
+      - run: pytest -q -m "not host_tree" --junitxml=pytest-results-${{ matrix.python }}.xml
+      - name: upload pytest diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{ matrix.python }}
+          path: pytest-results-${{ matrix.python }}.xml
+          if-no-files-found: ignore
       - run: python -m build
       - run: vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
