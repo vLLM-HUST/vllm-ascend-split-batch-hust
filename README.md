@@ -100,11 +100,15 @@ Unset the environment variable and restart workers/recapture graphs to disable.
 instances; it does not change existing instances or captured graphs.
 
 Registration checks and remaining-plugin migration boundaries are in
-[HOST_CONTRACT.md](HOST_CONTRACT.md). The source-execution probe uses controlled
-config/platform dependencies and a stub kernel; it is not a serving or device
-validation. Results: `docs/evidence/gelu-oot-registration-20261020.json`.
-Historical kernel evidence does not validate this integration's NPU numerical,
-graph-replay or performance behavior; these gates remain pending.
+[HOST_CONTRACT.md](HOST_CONTRACT.md). Device gates (real host import, real
+constructor dispatch, kernel numeric gate, ACL graph replay bit-exactness,
+fallback delegation) are closed by `tools/probe_gelu_device.py` and
+`tests/test_npu_w31_gelu_plugin.py`; results:
+`docs/evidence/gelu-device-gate-20261020.json`. The op-level microbench in that
+evidence is directional only (the fused kernel measured slower than the host
+native chain at the probed standalone shapes), so default-off remains correct.
+Serving-level L3 + compare and light L4 remain pending; historical kernel
+evidence does not validate this integration.
 
 ## fi_sampling plugin (default-off, evidence-only)
 

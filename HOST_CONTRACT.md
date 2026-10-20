@@ -60,6 +60,9 @@ Registration and release gates are defined in `docs/release.md`.
 - Upgrade gate: verify the constructor lookup, registration duplicate guard,
   dispatch, configuration name and Ascend registration list. A future Ascend
   `GeluAndMul` provider requires re-audit, not overwrite or loader monkeypatch.
+- `tools/probe_gelu_device.py` is the on-device gate runner (real host import,
+  real registration/construction dispatch, numeric gate, ACL graph replay,
+  fallback delegation, directional L0 pair). It requires a working NPU stack.
 - `tools/probe_gelu_registration.py` executes the unmodified host class
   definitions with real CPU PyTorch, controlled config/OOT platform and a stub
   kernel. It proves the constructor → host forward → adapter path in this
