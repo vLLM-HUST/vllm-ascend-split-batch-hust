@@ -35,7 +35,8 @@
 | aot-cache-guard（AOTAutograd 缓存 guard） | 无 bundle manifest / `aot-cache-guard` | — | **默认开**（`VLLM_HUST_AOT_CACHE_GUARD=0` 关） | 验收前置修复；宿主自修后变 no-op |
 | W1R GMM `tuning_config`（**提案补丁**，非插件 entry） | 无 bundle manifest | **未发布（tier-2 proposal，未提交上游）** | `VLLM_HUST_GMM_TUNING_CONFIG`（默认关） | 只改 `apply_gmm1`/`apply_gmm2` 两处 GMM 的 `tuning_config`；承载目录 `host-proposals/W1R-gmm-tuning-config/`；**单值**（列表被拒）；未设时无设备差异、零 shape/IO/import，但每次 GMM 仍有两次早退 Python 调用（非字节等价） |
 | W1R GMM counts dump（**提案补丁**，非插件 entry） | 无 bundle manifest | **未发布（tier-2 proposal）** | `VLLM_HUST_GMM_COUNTS_DUMP=<path>`（默认关） | 只记录 group_list counts/形状/provenance，不改变输出；capture 内按 `sample_source` 跳过；**dump 产物不是计时产物**；active FULL graph 下 M=128 真实 decode counts **取不到** |
-| fi-gelu / fi-sampling | 无 bundle manifest / `fi-gelu`、`fi-sampling` | — | `VLLM_HUST_FI_GELU`、`VLLM_HUST_FI_SAMPLING` | 能力在、证据显示 e2e 收益在噪声带内，保持默认关 |
+| fi-gelu | 无 bundle manifest / `fi-gelu` | — | `VLLM_HUST_FI_GELU=1`（默认关） | 通过 `CustomOp.register_oot` 接入；CPU 注册合同可测，NPU 数值/图/性能须独立验证，不继承旧 class-patch 证据 |
+| fi-sampling | 无 bundle manifest / `fi-sampling` | — | `VLLM_HUST_FI_SAMPLING`（默认关） | 保留模块 class 替换；历史 e2e 收益在噪声带内 |
 
 ## 4. dual-pad planner 为什么不可用（不是配置问题）
 

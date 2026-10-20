@@ -259,6 +259,16 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
       且 `cascade key hit` = 0;旧宿主上出现 `updatable-replay seam absent on this host`
       且 `cascade key hit` > 0。机理与顺序约束见 [pitfalls.md](pitfalls.md) §2.4
 - [ ] `vllm.general_plugins` 加载时机未变
+- [ ] fi_gelu 注册面：`CustomOp.register_oot` 以 `GeluAndMul` 类名建键，
+      `CustomOp.__new__` 实际消费此键；Ascend 注册列表不得新增同名 provider。
+      原宿主类不变，provider 自身保留 `name="gelu_and_mul"`，验证 all/none
+      与 `+gelu_and_mul` / `-gelu_and_mul`；关闭态无重型导入、冲突不覆盖、
+      卸载仅删除自有注册。先跑 `tests/test_fi_gelu_plugin.py`，再跑
+      `tools/probe_gelu_registration.py --core <实际 core 树> --ascend <实际 ascend 树>
+      --output <新证据.json>`（设置 `VLLM_HUST_FI_GELU=1`）。后者是受控依赖下的
+      宿主类源码执行，不是正常宿主 import 或起服验收；还须在 NPU 跑
+      `tests/test_npu_w31_gelu_plugin.py`、L3 + compare 与 light L4。
+      回滚：移除 enable 环境变量并重启 worker/重捕获图；不得承诺实例热切换。
 - [ ] fi_sampling 面:`vllm_ascend.sample.sampler.AscendTopKTopPSampler` 名称与
       `forward_native(logits, generators, k, p)` 签名、`AscendSampler.__init__`
       的构造点、`vllm.envs.VLLM_BATCH_INVARIANT` 与

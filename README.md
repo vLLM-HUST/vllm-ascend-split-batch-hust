@@ -82,6 +82,30 @@ and `provenance/`, not as an executable plugin implementation.
 Claim boundaries remain in [docs/cohort-and-ownership.md](docs/cohort-and-ownership.md).
 The inert planner's speculative-decoding guards are unchanged.
 
+## fi_gelu plugin (default-off, OOT registration)
+
+`fi-gelu` uses `vllm.general_plugins` for loading and
+`CustomOp.register_oot(name="GeluAndMul")` for execution selection. Enable with
+`VLLM_HUST_FI_GELU=1` before the first activation lookup/model construction;
+host factories may cache instances. The original host class is not
+modified; its constructor selects the provider subclass for new instances.
+The provider retains the host's `gelu_and_mul` compilation configuration name.
+
+Only NPU bf16 inputs with at least two dimensions, positive even last dimension
+and `approximate="none"` use the existing exact-erf kernel API. Other inputs and
+kernel failures delegate to the host. An occupied OOT key is never overwritten;
+unavailable registration or kernel dependencies leave the host path in place.
+Unset the environment variable and restart workers/recapture graphs to disable.
+`fi_gelu_plugin.uninstall()` removes only its own registration for future
+instances; it does not change existing instances or captured graphs.
+
+Registration checks and remaining-plugin migration boundaries are in
+[HOST_CONTRACT.md](HOST_CONTRACT.md). The source-execution probe uses controlled
+config/platform dependencies and a stub kernel; it is not a serving or device
+validation. Results: `docs/evidence/gelu-oot-registration-20261020.json`.
+Historical kernel evidence does not validate this integration's NPU numerical,
+graph-replay or performance behavior; these gates remain pending.
+
 ## fi_sampling plugin (default-off, evidence-only)
 
 Entry point: `vllm.general_plugins` ->
