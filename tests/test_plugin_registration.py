@@ -55,7 +55,12 @@ def test_external_cascade_kernel_dependency_is_disconnected():
 
 
 def test_no_bundle_can_inject_cascade_or_register_its_carriers():
-    for path in (ROOT / "src").rglob("vllm-hust-extension-v0.2.json"):
+    manifests = sorted((ROOT / "src").rglob("vllm-hust-extension-v0.2.json"))
+    assert manifests, (
+        "no bundle manifests matched vllm-hust-extension-v0.2.json; the loop "
+        "below would pass vacuously -- point this guard at whatever replaced it"
+    )
+    for path in manifests:
         raw = json.loads(path.read_text())
         assert not any("CASCADE" in key for key in raw["activation"]["environment"])
         assert not any("cascade" in item["module"] for item in raw["implementation"])
