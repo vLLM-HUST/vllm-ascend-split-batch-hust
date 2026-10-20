@@ -28,7 +28,7 @@ for rank in "${ranks[@]}"; do
   out="$rank/ASCEND_PROFILER_OUTPUT"
   if ! compgen -G "$out/ascend_pytorch_profiler_*.db" >/dev/null; then
     [ ! -e "$out" ] || { echo "Partial parse retained: $out" >&2; exit 3; }
-    /root/venvs/rv1/bin/python - "$rank" <<'PY'
+    /usr/local/python3.12.13/bin/python - "$rank" <<'PY'
 import sys
 from torch_npu.profiler.profiler import analyse
 analyse(sys.argv[1], max_process_number=1)

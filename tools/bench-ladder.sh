@@ -56,7 +56,8 @@
 #     gate_fp32_full_graph_ab_1014: L2 +2.58% 3/3 对, 设备 Cast[256,2048]->0 -148ms/窗, L3 8/8。
 #     关: 显式 VLLM_HUST_GATE_FP32=0。载体(husk 插件)缺失时 fail-open, 不影响起服）
 #   - L0/评测单变量: greedy + 固定 seed; 慢命令 setsid 后台落日志
-#   - 离线 trace 解析: rv1 venv + ascend_pt 父目录口径 + ulimit -v 45G（cgroup 64G, 与 serve 错峰;
+#   - 离线 trace 解析: LADDER_PARSE_PYTHON（默认 serving python, torch_npu 自带 analyse）
+#     + ascend_pt 父目录口径 + ulimit -v 45G（cgroup 64G, 与 serve 错峰;
 #     要解析前停 serve 设 LADDER_STOP_SERVE_FOR_PARSE=1, 默认 0）
 set -uo pipefail
 
@@ -66,7 +67,7 @@ LOGS=/root/包体恢复/logs
 PY=/usr/local/python3.12.13/bin/python
 VLLM=/usr/local/python3.12.13/bin/vllm
 HARNESS_LM_EVAL=/root/venvs/harness/bin/lm_eval
-RV1_PYTHON=/root/venvs/rv1/bin/python
+PARSE_PYTHON=${LADDER_PARSE_PYTHON:-$PY}
 MODEL=${LADDER_MODEL:-/models/Qwen3.5-35B-A3B}
 # 路径兜底: 2026-10-13 实测 /models/Qwen3.5-35B-A3B 已不存在（模型在 modelscope 缓存里）,
 # 少了这条会让 serve/L1/L2/L3/L4 全部起不来, 却只报"模型找不到"。
@@ -1244,7 +1245,7 @@ PYEOF
     echo "   目录: $asc_dir"
     return 1
   fi
-  echo "ascend_pt: $asc_dir （离线解析走 rv1 venv, ascend_pt 父目录口径, ulimit -v ${LADDER_PARSE_ULIMIT_MB:-45000}M）"
+  echo "ascend_pt: $asc_dir （离线解析走 LADDER_PARSE_PYTHON（默认 serving python）, ascend_pt 父目录口径, ulimit -v ${LADDER_PARSE_ULIMIT_MB:-45000}M）"
   # 改动 6｜解析与 serve 错峰（开关默认关, 不改变既有默认行为）。
   # 开启后 stop_profile 与 analyse 之间停一次 serve, 释放 ~20G 常驻内存, 把 cgroup 64G 留给解析。
   # 归因判据与结论见交付报告; 默认关是因为「停 serve」会打断主会话的在线观测, 需人工裁决。
@@ -1259,7 +1260,7 @@ PYEOF
     # （trace 体量翻 2~4 倍）→ 提到 45G; cgroup 64G, 必须与 serve 错峰跑。
     ulimit -v $(( ${LADDER_PARSE_ULIMIT_MB:-45000} * 1000 ))
     # 路径走 argv（不插值进 Python 源码, 避免引号/空格注入）
-    "$RV1_PYTHON" - "$asc_dir" > "$parse_log" 2>&1 <<'PYEOF'
+    "$PARSE_PYTHON" - "$asc_dir" > "$parse_log" 2>&1 <<'PYEOF'
 import sys
 from torch_npu.profiler.profiler import analyse
 analyse(sys.argv[1], max_process_number=1)
