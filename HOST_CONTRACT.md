@@ -115,9 +115,11 @@ plugin-side (design note `docs/design/rope-variant-defects.md`). It rides ONLY:
 
 - `vllm.model_executor.custom_op.op_registry_oot` — the out-of-tree registry read
   by `CustomOp.__new__` (:109-128) / `PluggableLayer.__new__` (:47-66) at
-  **instantiation** time. The carrier **replaces the three rope entries**; it never
-  calls `CustomOp.register_oot` itself, because that method asserts
-  `reg_name not in op_registry_oot` (duplicate-name guard).
+  **instantiation** time. The two occupied rope entries are **replaced directly**;
+  the missing defect-① key (`Llama3RotaryEmbedding`) is **created through**
+  `CustomOp.register_oot` (duplicate-name assert = collision guard against a
+  future upstream fix), and the registry key it stamps onto the class is undone
+  so `custom_ops` keeps addressing the base `rotary_embedding` op.
 - `vllm_ascend.utils.register_ascend_customop` — **wrapped** (original first, then
   the overrides), and the wrapper is rebound in every already-imported module
   holding a direct reference, `vllm_ascend.worker.worker` included
@@ -146,7 +148,7 @@ plugin-side (design note `docs/design/rope-variant-defects.md`). It rides ONLY:
 | `AscendYaRNRotaryEmbedding.__init__` (:281-298) | `truncate: bool = False` (vLLM/HF default is `True`) | subclass changing only that default to `True` | defect ③ |
 | `register_ascend_customop` (:688) | early-returns on `_ASCEND_CUSTOMOP_IS_REIGISTERED`; registers every key at :813-814 | wrapped; overrides applied **after** the original returns; rolled back if that eager pass fails | ordering contract |
 | `worker.py:95/150` | `from vllm_ascend.utils import register_ascend_customop` + a call inside `NPUWorker.__init__` | the wrapper is rebound in this module too (an attribute patch alone would miss the live call site) | call-site rebinding |
-| `CustomOp.register_oot` (:339-351) | `assert reg_name not in op_registry_oot` | never called by the carrier (why the entries are replaced instead) | lever justification |
+| `CustomOp.register_oot` (:339-351) | `assert reg_name not in op_registry_oot` | called ONLY for the defect-① key creation (key is absent by defect); occupied keys are replaced directly because the assert refuses re-registration | lever justification |
 
 Host-upgrade checklist item: `tests/test_rope_fix_drift.py` (see
 `docs/release.md` §4). Its reverse assertions fail *by design* when upstream fixes

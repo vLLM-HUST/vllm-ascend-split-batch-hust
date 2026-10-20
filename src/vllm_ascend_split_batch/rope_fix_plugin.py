@@ -30,13 +30,18 @@ numeric evidence ``knowledge/surveys/contrast/norm-rope-act/``):
    vLLM/HF default to ``True`` -> a different cos/sin cache than host/GPU for
    the Qwen2.5-style yarn configs that do not spell ``truncate`` out.
 
-Carrier mechanism (no host source edit, no second ``register_oot``):
+Carrier mechanism (no host source edit):
 
-* ``CustomOp.register_oot`` asserts the name is still absent, so the plugin
-  must NOT register anything itself; it replaces the *entries* of
-  ``vllm.model_executor.custom_op.op_registry_oot``, which ``CustomOp.__new__``
+* The occupied rope entries of ``vllm.model_executor.custom_op.op_registry_oot``
+  are replaced directly, because ``CustomOp.register_oot``'s duplicate-name
+  assert refuses to re-register them; the registry is what ``CustomOp.__new__``
   (and ``PluggableLayer.__new__``) reads at **instantiation** time -- i.e. after
   the host's registration pass.
+* The missing defect-① key (``Llama3RotaryEmbedding``) is created through the
+  host's own ``CustomOp.register_oot``; its duplicate-name assert doubles as the
+  collision guard against a future upstream fix of defect ①, and the registry
+  key it stamps onto the class is undone so ``custom_ops`` keeps addressing the
+  base ``rotary_embedding`` op.
 * ``vllm_ascend.utils.register_ascend_customop`` is therefore *wrapped*: the
   wrapper calls the original first and only then points the three rope keys at
   the plugin subclasses, so the host's ``assert reg_name not in op_registry_oot``
@@ -407,6 +412,29 @@ def _host_registration_ran() -> bool:
     return op_registry_oot.get(KEY_BASE_ROTARY) is not None
 
 
+def _register_llama3_override(op_registry_oot, cls) -> str:
+    """Create the missing defect-① key through the host's own OOT API.
+
+    ``CustomOp.register_oot`` stamps its registry key onto ``cls.name``; the
+    effective name is restored so ``custom_ops`` keeps addressing the base
+    ``rotary_embedding`` op exactly as the direct-write behaviour did.
+    """
+    from vllm.model_executor.custom_op import CustomOp
+
+    effective_name = getattr(cls, "name", None)
+    try:
+        CustomOp.register_oot(name=KEY_LLAMA3)(cls)
+    except Exception:
+        if op_registry_oot.get(KEY_LLAMA3) is cls:
+            del op_registry_oot[KEY_LLAMA3]
+        raise
+    if effective_name is None:
+        del cls.name
+    else:
+        cls.name = effective_name
+    return "created (defect ①: the fork never wired it)"
+
+
 def _apply_overrides(post_registration: bool) -> dict:
     """Point the ``op_registry_oot`` keys at the plugin classes.
 
@@ -446,9 +474,15 @@ def _apply_overrides(post_registration: bool) -> dict:
             if post_registration:
                 # Defect ① is a coverage gap: there is nothing to replace, the key
                 # has to be created.  The host pass never writes this name, so the
-                # creation cannot trip its duplicate-name assert.
-                op_registry_oot[KEY_LLAMA3] = cls
-                applied[KEY_LLAMA3] = "created (defect ①: the fork never wired it)"
+                # official ``CustomOp.register_oot`` (whose duplicate-name assert
+                # is exactly the collision guard against a future upstream fix)
+                # is the sanctioned way to create it.
+                try:
+                    applied[KEY_LLAMA3] = _register_llama3_override(
+                        op_registry_oot, cls
+                    )
+                except Exception as exc:  # noqa: BLE001 -- fail-open per key
+                    skipped[KEY_LLAMA3] = f"registration failed: {exc!r}"
         else:
             skipped[KEY_LLAMA3] = f"a foreign entry is already registered: {current!r}"
 
