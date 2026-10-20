@@ -47,10 +47,11 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC = REPO_ROOT / "src" / "vllm_ascend_split_batch"
-BUNDLE_ID = "org.vllm-hust.split-batch-full-graph"
+BUNDLE_ID = "org.vllm-hust.fia-demask"
 
 #: 实现载体模块名：生命周期命令不应 import 它们（发现只读元数据）。
 IMPLEMENTATION_MODULES = (
+    "vllm_ascend_split_batch.fia_demask_plugin",
     "vllm_ascend_split_batch.cascade_plugin",
     "vllm_ascend_split_batch.cascade_graph_plugin",
     "vllm_ascend_split_batch.cascade_runner_patch",

@@ -49,23 +49,6 @@
       "permissions": [
         "device_access"
       ]
-    },
-    {
-      "component_id": "cascade-two-stage-decode",
-      "implementation_ref": "vllm_ascend_split_batch.cascade_plugin:load",
-      "contracts": [
-        "vllm.general_plugins",
-        "vllm.ascend.graph-pool.v1",
-        "vllm.graph.runtime-key.v1"
-      ],
-      "execution_planes": [
-        "worker",
-        "device"
-      ],
-      "isolation": "trusted_in_process",
-      "permissions": [
-        "device_access"
-      ]
     }
   ],
   "implementation": [
@@ -74,27 +57,12 @@
       "module": "vllm_ascend_split_batch.planner",
       "object": "plan_dual_pad",
       "status": "import_only"
-    },
-    {
-      "type": "python_module",
-      "module": "vllm_ascend_split_batch.cascade_plugin",
-      "object": "load",
-      "status": "active"
-    },
-    {
-      "type": "python_module",
-      "module": "vllm_ascend_split_batch.cascade_graph_plugin",
-      "object": "install",
-      "status": "active"
     }
   ],
   "requires_services": [],
   "activation": {
     "entry_points": [],
-    "environment": {
-      "VLLM_ASCEND_ENABLE_CASCADE_DECODE": "1",
-      "VLLM_ASCEND_ENABLE_CASCADE_GRAPH": "1"
-    },
+    "environment": {},
     "additional_config": {}
   }
 }

@@ -1,5 +1,16 @@
 # 发布流程与检查表
 
+## Cascade 接入边界
+
+- 不发布 `cascade-attention` general plugin，不注入 cascade 环境变量。
+- `org.vllm-hust.split-batch-full-graph` 仅保留 `import_only` planner，管理器不得激活。
+- 不声明 `[kernels]` extra，不依赖或自动安装外部 cascade kernel wheel。
+- cascade 私有 Runner 包装、图孪生与 wheel 探针不属于自动接入面；下文相关接口和证据仅供归档核对，不构成启用指令。
+- 其余插件的入口、门控、host 版本范围、宿主只读及禁止 platform plugin 的约束不变。
+- 升级须重新安装本轮构建产物并重启 worker/重新捕获图；不支持卸载入口后热撤销既有包装。
+- 回滚须恢复本轮提交前的注册元数据、重新构建安装并重启；外部 wheel 仍需单独审批安装与验证。
+
+
 基于 [bidkv 打包发布指南](https://github.com/vLLM-HUST/vllm-hust-docs/blob/main/operations/bidkv-packaging-and-release-guide.md)
 裁剪,补充本插件特有事项。Bundle ID: `org.vllm-hust.split-batch-full-graph`。
 

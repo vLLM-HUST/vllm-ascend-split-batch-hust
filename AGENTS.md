@@ -1,12 +1,10 @@
 # AGENTS.md — vllm-ascend-split-batch-hust
 
-vllm-ascend 宿主的 default-off 插件壳:cascade 两段式 decode(eager+图模式)
-与 split-batch 规划契约。
+vllm-ascend 宿主的插件壳与 split-batch 规划契约；cascade 自动接入停用，源码与证据仅归档。
 
 **算子落点按形态分(2026-10-13 明确)**:
-- **CCE / Ascend C / CATLASS(编译成 `.so`)**:在**仓库外** `ascend_kernel`
-  wheel(`vllm-hust-cascade-kernel`),本壳经 `[kernels]` extra 单向软依赖,
-  不在本仓引入 C/C++ kernel 构建。
+- **CCE / Ascend C / CATLASS(编译成 `.so`)**:在**仓库外**独立 wheel；本仓不引入 C/C++ kernel 构建，
+  不声明 cascade 的 `[kernels]` extra 或外部 kernel wheel 依赖。
 - **Triton / 纯 Python kernel 载体**:**在仓内**。形态=default-off 插件,
   靠 `vllm.general_plugins` 入口点注入;`triton` 必须 lazy import(关闭时零
   import)。先例:W3.1 `fi_gelu`(gelu_and_mul triton 融合)、

@@ -2,14 +2,9 @@
 
 Owner-led research carrier for split-batch planning, dual-stream replay, and full-graph parallel execution. Core owns graph lifecycle seams; this repository owns policy, runners, validation, and evidence.
 
-**Status: default-off.** Two independently gated capabilities are installed:
-
-1. **Split-batch dual-pad planner** — pure planning + prechecks (`import_only`,
-   no vLLM behavior change without the host contract).
-2. **Cascade two-stage decode** (`vllm.general_plugins` entry
-   `cascade-attention`) — eager + graph-mode two-stage cascade attention for
-   vllm-ascend, patched entirely from the plugin; official vllm /
-   vllm-ascend sources are NOT modified.
+**Status: cascade retired from automatic integration.** The split-batch planner
+is an inert `import_only` descriptor. The remaining general plugins retain their
+existing host bounds, activation gates and registration contracts.
 
 Technical ownership belongs to @Raing5Days, @ilnnfover. Source extraction must
 preserve exact authorship, license, tests, constraints, and evidence before
@@ -29,18 +24,21 @@ project page). Release receipt: [docs/release.md](docs/release.md) §11.9. This 
 `>=0.25.1rc2.dev125,<0.25.2` (rationale §0.3) and carries the UpdatableGraph replay fix;
 it was verified on the published bytes, not only on the work tree.
 
-**What you get:** 8 `vllm.general_plugins` carriers and 4 extension bundles,
-all **default-off** — installing changes nothing until you enable a capability
-via its env var (see the table below). Cascade attention additionally needs the
-`ascend_kernel` CCE op wheel, which is **not on any package index** (the
-`kernels` extra pins a version that only exists in the kernel repository, so the
-extra resolves only with `--find-links`):
+**What you get:** 9 `vllm.general_plugins` carriers and 6 extension bundles.
+The root split-batch bundle is planner-only and cannot be activated. There is
+no `cascade-attention` entry point, no cascade environment injection, and no
+`[kernels]` extra or dependency on the external cascade kernel repository.
+Other plugin gates are unchanged; see [docs/support-matrix.md](docs/support-matrix.md).
 
-```bash
-# cascade-only soft dependency; skip it if you do not need the cascade path
-pip install "vllm-ascend-split-batch[kernels]" \
-  --find-links https://github.com/Raing5Days/vllm-hust-cascade-kernel/releases/expanded_assets/v2026.9.26
-```
+Upgrade using a wheel built from this checkout, then restart all engine/worker
+processes and recapture graphs. Removing registration cannot undo wrappers in an
+already running process. Do not reuse an older installed wheel's entry-point
+metadata. External kernel packages are not automatically uninstalled.
+
+Cascade source and evidence remain archived, not a supported activation path;
+manual imports/calls of its old installers are outside the plugin contract.
+Rollback: revert the retirement commit, rebuild/reinstall, and restart/recapture.
+Restoring external kernel use requires a separate explicit install and validation.
 
 ⚠️ **Host pin.** The manifest pins one verified `vllm-ascend` build
 (`host.version_range`; see [docs/release.md](docs/release.md) §0.1). On any other
@@ -74,10 +72,9 @@ Acceptance evidence: `host-proposals/GDN-qkv-norm/validation/`.
 Registration decision: `host-proposals/GDN-qkv-norm/registration-closure.json`.
 Delivery gates: [docs/release.md](docs/release.md#算子-bundle-最短交付路径).
 
-## Cascade attention plugin (default-off)
+## Cascade reference (not registered; do not use for activation)
 
-Entry point: `vllm.general_plugins` ->
-`cascade-attention = vllm_ascend_split_batch.cascade_plugin:load`.
+No cascade entry point is shipped. The gates below describe archived code only.
 
 Environment gates (all default off):
 

@@ -1,5 +1,16 @@
 # 支持矩阵（能力 × 准入条件 × 代码位置）
 
+## Cascade 接入边界
+
+- 不发布 `cascade-attention` general plugin，不注入 cascade 环境变量。
+- `org.vllm-hust.split-batch-full-graph` 仅保留 `import_only` planner，管理器不得激活。
+- 不声明 `[kernels]` extra，不依赖或自动安装外部 cascade kernel wheel。
+- cascade 私有 Runner 包装、图孪生与 wheel 探针不属于自动接入面；下文相关接口和证据仅供归档核对，不构成启用指令。
+- 其余插件的入口、门控、host 版本范围、宿主只读及禁止 platform plugin 的约束不变。
+- 升级须重新安装本轮构建产物并重启 worker/重新捕获图；不支持卸载入口后热撤销既有包装。
+- 回滚须恢复本轮提交前的注册元数据、重新构建安装并重启；外部 wheel 仍需单独审批安装与验证。
+
+
 > 用途：回答「某个能力在我的配置下到底会不会生效、不生效是因为哪一条」。
 > 每行都给出**判定代码位置**，可直接对照。状态口径：
 > **`active`** = manifest 允许启用且已过启用验证；**`import_only`** = 描述符在、但无验收证据或缺少宿主 seam，
@@ -13,8 +24,8 @@
 | 能力 | bundle / entry point | manifest 状态 | 运行时开关 | 一句话结论 |
 |---|---|---|---|---|
 | dual-pad planner（split-batch 规划） | `org.vllm-hust.split-batch-full-graph` / 无 entry（纯函数 `plan_dual_pad`） | **import_only** | `SplitBatchConfig.enabled` | **不可用**：宿主未提供 `vllm.graph.runtime-key.v1` 等 seam，只有纯逻辑 + 预检 |
-| cascade 两段式 decode（eager） | 同上 / `vllm.general_plugins: cascade-attention` | **active** | `VLLM_ASCEND_ENABLE_CASCADE_DECODE=1` | 可用，受 §2 全部条件约束 |
-| cascade 图孪生（aclgraph） | 同上 / 同一 `load()` 内的 `cascade_graph_plugin.install()` | **active** | 再加 `VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1` | 可用，另需 §3 的图条件 |
+| cascade 两段式 decode（eager） | 无注册入口 | **已停用接入** | 不注入 | 仅保留归档源码 |
+| cascade 图孪生（aclgraph） | 无注册入口 | **已停用接入** | 不注入 | 仅保留归档源码 |
 | fia-demask（decode FIA 去冗余掩码） | `org.vllm-hust.fia-demask` / `fia-demask` | **active** | `VLLM_HUST_FIA_DEMASK=1` | 可用；只对"纯 decode + Q_S==1/请求"形态生效 |
 | rope-fix（fork RoPE 三缺陷覆写） | `org.vllm-hust.rope-fix` / `rope-fix` | **import_only** | `VLLM_HUST_ROPE_FIX=1` | 三证据未齐，管理器拒 enable |
 | zerocost-wiring（prefill `.out` + 跳过 cos/sin） | `org.vllm-hust.zerocost-wiring` / `zerocost-wiring` | **active** | `VLLM_HUST_FI_PREFILL_OUT=1`、`VLLM_HUST_SKIP_COS_SIN=1` | 可用 |

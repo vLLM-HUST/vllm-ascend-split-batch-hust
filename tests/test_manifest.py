@@ -42,43 +42,26 @@ def _manifest_json() -> dict:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
 
-CASCADE_CARRIERS = (
-    "vllm_ascend_split_batch.cascade_plugin",
-    "vllm_ascend_split_batch.cascade_graph_plugin",
-)
 PLANNER_CARRIER = "vllm_ascend_split_batch.planner"
 
 
-def test_descriptor_is_discoverable_and_activatable() -> None:
-    """Discoverable and activatable: the cascade carriers now carry evidence.
-
-    The three acceptance evidences were re-run on the pinned host baseline
-    (default-off smoke / real-model correctness 6/64 / gatefix performance
-    margin), so the cascade carrier guard is lifted and an active carrier
-    makes the bundle enable-able.
-    """
+def test_descriptor_is_discoverable_but_not_activatable() -> None:
     manifest = load_manifest(MANIFEST_PATH)
     assert manifest.bundle_id == "org.vllm-hust.split-batch-full-graph"
-    assert activation_blocker(manifest) is None
+    blocker = activation_blocker(manifest)
+    assert blocker is not None and "import_only" in blocker
 
 
-def test_only_cascade_carriers_are_active() -> None:
-    """Flip the two cascade carriers to active; the planner stays inert.
-
-    The evidence re-run on the pinned host baseline closed the flip blockers,
-    so both cascade carriers (``cascade_plugin:load`` /
-    ``cascade_graph_plugin:install``) are ``active``.  The planner has no
-    acceptance evidence (review F7), so it must keep ``import_only`` -- an
-    accidental flip would silently enable an unimplemented host contract.
-    """
-    carriers = {
-        item["module"]: item["status"] for item in _manifest_json()["implementation"]
+def test_only_inert_planner_remains_in_root_bundle() -> None:
+    raw = _manifest_json()
+    carriers = {item["module"]: item["status"] for item in raw["implementation"]}
+    assert carriers == {PLANNER_CARRIER: "import_only"}
+    assert [item["component_id"] for item in raw["components"]] == ["dual-pad-planner"]
+    assert raw["activation"] == {
+        "entry_points": [],
+        "environment": {},
+        "additional_config": {},
     }
-    for module in CASCADE_CARRIERS:
-        assert carriers[module] == "active", module
-    assert carriers[PLANNER_CARRIER] == "import_only"
-    # The demask carrier moved to its own bundle; it must not linger here.
-    assert "vllm_ascend_split_batch.fia_demask_plugin" not in carriers
 
 
 def test_fia_demask_bundle_is_activatable() -> None:
