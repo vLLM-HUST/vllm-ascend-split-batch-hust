@@ -102,20 +102,7 @@ def test_rope_fix_bundle_is_import_only_with_its_own_key() -> None:
 
 
 def test_zerocost_bundle_is_active_with_its_own_keys() -> None:
-    """The zero-cost host-wiring carrier is env-gated and now ``active``.
-
-    Three acceptance items were already gathered (default-off smoke / bitwise
-    correctness / prefill TTFT -1.09% vs a 0.30% band); the release.md §3
-    enablement blocker was then closed: ``zerocost_wiring._host_func`` now walks
-    the whole ``__closure__`` graph, so under the manager launch
-    (``vllm-hust-ext run``, which co-enables cascade graph) it resolves the host
-    body through ``cascade_graph_plugin``'s second wrapper as well -- the formal
-    leg now shows ① and ② both ACTIVE (evidence:
-    ``docs/evidence/zerocost-activation-20260913.md``).  Flipping ``active``
-    injects the two env keys for every deployment that enables the bundle, which
-    is now deliberate; the opt-in contract still holds because the manager does
-    not enable the bundle by default and ``load()`` gates internally.
-    """
+    """Zero-cost wiring remains active and gated by its own environment keys."""
     manifest = load_manifest(ZEROCOST_MANIFEST_PATH)
     assert manifest.bundle_id == "org.vllm-hust.zerocost-wiring"
     assert activation_blocker(manifest) is None

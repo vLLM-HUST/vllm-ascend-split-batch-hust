@@ -3,6 +3,7 @@
 import argparse
 import importlib.abc
 import importlib.metadata
+import importlib.util
 import json
 import os
 import sys
@@ -37,6 +38,18 @@ def probe(stale_cascade_env=False):
     if stale_cascade_env:
         os.environ["VLLM_ASCEND_ENABLE_CASCADE_DECODE"] = "1"
         os.environ["VLLM_ASCEND_ENABLE_CASCADE_GRAPH"] = "1"
+    removed_modules = [
+        f"vllm_ascend_split_batch.{name}"
+        for name in (
+            "cascade_plugin",
+            "cascade_graph_plugin",
+            "cascade_runner_patch",
+            "cascade_gate",
+            "cascade_gate_self",
+        )
+    ]
+    for module in removed_modules:
+        assert importlib.util.find_spec(module) is None, module
     guard = ImportGuard()
     sys.meta_path.insert(0, guard)
     try:
@@ -65,6 +78,7 @@ def probe(stale_cascade_env=False):
             "plugins": loaded,
             "forbidden_import_attempts": guard.attempts,
             "root_bundle": "planner-only/import_only",
+            "removed_modules": removed_modules,
             "npu_validation": "NOT_RUN",
             "performance_claim": False,
         }

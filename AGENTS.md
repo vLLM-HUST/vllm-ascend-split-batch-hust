@@ -1,6 +1,6 @@
 # AGENTS.md — vllm-ascend-split-batch-hust
 
-vllm-ascend 宿主的插件壳与 split-batch 规划契约；cascade 自动接入停用，源码与证据仅归档。
+vllm-ascend 宿主的插件壳与 split-batch 规划契约；cascade 实现源码已删除，仅保留历史证据与只读溯源。
 
 **算子落点按形态分(2026-10-13 明确)**:
 - **CCE / Ascend C / CATLASS(编译成 `.so`)**:在**仓库外**独立 wheel；本仓不引入 C/C++ kernel 构建，

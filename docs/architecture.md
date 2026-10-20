@@ -26,10 +26,11 @@ vLLM / vllm-ascend（只读）
 - 不发布 `cascade-attention` general plugin，不注入 cascade 环境变量。
 - 不声明 `[kernels]` extra，不依赖或自动安装外部 cascade kernel wheel。
 - `cascade-merge-op` / `Raing5Days/vllm-hust-cascade-kernel` 不属于当前安装依赖。
-- cascade 源码、测试、版权、溯源和证据保留归档；手工导入并调用旧 installer
-  不属于支持的接入方式。Runner 包装、图孪生、wheel 探针不在自动加载链上。
+- cascade 实现模块、Runner 包装、图孪生、gate 子进程与专属测试不保留在源码树或包中。
+  历史证据、版权和只读溯源保留；它们不属于可导入的插件实现。
 - 已运行的进程和已捕获的图不能靠移除入口热撤销；升级必须重新安装并重启、重捕获。
-- 回滚须恢复注册元数据、构建安装并重启；外部 wheel 单独安装与验证。
+- 回滚本轮仅恢复源码，上轮已停用的入口和依赖不自动恢复；重新安装后重启并重捕获。
+  重新启用须恢复对应注册并独立验证。
 
 ## 3. Extension Bundle 语义
 

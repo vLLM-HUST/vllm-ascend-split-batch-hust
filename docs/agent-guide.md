@@ -42,7 +42,7 @@ NPU 层验证顺序:先小规模冒烟(单卡 `npu:0`),再场景化;正确性(to
   (见 `pyproject.toml`,提交前 `ruff check .` 必须零输出)。
 - 纯逻辑与设备路径分离:shape 推导、gate 判定、planner 等写成 CPU 可测的
   纯函数;设备路径用 mock 测 + 真机冒烟。
-- patch/包装代码集中放 `cascade_runner_patch.py` 等既有落点,不要散落新文件;
+- patch/包装代码集中放对应插件载体,不要散落新文件;
   新 monkeypatch 点必须同步更新 `HOST_CONTRACT.md` 与 `docs/release.md` 第 4 节。
 - 不引入新三方依赖;确需引入时先在 PR 里说明理由并更新 `pyproject.toml`。
 
@@ -58,8 +58,8 @@ NPU 层验证顺序:先小规模冒烟(单卡 `npu:0`),再场景化;正确性(to
 ## 5. Git 与网络
 
 - commit 原子:一个逻辑变更一个 commit,不混格式化与功能修改。
-- message 用 conventional 风格(仓库现状):`feat(cascade): ...`、
-  `fix(cascade gate): ...`、`docs: ...`、`test: ...`。
+- message 用 conventional 风格:`feat(plugins): ...`、`fix(plugins): ...`、
+  `docs: ...`、`test: ...`。
 - clone/push 统一走 **SSH over 443**(一次配置永久生效):流程见工作区
   `/vllm-workspace/docs/git-remote-and-network.md`;gh-proxy 前缀仅留给 pip git 依赖。
 

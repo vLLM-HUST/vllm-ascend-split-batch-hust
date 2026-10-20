@@ -21,14 +21,7 @@ the *interface and extension point* for that future selection: it decides
 nothing about real kernels, registers no candidate, and is wired into no
 runtime path (see ``docs/design/operator-dispatch.md``).
 
-Semantics (mirroring the two in-repo precedents):
-
-- ``fi_sampling_route.decide_route`` -- rule-based selection ("regla" tier);
-- ``cascade_gate.decision_for`` -- measured selection from a startup bench plus
-  an env override ("measured" tier).
-
-Both collapse here into one ``OpSelector`` with a fixed decision-source
-ladder, highest priority first:
+Decision-source ladder, highest priority first:
 
 1. ``SOURCE_ENV``      ``VLLM_ASCEND_OP_SELECT_<OP>`` / global override;
 2. ``SOURCE_OVERRIDE`` programmatic :meth:`OpSelector.override` (test / A-B);
@@ -41,8 +34,7 @@ Contract invariants:
 
 - **default-off**: :meth:`OpSelector.enabled` is the master gate and reads a
   env var that defaults to unset; the future wiring -- not this module -- is
-  responsible for checking it before asking ``select`` (same split as
-  ``cascade_gate.enabled``).
+  responsible for checking it before asking ``select``.
 - **fail-open**: anything that cannot resolve -- no applicable candidate, an
   override naming an unknown/inapplicable candidate, an applicability
   predicate that raises -- returns the host implementation name, never a
@@ -112,13 +104,8 @@ def _env_suffix(op: str) -> str:
 class OpContext:
     """Shape/scene payload a caller hands to ``select``.
 
-    The fields are the intersection of the two precedents, not an invented
-    vocabulary:
-
-    - ``num_tokens``  -- flattened token count of the step, i.e. the batch
-      bucket in ``cascade_gate`` and ``batch_size`` in ``fi_sampling_route``;
-    - ``shared_len``  -- shared/prefix length of the step (``cascade_gate``
-      keyed its measured verdict on ``(num_tokens, prefix bucket)``);
+    - ``num_tokens`` -- flattened token count of the step;
+    - ``shared_len`` -- shared/prefix length of the step;
     - ``headdim`` / ``dtype`` -- steady kernel-shape discriminators;
     - ``scene``       -- free-form categorical tag (e.g. ``"greedy_k1"``,
       ``"untruncated"``, ``"joint_truncated"``) carrying whatever rule cell the
@@ -242,8 +229,7 @@ class OpSelector:
     def enabled(self) -> bool:
         """Master gate; default-off (unset env -> False).
 
-        Not consulted by :meth:`select`: the runtime wiring owns the gate, the
-        same split as ``cascade_gate.enabled`` / ``decision_for``.
+        Not consulted by :meth:`select`: the runtime wiring owns the gate.
         """
         return os.getenv(self._enabled_env) == "1"
 

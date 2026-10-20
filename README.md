@@ -18,11 +18,10 @@ See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
 pip install vllm-ascend-split-batch
 ```
 
-Published on PyPI (`0.1.3`; wheel + sdist, sha256 and PEP 740 attestations on the
-project page). Release receipt: [docs/release.md](docs/release.md) §11.9. This version widens
-`host.version_range` from a point pin to the bounded window
-`>=0.25.1rc2.dev125,<0.25.2` (rationale §0.3) and carries the UpdatableGraph replay fix;
-it was verified on the published bytes, not only on the work tree.
+The published PyPI `0.1.3` release predates cascade source removal. Installing
+that published release does not apply this checkout's deletion. Build and install
+this checkout's wheel for the current code; publication requires separate authorization.
+Historical release receipt: [docs/release.md](docs/release.md) §11.9.
 
 **What you get:** 9 `vllm.general_plugins` carriers and 6 extension bundles.
 The root split-batch bundle is planner-only and cannot be activated. There is
@@ -35,10 +34,11 @@ processes and recapture graphs. Removing registration cannot undo wrappers in an
 already running process. Do not reuse an older installed wheel's entry-point
 metadata. External kernel packages are not automatically uninstalled.
 
-Cascade source and evidence remain archived, not a supported activation path;
-manual imports/calls of its old installers are outside the plugin contract.
-Rollback: revert the retirement commit, rebuild/reinstall, and restart/recapture.
-Restoring external kernel use requires a separate explicit install and validation.
+Cascade implementation modules and their dedicated tests are removed. Historical
+evidence and provenance remain; no cascade installer can be imported from the package.
+Rollback: revert the source-removal commit, rebuild/reinstall, and restart/recapture.
+This restores source only; the earlier entry-point/dependency retirement remains.
+Re-enabling cascade requires restoring those registrations and separate validation.
 
 ⚠️ **Host pin.** The manifest pins one verified `vllm-ascend` build
 (`host.version_range`; see [docs/release.md](docs/release.md) §0.1). On any other
@@ -72,95 +72,15 @@ Acceptance evidence: `host-proposals/GDN-qkv-norm/validation/`.
 Registration decision: `host-proposals/GDN-qkv-norm/registration-closure.json`.
 Delivery gates: [docs/release.md](docs/release.md#算子-bundle-最短交付路径).
 
-## Cascade reference (not registered; do not use for activation)
+## Removed cascade capability
 
-No cascade entry point is shipped. The gates below describe archived code only.
+Cascade eager/graph integration, Runner wrappers and adaptive-gate subprocess
+are absent from the package. Neither manual imports nor old cascade environment
+variables can restore them. Historical material remains under `docs/evidence/`
+and `provenance/`, not as an executable plugin implementation.
 
-Environment gates (all default off):
-
-| Variable | Meaning |
-|---|---|
-| `VLLM_ASCEND_ENABLE_CASCADE_DECODE=1` | enable the two-stage cascade decode |
-| `VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1` | additionally enable the graph-mode (aclgraph) cascade twin |
-| `VLLM_ASCEND_CASCADE_MIN_PREFIX` (8192) | min shared prefix tokens to trigger |
-| `VLLM_ASCEND_CASCADE_MIN_REQS` (32) | min batch size to trigger |
-| `VLLM_ASCEND_CASCADE_PRECISION` | `bf16` (Tier-0, default) or `fp32` (Tier-1, eager-only) |
-| `VLLM_ASCEND_CASCADE_STRICT=1` | force the standard full-KV path (bit-exact reference) |
-| `VLLM_ASCEND_CASCADE_TRACE=1` | per-step plugin trace to stdout |
-| `VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE` (1) | skip the stage-1 graph re-bind when its inputs are step-invariant (0 restores always-rebind) |
-
-With every gate unset the patched methods are no-ops and the serving path is
-bit-identical to stock vllm-ascend. On load the plugin emits one INFO line,
-`cascade plugin loaded (gate=0, graph_gate=0, kernel_wheel=not-probed)`, so a
-default-off serve log proves `load()` actually ran (vLLM otherwise swallows
-general-plugin load errors). **Disabled discovery touches nothing else**: with
-`VLLM_ASCEND_ENABLE_CASCADE_DECODE` unset the plugin injects no env entries,
-imports no host module, installs no fail-open shim, imports no kernel wheel and
-replaces no attention/graph entry (contract: `docs/release.md` §6).
-
-## Speculative decoding boundary
-
-Cascade admits **one query row per request**. The two-stage path flattens the
-shared prefix once and re-derives the per-request suffix from the query-row
-count, so MTP verification and chunked prefill (which feed `k + 1` rows) are
-rejected by the dispatch gate and skip the cascade twin capture; those steps
-keep native attention and the standard FULL graph. `speculative_config` being
-set at all is treated as fail-closed, even when a step happens to carry single
-rows, because the `k > 1` query layout is neither supported nor measured yet.
-This is a guard, **not** MTP support: Split-Batch/dual-pad fails closed the
-same way (`planner.precheck_reason` -> `speculative_decode_conflict`). Enabling
-Cascade with speculative decoding therefore yields no cascade speedup — it is
-a compatibility boundary, not an enabled-Cascade result.
-
-### Cohort scope (what our evidence does and does not cover)
-
-> Authority: [`docs/cohort-and-ownership.md`](docs/cohort-and-ownership.md) — the cohort boundary plus the four
-> ownership items returned to this repository; binding rule: [`AGENTS.md`](AGENTS.md) hard constraint 6.
-
-Stated here so the numbers below are not over-extended. **2026-10-13 owner ruling: the baseline moved to the
-0.28 image + Qwen3.5-35B-A3B** ("we no longer work on Qwen2.5"). The upstream audit quotes in
-[`docs/cohort-and-ownership.md`](docs/cohort-and-ownership.md) §1 are kept verbatim as historical receipts;
-the table below is the current claim surface. The Qwen2.5 / 0.25 evidence is retained as an **independent,
-historical** set and must not be crossed with the numbers below.
-
-| This repository's evidence covers (0.28 baseline) | This repository's evidence does **not** cover |
-|---|---|
-| 0.28 image stack: vllm `0.28.1.post1.dev143+gf18cf803c` + vllm-ascend `0.25.1rc2.dev125+hust…`, CANN 9.1.0, 2×910B2 TP=2 | other host builds outside the measured 0.28 image |
-| Qwen3.5-35B-A3B (40L: 30 GDN + 10 MoE) hybrid **TP2** | native **MTP2** verification rows / any speculative decoding |
-| chunked prefill **on**, APC **off**, `cudagraph_mode=NONE` | `async` scheduling combinations we did not run |
-| bf16 | the retired Qwen2.5 / 0.25 line (historical set only) |
-
-⇒ **Do not cross-extrapolate**: the historical Qwen2.5/0.25 numbers do not carry over to the 0.28/Qwen3.5
-baseline, and vice versa. Speculative decoding (incl. MTP2) stays **fail-closed** on both domains — a
-"cascade ON" run under it measures the native path, not this feature. Entering the unified cohort would
-still first require a dual-pad/graph bucket contract for `k + 1` verification rows plus real replay
-correctness on that configuration — that work is **not** planned here (see `docs/support-matrix.md` §5 and
-the workspace ledger, OPEN-05).
-
-
-Microbatching: the plugin mirrors the official vllm core gate and keeps the
-two-stage path off under ANY microbatching (`use_ubatching`, i.e. DBO or
-`ubatch_size > 1`).  On the current vllm-ascend the platform layer resets both
-`enable_dbo` and `ubatch_size`, so this gate is dormant there by construction.
-
-Verified evidence — **historical (Qwen2.5 / 0.25 domain)**, Qwen2.5-Coder-14B-Instruct, 910B2, CANN 9.0.1:
-
-- eager off/on/on_fp32 token-identical; graph off/on/on_fp32 token-identical;
-- C3-shaped run (B=64, shared ~4.1k tokens, gen128): 0/64 divergent arms;
-- graph cascade at that shape: `VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE` on/off
-  token-identical (64/64), wall 8.51s vs 9.38s (off baseline 6.49s);
-- no fail-open events during the verified runs;
-- `pytest -q` + `ruff check .` green.
-
-The full evidence set travels with this repository: see
-[docs/evidence/cascade/README.md](docs/evidence/cascade/README.md) for the
-per-section reports (`section2-correctness.md`, `section3-performance.md`,
-`section4-active-enablement.md`), the reproduction scripts, the raw result
-JSONs and the sha256 manifest (including the list of large sweep logs left in
-the development workspace). Read its §1 before quoting any number: the Coder
-model is a **performance stand-in** and must not be compared with the real
-`Qwen2.5-14B-Instruct` on behavior. This whole set is **historical (Qwen2.5 /
-0.25)** and must not be crossed with the current 0.28/Qwen3.5 baseline.
+Claim boundaries remain in [docs/cohort-and-ownership.md](docs/cohort-and-ownership.md).
+The inert planner's speculative-decoding guards are unchanged.
 
 ## fi_sampling plugin (default-off, evidence-only)
 
@@ -204,15 +124,10 @@ Evidence (`docs/evidence/w2b-fi-sampling/REPORT.md`, Qwen2.5-Coder-14B, 910B2 �
 
 Extension ID: `org.vllm-hust.split-batch-full-graph`
 
-The Manifest 0.2 descriptor marks the two cascade carriers `active` (the
-planner stays `import_only`): `vllm-hust-ext extension enable` injects the
-`activation.environment` flags, and installation alone changes no vLLM
-behavior because the cascade capability is env-gated at runtime. Declared
-host range: **`vllm-ascend >=0.25.1rc2.dev125,<0.25.2`** — a bounded
-*compatibility window*, not a point pin: both endpoints were verified on
-910B2 hardware (`dev125` historically; `dev605` = `fbe4911bb` on 2026-09-27),
-and a failure inside the window is a host-side finding by design (rationale
-and the core-pairing caveat: `docs/release.md` §0.1/§0.3).
+The root descriptor contains only the `import_only` planner and no activation
+environment. Other bundles retain their own activation status and host bounds.
+The bounded host range remains `>=0.25.1rc2.dev125,<0.25.2`; see
+[docs/release.md](docs/release.md) for its verified scope.
 
 ```bash
 python -m pip install -e ".[test]"
@@ -240,43 +155,6 @@ this repository only consumes it.
 ```bash
 python -m pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extension-manager.git@main"
 ```
-
-The `kernels` extra is the one end users need, and it is
-resolvable (`--find-links` to the kernel release, see "Install" above).
-
-## Kernel wheel dependency (soft, fail-open)
-
-Both cascade tiers consume the `ascend_kernel` CCE op wheel
-(`fa_fp32_stage1` / `lse_merge`) as a SOFT dependency: it is declared only in
-the `kernels` extra — base dependencies stay empty. When the wheel is absent
-or its ops fail to register, the whole cascade feature is disabled
-(fail-open to the standard full-KV path) with a single warning; the
-default-off semantics are unchanged. Validated pairing:
-
-| plugin | kernel wheel | torch_npu | CANN |
-|---|---|---|---|
-| `0.1.3` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
-| `0.1.2` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
-| `0.1.1` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
-
-The kernel wheel is not on any package index (it is platform-tagged and must be
-rebuilt whenever the CANN / torch_npu / soc tuple changes), so it ships as a
-**GitHub Release asset**:
-
-```bash
-pip install "vllm-ascend-split-batch[kernels]" \
-  --find-links https://github.com/Raing5Days/vllm-hust-cascade-kernel/releases/expanded_assets/v2026.9.26
-python -c "import ascend_kernel, torch; assert hasattr(torch.ops.npu, 'fa_fp32_stage1')"
-```
-
-Verify the installed kernel build by its library fingerprint (the kernel repo's
-rule is "read the md5, not the file name"): `libascend_kernel.so` must hash to
-`ca8de2d70fe0504d` for `2026.9.26`. Building it from source is documented in the
-kernel repo README (`./build.sh`, ~2 min).
-
-Compat tuple & red lines for the kernel side live in the kernel repo README
-§4-§5. After bumping the kernel wheel: reinstall, then rerun the plugin
-smoke (see [docs/release.md](docs/release.md) §2).
 
 ## Operator validation workflow
 

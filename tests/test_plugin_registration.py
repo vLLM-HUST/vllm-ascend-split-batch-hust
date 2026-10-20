@@ -14,6 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
 
 
+def test_package_source_contains_no_cascade_implementation_or_references():
+    package = ROOT / "src/vllm_ascend_split_batch"
+    assert not list(package.glob("cascade*"))
+    offenders = [
+        str(path.relative_to(ROOT))
+        for path in package.rglob("*.py")
+        if "cascade" in path.read_text().lower()
+    ]
+    assert offenders == []
+
+
 def test_cascade_is_not_a_general_plugin():
     plugins = PROJECT["entry-points"]["vllm.general_plugins"]
     assert "cascade-attention" not in plugins
@@ -75,3 +86,4 @@ def test_installed_plugins_are_isolated_from_cascade(tmp_path, stale_env):
     assert report["stale_cascade_env"] is stale_env
     assert report["forbidden_import_attempts"] == []
     assert len(report["plugins"]) == 9
+    assert len(report["removed_modules"]) == 5
