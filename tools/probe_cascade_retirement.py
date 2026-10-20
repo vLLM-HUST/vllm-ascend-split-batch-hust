@@ -62,11 +62,12 @@ def probe(stale_cascade_env=False):
         for entry in entries:
             loaded[entry.name] = entry.load()()
             assert loaded[entry.name] is False, entry.name
-        root = json.loads(
-            dist.locate_file(
-                "vllm_ascend_split_batch/vllm-hust-extension-v0.2.json"
-            ).read_text()
+        package_dir = Path(
+            importlib.util.find_spec(
+                "vllm_ascend_split_batch"
+            ).submodule_search_locations[0]
         )
+        root = json.loads((package_dir / "vllm-hust-extension-v0.2.json").read_text())
         assert root["activation"]["environment"] == {}
         assert [item["status"] for item in root["implementation"]] == ["import_only"]
         assert not guard.attempts, guard.attempts
