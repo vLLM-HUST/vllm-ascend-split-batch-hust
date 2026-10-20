@@ -7,12 +7,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _deployment import deployed_file
 
 
 @pytest.fixture
 def kb(tmp_path, monkeypatch):
     source = Path("/root/opt-ops/scripts/kbctl.py")
-    if not source.exists():
+    if not deployed_file(source):
         pytest.skip("opt-ops not deployed")
     spec = importlib.util.spec_from_file_location("kb_repair_test", source)
     mod = importlib.util.module_from_spec(spec)
@@ -106,7 +107,7 @@ def test_deployed_patch_roundtrip(tmp_path):
     metadata = json.loads((proposal / "proposal_meta.json").read_text())
     for row in metadata["files"]:
         source = Path("/root") / row["target"]
-        if not source.exists():
+        if not deployed_file(source):
             pytest.skip("opt-ops deployment not installed")
         data = source.read_bytes()
         assert hashlib.sha256(data).hexdigest() == row["after_sha256"]

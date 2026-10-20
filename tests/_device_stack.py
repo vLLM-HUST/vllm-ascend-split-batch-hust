@@ -13,13 +13,26 @@
 
 """Skip device-stack tests when required packages are unavailable."""
 
+import importlib
+
 import pytest
 
-torch = pytest.importorskip("torch", reason="device tests need torch")
-torch_npu = pytest.importorskip(
-    "torch_npu", reason="device tests need the torch_npu plugin"
-)
-vllm_ascend = pytest.importorskip(
+
+def _importorskip(mod: str, reason: str):
+    # importorskip only catches ImportError; device-less stacks can also fail
+    # with SystemError/RuntimeError raised from C extension levels.
+    try:
+        return importlib.import_module(mod)
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(
+            reason=f"{reason}: {type(e).__name__}: {e}", allow_module_level=True
+        )
+        raise  # unreachable; keeps type checkers happy
+
+
+torch = _importorskip("torch", "device tests need torch")
+torch_npu = _importorskip("torch_npu", "device tests need the torch_npu plugin")
+vllm_ascend = _importorskip(
     "vllm_ascend", reason="the carriers patch vllm-ascend internals"
 )
 F = torch.nn.functional
