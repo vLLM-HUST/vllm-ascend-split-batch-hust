@@ -42,5 +42,18 @@ jobs:
           name: pytest-results-${{ matrix.python }}
           path: pytest-results-${{ matrix.python }}.xml
           if-no-files-found: ignore
+      - name: push pytest diagnostics branch
+        if: failure()
+        run: |
+          set -eu
+          git config user.email "ci-bot@vllm-hust.invalid"
+          git config user.name "ci-bot"
+          git checkout -q --orphan "ci-diag-${{ matrix.python }}"
+          git rm -rq --cached . >/dev/null 2>&1 || true
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name 'pytest-results-*' -exec rm -rf {} +
+          git add -f pytest-results-*.xml 2>/dev/null || true
+          if git diff --cached --quiet; then echo "no junit to publish"; exit 0; fi
+          git commit -qm "ci diag for ${{ github.sha }}"
+          git push -q origin +HEAD:refs/heads/ci-diag-${{ matrix.python }}
       - run: python -m build
       - run: vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
