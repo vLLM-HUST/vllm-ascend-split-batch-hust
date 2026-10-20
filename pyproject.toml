@@ -87,6 +87,7 @@ line-length = 88
 extend-exclude = [
     "src/vllm_ascend_split_batch/fi_sampling",
     "docs/evidence",
+    "tools/runtime-tree",
 ]
 
 [tool.ruff.lint]
