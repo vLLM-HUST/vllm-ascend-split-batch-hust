@@ -606,11 +606,17 @@ serve_env_preflight() {
   [ "${LADDER_SKIP_ENV_CHECK:-0}" != "1" ] || return 0
   [ -d "${LADDER_ATB_HOME:-/usr/local/Ascend/nnal/atb}" ] || return 0
   case ":${LD_LIBRARY_PATH:-}:" in
-    *:"${LADDER_ATB_HOME:-/usr/local/Ascend/nnal/atb}"/*) return 0 ;;
+    *:"${LADDER_ATB_HOME:-/usr/local/Ascend/nnal/atb}"/*) ;;
+    *)
+      echo "bench-ladder: LD_LIBRARY_PATH 缺 nnal/atb 路径 → worker dlopen libatb.so 将失败 → 拒绝起服" >&2
+      echo "  修复: 起服 shell 依次 source ascend-toolkit / cann ascendnpu-ir / nnal-atb 三个 set_env.sh" >&2
+      echo "  （持久修复: tools/repair-ascend-login-env.sh; LADDER_SKIP_ENV_CHECK=1 自担）" >&2
+      return 1 ;;
   esac
-  echo "bench-ladder: LD_LIBRARY_PATH 缺 nnal/atb 路径 → worker dlopen libatb.so 将失败 → 拒绝起服" >&2
+  if "$PY" -c 'import ctypes; ctypes.CDLL("libatb.so")' 2>/dev/null; then return 0; fi
+  echo "bench-ladder: LD_LIBRARY_PATH 含 nnal/atb 条目但 dlopen libatb.so 失败 → 拒绝起服" >&2
   echo "  修复: 起服 shell 依次 source ascend-toolkit / cann ascendnpu-ir / nnal-atb 三个 set_env.sh" >&2
-  echo "  （LADDER_SKIP_ENV_CHECK=1 可跳过, 需自担）" >&2
+  echo "  （持久修复: tools/repair-ascend-login-env.sh; LADDER_SKIP_ENV_CHECK=1 自担）" >&2
   return 1
 }
 
