@@ -49,11 +49,16 @@ def test_patch_files_exist_in_pdir():
         assert (PDIR / patch).stat().st_size > 200, patch
 
 
-def test_live_tree_carries_fingerprints():
-    """活守卫: 并发重放/重灌抹层时此测试立刻红（fingerprints 缺失即 DRIFT）。"""
-    missing = []
+def test_live_tree_is_stock_and_husk_carries_transforms():
+    """C 形态活守卫: 运行树必须 stock(无树内补丁指纹), 变换定义在 husk 模块。"""
+    husk = HERE.parent / "src" / "vllm_ascend_split_batch" / "runtime_source_patches.py"
+    hsrc = husk.read_text()
+    for tok in ("VLLM_HUST_D4_CONV_PACK", "VLLM_HUST_GDN_UNPACK_VIEWS",
+                "VLLM_HUST_MOE_INIT_TRITON", "VLLM_HUST_NZ_SKIP_GATE"):
+        assert tok in hsrc, tok
+    leftover = []
     for rel, token in FINGERPRINTS:
         src = (TREE / rel).read_text(encoding="utf-8", errors="replace")
-        if token not in src:
-            missing.append(f"{rel}:{token}")
-    assert not missing, f"运行树补丁指纹缺失(被重灌/并发重放抹除): {missing}; 修复: bash /root/包体恢复/scripts/apply-runtime-patches.sh"
+        if token in src:
+            leftover.append(f"{rel}:{token}")
+    assert not leftover, f"运行树残留树内补丁(应迁 husk 源码变换): {leftover}; 回滚: apply-runtime-patches.sh 手动层"

@@ -50,6 +50,8 @@ w3f2-pq35-rebind|patch/worker/patch_qwen3_5.py|20261015T1731_W3F2-runtime-tree.p
 w3f3-shared-gate|ops/fused_moe/shared_experts.py|20261016T1130_W3F3-runtime-tree.shared_experts.py.orig|20261016T1130_W3F3-runtime-tree.shared_experts.py.patch
 w3f3-runner-hook|worker/model_runner_v1.py|20261016T1130_W3F3-runtime-tree.model_runner_v1.py.orig|20261016T1130_W3F3-runtime-tree.model_runner_v1.py.patch
 w1r-gmm-tuning|ops/fused_moe/routed_experts.py|20261018T0517_W1R-runtime-tree.routed_experts.py.orig|20261018T0517_W1R-runtime-tree.routed_experts.py.patch
+# 2026-10-21 C 轮: 以下三层已由 husk runtime_source_patches 源码变换载波接管(默认退役,
+#   重放会与 loader 锚点失配->fail-closed stock, 行为仍正确但冗余)。保留条目仅作回滚通道。
 d4site2-views-combined|ops/gdn.py|20261021T1355Z_d4_conv_hoist_site2.orig-gdn.py|20261021T1459Z_concatdViews.gdn.py.patch
 moe-init-triton|ops/fused_moe/token_dispatcher.py|20261021T1710Z_moeInitTriton.token_dispatcher.py.orig|20261021T1710Z_moeInitTriton.token_dispatcher.py.patch
 nz-skip-gate|ops/linear.py|20261021T1545Z_nzSkipGate.linear.py.orig|20261021T1545Z_nzSkipGate.linear.py.patch
