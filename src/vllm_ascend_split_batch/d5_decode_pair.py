@@ -47,13 +47,24 @@ def split_decode(metadata, start, stop):
     return result
 
 
+def _flat(values):
+    if isinstance(values, (list, tuple)):
+        items = []
+        for value in values:
+            items.extend(_flat(value))
+        return items
+    if hasattr(values, "reshape"):
+        return _flat(values.reshape(-1).tolist())
+    return [values]
+
+
 def require_disjoint(a, b):
     for field in ("non_spec_state_indices_tensor",):
-        left = set(getattr(a, field).reshape(-1).tolist())
-        right = set(getattr(b, field).reshape(-1).tolist())
+        left = set(_flat(getattr(a, field)))
+        right = set(_flat(getattr(b, field)))
         if left & right or 0 in left | right or min(left | right) < 0:
             raise ValueError("shared or reserved GDN state slot")
-    left = set(a.non_spec_decode_metadata.causal_conv1d.cache_indices.tolist())
-    right = set(b.non_spec_decode_metadata.causal_conv1d.cache_indices.tolist())
+    left = set(_flat(a.non_spec_decode_metadata.causal_conv1d.cache_indices))
+    right = set(_flat(b.non_spec_decode_metadata.causal_conv1d.cache_indices))
     if left & right or 0 in left | right or min(left | right) < 0:
         raise ValueError("shared or reserved conv state slot")

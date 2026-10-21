@@ -83,3 +83,25 @@ def test_reserved_state_rejected():
 def test_invalid_slice_rejected():
     with pytest.raises(ValueError, match="invalid"):
         split_decode(metadata(), 2, 2)
+
+
+def test_two_dim_conv_cache_indices_disjoint():
+    m = metadata()
+    m.non_spec_decode_metadata.causal_conv1d.cache_indices = torch.tensor(
+        [[10, 20], [11, 21], [12, 22], [13, 23]], dtype=torch.int32
+    )
+    a, b = split_decode(m, 0, 2), split_decode(m, 2, 4)
+    require_disjoint(a, b)
+    assert b.non_spec_decode_metadata.causal_conv1d.cache_indices.tolist() == [
+        [12, 22],
+        [13, 23],
+    ]
+
+
+def test_two_dim_conv_cache_indices_shared_rejected():
+    m = metadata()
+    m.non_spec_decode_metadata.causal_conv1d.cache_indices = torch.tensor(
+        [[10, 20], [11, 21], [11, 21], [13, 23]], dtype=torch.int32
+    )
+    with pytest.raises(ValueError, match="shared"):
+        require_disjoint(split_decode(m, 0, 2), split_decode(m, 2, 4))
