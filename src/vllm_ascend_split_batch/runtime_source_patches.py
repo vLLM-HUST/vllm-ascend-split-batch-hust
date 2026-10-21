@@ -217,81 +217,30 @@ def _unpack_mixed_qkv_views(mixed, layer):
 # ---------------------------------------------------------------- dispatcher: triton init
 _INIT_TRITON_TRANSFORMS = [
     (
-        "from abc import ABC, abstractmethod",
-        '''import os
-
-import triton
-import triton.language as tl
-
-from abc import ABC, abstractmethod''',
-        1,
-    ),
-    (
-        "from abc import ABC, abstractmethod",
-        '''from abc import ABC, abstractmethod
-
-
-_MOE_INIT_TRITON_ON = os.environ.get("VLLM_HUST_MOE_INIT_TRITON") == "1"
-
-
-@triton.jit
-def _moe_init_routing_t1_kernel(
-    x_ptr, ids_ptr,
-    sorted_ptr, rowidx_ptr, counts_ptr,
-    H: tl.constexpr, E: tl.constexpr, K: tl.constexpr,
-):
-    kidx = tl.arange(0, K)
-    ids = tl.load(ids_ptr + kidx).to(tl.int32)
-    xrow = tl.load(x_ptr + tl.arange(0, H)).to(x_ptr.dtype.element_ty)
-    sblock = tl.broadcast_to(xrow[None, :], (K, H))
-    tl.store(sorted_ptr + kidx[:, None] * H + tl.arange(0, H)[None, :], sblock)
-    iv = ids[:, None].to(tl.int32)
-    less = tl.sum((ids[None, :] < iv).to(tl.int32), axis=1)
-    sidx = kidx[None, :]
-    ties_before = tl.sum(((ids[None, :] == iv) & (sidx < kidx[:, None])).to(tl.int32), axis=1)
-    tl.store(rowidx_ptr + kidx, (less + ties_before).to(tl.int32))
-    counts = tl.zeros((E,), tl.int32)
-    for j in tl.static_range(K):
-        e_j = tl.sum(tl.where(kidx == j, ids, 0), axis=0)
-        counts += (tl.arange(0, E) == e_j.to(tl.int32)).to(tl.int32)
-    tl.store(counts_ptr + tl.arange(0, E), counts.to(counts_ptr.dtype.element_ty))
-
-
-def _moe_init_routing_t1(hidden_states, topk_ids, expert_num: int):
-    k = topk_ids.shape[1]
-    h = hidden_states.shape[1]
-    sorted_t = torch.empty((k, h), dtype=hidden_states.dtype, device=hidden_states.device)
-    rowidx = torch.empty((k,), dtype=torch.int32, device=hidden_states.device)
-    counts = torch.zeros((expert_num,), dtype=torch.int64, device=hidden_states.device)
-    _moe_init_routing_t1_kernel[(1,)](
-        hidden_states, topk_ids, sorted_t, rowidx, counts,
-        H=h, E=expert_num, K=k, num_warps=4,
-    )
-    return sorted_t, rowidx, counts, None''',
-        1,
-    ),
-    (
-        '''        sorted_hidden_states, expanded_row_idx, expert_tokens, dynamic_scale = DeviceOperator.npu_moe_init_routing(
+        """        sorted_hidden_states, expanded_row_idx, expert_tokens, dynamic_scale = DeviceOperator.npu_moe_init_routing(
             hidden_states,
-            topk_ids,''',
-        '''        if _MOE_INIT_TRITON_ON and hidden_states.shape[0] == 1 and hidden_states.is_contiguous():
+            topk_ids,""",
+        """        if hidden_states.shape[0] == 1 and hidden_states.is_contiguous():
+            from vllm_ascend_split_batch.moe_init_triton import (
+                moe_init_routing_t1 as _moe_init_routing_t1,)
+
             sorted_hidden_states, expanded_row_idx, expert_tokens, dynamic_scale = _moe_init_routing_t1(
                 hidden_states, topk_ids, global_num_experts)
         else:
             sorted_hidden_states, expanded_row_idx, expert_tokens, dynamic_scale = DeviceOperator.npu_moe_init_routing(
             hidden_states,
-            topk_ids,''',
+            topk_ids,""",
         1,
     ),
     (
-        '''            quant_mode=quant_mode,
+        """            quant_mode=quant_mode,
             act_quant_type=act_quant_type,
         )
-        expert_tokens = expert_tokens.to(torch.int64)''',
-        '''            quant_mode=quant_mode,
+        expert_tokens = expert_tokens.to(torch.int64)""",
+        """            quant_mode=quant_mode,
             act_quant_type=act_quant_type,
             )
-        expert_tokens = expert_tokens.to(torch.int64)''',
+        expert_tokens = expert_tokens.to(torch.int64)""",
         1,
     ),
 ]
@@ -346,23 +295,29 @@ class AnchorError(Exception):
 
 
 class _PatchingLoader(importlib.machinery.SourceFileLoader):
-    """对目标模块源码文本施锚点变换后编译; 失败即原样编译（stock）。"""
+    """对目标模块源码文本施锚点变换后编译; 失败即原样编译（stock）。
+
+    重写 get_code（而非 source_to_code）: SourceFileLoader 的字节码缓存与
+    stock 源 mtime/size 匹配时会短路, 变换永远不会发生——必须绕过缓存。
+    """
 
     def __init__(self, fullname, path, transforms):
         super().__init__(fullname, path)
         self._transforms = transforms
 
-    def source_to_code(self, data, path, *, _path=None):
-        source = data.decode("utf-8")
+    def get_code(self, fullname):
+        src_path = self.get_filename(fullname)
+        source = self.get_data(src_path).decode("utf-8")
         try:
             patched, log = apply_transforms(source, self._transforms)
         except AnchorError as exc:
             logger.warning(
-                "runtime_source_patches: %s anchor mismatch -> stock (%s)", path, exc)
-            return super().source_to_code(data, path, _path=_path)
+                "runtime_source_patches: %s anchor mismatch -> stock (%s)",
+                src_path, exc)
+            return super().get_code(fullname)
         for entry in log:
-            logger.info("runtime_source_patches: %s %s", path, entry)
-        return super().source_to_code(patched.encode("utf-8"), path, _path=_path)
+            logger.info("runtime_source_patches: %s %s", src_path, entry)
+        return compile(patched, src_path, "exec", dont_inherit=True)
 
 
 class _Finder:
@@ -374,17 +329,31 @@ class _Finder:
         if transforms is None:
             return None
         self._targets.pop(fullname, None)  # 一次性: 命中后即卸钩
-        spec = importlib.util.find_spec(fullname)
+        parent_name, _, sub_name = fullname.rpartition(".")
+        parent = sys.modules.get(parent_name)
+        parent_path = list(getattr(parent, "__path__", []) or [])
+        if not parent_path:
+            logger.warning(
+                "runtime_source_patches: %s 父包未就绪 -> stock", fullname)
+            return None
+        spec = importlib.machinery.PathFinder.find_spec(sub_name, parent_path)
         if spec is None or not getattr(spec, "origin", None):
             logger.warning("runtime_source_patches: %s 未定位到源文件 -> stock", fullname)
             return None
-        spec.loader = _PatchingLoader(fullname, spec.origin, transforms)
-        logger.info("runtime_source_patches: patched-loader installed for %s", fullname)
-        return spec
+        return importlib.util.spec_from_file_location(
+            fullname, spec.origin,
+            loader=_PatchingLoader(fullname, spec.origin, transforms),
+        )
+
+
+_INSTALLED = False
 
 
 def install() -> bool:
-    """env 门控注册 meta-path 钩子; 无相关 env 时不注册（零开销）。"""
+    """env 门控注册 meta-path 钩子; 无相关 env 时不注册（零开销）。幂等。"""
+    global _INSTALLED
+    if _INSTALLED:
+        return True
     targets: dict[str, list] = {}
     for env, module, transforms in TABLES:
         if os.environ.get(env) == "1":
@@ -398,6 +367,7 @@ def install() -> bool:
         )
         return False
     sys.meta_path.insert(0, _Finder(targets))
+    _INSTALLED = True
     logger.info(
         "runtime_source_patches: armed for %s (fail-closed anchors)", sorted(targets)
     )

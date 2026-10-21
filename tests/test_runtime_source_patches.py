@@ -20,7 +20,7 @@ ORIGS = {
 FINGERPRINTS = {
     rsp.GDN: ["_PACKED_CONV_WEIGHT_NAME", "_PACK_CONV_ENV", "_UNPACK_VIEWS_ON",
               "_unpack_mixed_qkv_views"],
-    rsp.TD: ["_moe_init_routing_t1_kernel", "_MOE_INIT_TRITON_ON"],
+    rsp.TD: ["_moe_init_routing_t1", "vllm_ascend_split_batch.moe_init_triton"],
     rsp.LIN: ["VLLM_HUST_NZ_SKIP_GATE", "skip_weight_nz_conversion"],
 }
 
