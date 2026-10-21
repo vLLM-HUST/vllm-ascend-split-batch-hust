@@ -137,5 +137,8 @@ def install() -> bool:
 
 
 def load() -> bool:
+    from . import runtime_source_patches as _rsp  # noqa: PLC0415
+
+    _rsp.install()
     """vLLM general-plugin entry point; default-off via ``VLLM_HUST_GATE_FP32``."""
     return install() if is_enabled() else False
