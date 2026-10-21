@@ -9,6 +9,8 @@ import torch
 
 from vllm_ascend_split_batch.d5_decode_pair import (
     eligible,
+    min_step,
+    min_tokens,
     require_disjoint,
     split_decode,
 )
@@ -105,3 +107,31 @@ def test_two_dim_conv_cache_indices_shared_rejected():
     )
     with pytest.raises(ValueError, match="shared"):
         require_disjoint(split_decode(m, 0, 2), split_decode(m, 2, 4))
+
+
+def test_min_tokens_env_threshold(monkeypatch):
+    monkeypatch.setenv("D5_PAIR_MIN_TOKENS", "32")
+    assert min_tokens() == 32
+
+
+def test_min_tokens_floors_and_ignores_invalid(monkeypatch):
+    monkeypatch.delenv("D5_PAIR_MIN_TOKENS", raising=False)
+    assert min_tokens() == 2
+    monkeypatch.setenv("D5_PAIR_MIN_TOKENS", "bogus")
+    assert min_tokens() == 2
+    monkeypatch.setenv("D5_PAIR_MIN_TOKENS", "1")
+    assert min_tokens() == 2
+
+
+def test_min_step_env_threshold(monkeypatch):
+    monkeypatch.setenv("D5_PAIR_MIN_STEP", "8")
+    assert min_step() == 8
+
+
+def test_min_step_floors_and_ignores_invalid(monkeypatch):
+    monkeypatch.delenv("D5_PAIR_MIN_STEP", raising=False)
+    assert min_step() == 2
+    monkeypatch.setenv("D5_PAIR_MIN_STEP", "zero")
+    assert min_step() == 2
+    monkeypatch.setenv("D5_PAIR_MIN_STEP", "-3")
+    assert min_step() == 2

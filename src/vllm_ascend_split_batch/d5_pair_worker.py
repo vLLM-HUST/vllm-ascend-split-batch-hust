@@ -13,7 +13,13 @@ from vllm.forward_context import get_forward_context, override_forward_context
 from vllm.v1.worker.workspace import init_workspace_manager, use_workspace_lane
 from vllm_ascend.worker.worker import NPUWorker
 
-from .d5_decode_pair import eligible, require_disjoint, split_decode
+from .d5_decode_pair import (
+    eligible,
+    min_step,
+    min_tokens,
+    require_disjoint,
+    split_decode,
+)
 
 
 class D5PairWorker(NPUWorker):
@@ -49,7 +55,7 @@ class D5PairWorker(NPUWorker):
         return super().execute_model(scheduler_output)
 
     def _probe(self, layer, args, kwargs):
-        if self.d5_done or self.d5_step < 2:
+        if self.d5_done or self.d5_step < min_step():
             return
         ctx = get_forward_context()
         prefix = layer.linear_attn.prefix
@@ -61,6 +67,8 @@ class D5PairWorker(NPUWorker):
         hidden = kwargs.get("hidden_states", args[0] if args else None)
         residual = kwargs.get("residual", args[1] if len(args) > 1 else None)
         if hidden is None or not eligible(meta, hidden.shape[0]):
+            return
+        if hidden.shape[0] < min_tokens():
             return
         self.d5_done = True
         directory = Path(os.environ["D5_PAIR_DIR"])

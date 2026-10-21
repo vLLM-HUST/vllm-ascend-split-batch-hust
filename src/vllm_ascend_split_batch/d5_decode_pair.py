@@ -1,7 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 vLLM-HUST contributors.
 
+import os
 from copy import copy
+
+
+def min_tokens():
+    try:
+        return max(2, int(os.environ.get("D5_PAIR_MIN_TOKENS", "2")))
+    except ValueError:
+        return 2
+
+
+def min_step():
+    try:
+        return max(2, int(os.environ.get("D5_PAIR_MIN_STEP", "2")))
+    except ValueError:
+        return 2
 
 
 def eligible(metadata, tokens):
