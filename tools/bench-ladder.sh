@@ -601,6 +601,19 @@ get_prof_ptr() {
   fi
 }
 
+serve_env_preflight() {
+  # nnal/atb 在位时要求 LD_LIBRARY_PATH 已含其条目, 否则 worker dlopen libatb.so 必败。
+  [ "${LADDER_SKIP_ENV_CHECK:-0}" != "1" ] || return 0
+  [ -d "${LADDER_ATB_HOME:-/usr/local/Ascend/nnal/atb}" ] || return 0
+  case ":${LD_LIBRARY_PATH:-}:" in
+    *:"${LADDER_ATB_HOME:-/usr/local/Ascend/nnal/atb}"/*) return 0 ;;
+  esac
+  echo "bench-ladder: LD_LIBRARY_PATH 缺 nnal/atb 路径 → worker dlopen libatb.so 将失败 → 拒绝起服" >&2
+  echo "  修复: 起服 shell 依次 source ascend-toolkit / cann ascendnpu-ir / nnal-atb 三个 set_env.sh" >&2
+  echo "  （LADDER_SKIP_ENV_CHECK=1 可跳过, 需自担）" >&2
+  return 1
+}
+
 cmd_serve() {
   local profile=0 tier=plain max_iters=0 require_shapes=0
   if [ "${1:-}" = "--profile" ]; then
@@ -632,6 +645,8 @@ cmd_serve() {
     echo "serve 已运行但 mode=$running，请先 opt bench stop 再切换到 mode=$tier（plain/profile 不混测）" >&2
     return 3
   fi
+  # 起服前置: ATB 动态库路径自检（fail-fast; 回执 records/probes/20261021T024500Z_serve_env_clobber_diagnosis）
+  if serve_env_preflight; then :; else return 1; fi
   # 起服前置: 运行树接口面校验（2026-10-16 加；纯静态、不 import、不占卡、秒级）
   #   拦两类错误: ①「调用点已改、定义点未改」——2026-10-16 11:53 就是这样漏过去的
   #   （fused_moe.py 调 AscendSharedExperts.prepare_input_before_routed_experts 而定义点无此方法），
