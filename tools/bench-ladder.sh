@@ -797,18 +797,20 @@ PYEOF
   nohup setsid "$VLLM" serve "$MODEL" \
     --tensor-parallel-size 2 --max-model-len 8192 --port "$PORT" \
     --no-enable-prefix-caching "${prof_args[@]}" "${extra[@]}" > "$log" 2>&1 < /dev/null &
-  echo $! > "$LADDER_PIDFILE"
+  local started_pid=$!
+  printf '%s\n' "$started_pid" > "$LADDER_PIDFILE"
   # 2026-10-17(F1): 落 serve 侧 env 快照（与 serve log 同 stem 的 <log>.env.json）。
   # 这里**按 stem 硬推导**（不认 LADDER_SERVE_ENV 覆盖），保证"一个 serve ⇔ 一份快照"的关联；
   # 该覆盖项只给探针/排障用。这是 carriers.env 的**唯一**来源：screen/L1/L2 的调用 shell
   # 未必继承这里的 export，读调用 shell 会写出"键为空 + marker effective"的自证冲突。
   # 失败只告警, 不阻断起服。
   local serve_env="${log%.log}.env.json"
-  carrier_write_serve_env "$serve_env" "$log" "$(serve_pid)"
-  cmd_wait 1800 || return $?
+  carrier_write_serve_env "$serve_env" "$log" "$started_pid"
+  cmd_wait 1800 "$started_pid" || return $?
   # 2026-10-17: 就绪后打载体 marker 摘要（人工核验: 包/入口点/env 来源/日志逐载体归因）。
   # 只记录不阻断 —— 载体状态是记录轴（/root/opt-ops/AGENTS.md），起服失败另有其它门。
   carrier_summary "$(carrier_probe_json "$log")"
+  startup_pid_ok "$started_pid" || return $?
   "$PY" - "$SERVE_MODE_FILE" "$tier" <<'PYEOF'
 import json, sys
 json.dump({"mode": sys.argv[2]}, open(sys.argv[1], "w"))
@@ -827,9 +829,30 @@ cmd_stop() {
   echo "serve 已停止"
 }
 
+startup_pid_ok() {
+  local expected=${1:-} state=""
+  case "$expected" in
+    ''|0|*[!0-9]*) echo "无效的 serve 启动 PID: $expected" >&2; return 1 ;;
+  esac
+  if [ "$(serve_pid)" = "$expected" ] && kill -0 "$expected" 2>/dev/null; then
+    state=$(ps -p "$expected" -o stat= 2>/dev/null) || state=""
+    case "$state" in
+      ''|*Z*|*X*) ;;
+      *) return 0 ;;
+    esac
+  fi
+  echo "serve 启动 PID 已退出或替换(expected=$expected, actual=$(serve_pid)); 查 $(cat /tmp/ladder-serve-log 2>/dev/null || echo "$LOGS/ladder-serve.log")" >&2
+  return 1
+}
+
 cmd_wait() {
-  local timeout=${1:-1800} i=0
-  until health_ok; do
+  local timeout=${1:-1800} expected_pid=${2:-} i=0
+  while :; do
+    if [ -n "$expected_pid" ]; then startup_pid_ok "$expected_pid" || return 1; fi
+    if health_ok; then
+      if [ -n "$expected_pid" ]; then startup_pid_ok "$expected_pid" || return 1; fi
+      break
+    fi
     sleep 5; i=$((i + 5))
     if [ "$i" -ge "$timeout" ]; then echo "等待 /health 超时(${timeout}s), 查 $(cat /tmp/ladder-serve-log 2>/dev/null || echo "$LOGS/ladder-serve.log")"; return 1; fi
   done

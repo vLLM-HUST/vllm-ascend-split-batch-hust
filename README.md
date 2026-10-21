@@ -204,6 +204,11 @@ CSV/all-kernel result is delivered. `deep` defaults to a full window and retains
 the shape database. Plain and profiler-enabled servers cannot be reused across
 modes; stop the active server before switching.
 
+`opt bench serve` requires its captured startup PID to remain live and match the
+PID file before accepting `/health` and publishing the serve mode. A dead or
+replaced PID fails immediately, even if another server is healthy. Standalone
+`opt bench wait [timeout_s]` remains an endpoint-only readiness check.
+
 ### Carrier status is recorded, not gated
 
 `screen.json` carries a `carriers` block (`opt-ops-carriers.v2`), and
