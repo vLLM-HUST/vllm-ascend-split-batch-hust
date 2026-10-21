@@ -47,7 +47,7 @@ vllm-ascend 宿主的插件壳与 split-batch 规划契约；cascade 实现源�
 - 算子默认执行 L0 → plain L3 + compare → light L4；不强制 L1/L2 screen。端到端问题显式跑完整 screen；无 screen 的采集条件以 `/root/opt-ops/AGENTS.md` 为准。历史报告保留，不为新流程重采旧数据。
 - 最小实现可测后、完整验证或明确阻塞后，各检查一次是否应提交。提交包含实现/测试/接入与回滚材料/结果边界；大 trace 留 L2，仓内保留摘要、解析入口和哈希，不复制逐调用明细制造无效审查负担。
 - 数值失败保持 default-off，把失败复现和证据提交入库；不得将失败项从报告删除，或将局部收益写成已验收。Git 提交与优化验收是两个状态。
-- 先跑测试，再审查 `git diff` 与 staged diff，仅 `git add <本轮明确路径>`。不提交无关 dirty 文件，不改正在执行的脚本。
+- 按 [docs/agent-guide.md §2](docs/agent-guide.md#2-开发工作流) 选择受影响的定向测试与静态检查，失败后定位子集；全仓 pytest 不作每次实验/JSON/提交的默认前置。全量触发原因、稳定源码快照及复用范围必须明确；发布/合入准入不变。纯文档/结果/证据指针只做格式、引用、哈希与 Git 范围检查，不起服、不跑模型 smoke。验证后审查 `git diff` 与 staged diff，仅 `git add <本轮明确路径>`。不提交无关 dirty 文件，不改正在执行的脚本。
 - commit 后用 `opt delivery --base <起点HEAD> --path <本轮路径> ... --check` 核验；工作台未部署时可用 `python3 tools/operator_delivery.py` 的相同参数。无范围不算通过，push 另需授权及远端 hash 核验。
 - `/root/opt-ops` 的流程修改必须有本仓可校验补丁及测试；运行树仅为部署副本。
 
@@ -55,7 +55,8 @@ vllm-ascend 宿主的插件壳与 split-batch 规划契约；cascade 实现源�
 
 ```bash
 cd /vllm-workspace/vllm-ascend-split-batch-hust
-pytest -q && ruff check .        # CPU 层门槛,提交前必过
+pytest -q tests/test_planner.py  # 示例：仅 planner 改动
+ruff check src/vllm_ascend_split_batch/planner.py tests/test_planner.py
 python -m pip install -e ".[test]"
 vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
 ```

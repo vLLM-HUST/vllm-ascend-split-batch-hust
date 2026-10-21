@@ -1,0 +1,12 @@
+[
+  {
+    "path": "AGENTS.md",
+    "before_sha256": "8afc3141d61e052e3928d69db155a80abf4aae020fc02f590b1426d20826d5ee",
+    "after_sha256": "68a7d52ac21ef43f76230ec206306cb1ec22b1795112b7a8606223f43ab1aac5"
+  },
+  {
+    "path": "opt-ops/AGENTS.md",
+    "before_sha256": "0da4cd817ed69229f4dda015222dd08404b557fad60e1c2bfe1ac817ac198907",
+    "after_sha256": "40c8e00e8b6ad2346107737ee092ff2e2ffa158e7d9c0b8919c1fab337d32b35"
+  }
+]

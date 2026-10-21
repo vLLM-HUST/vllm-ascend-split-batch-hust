@@ -160,7 +160,8 @@ The bounded host range remains `>=0.25.1rc2.dev125,<0.25.2`; see
 ```bash
 python -m pip install -e ".[test]"
 vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
-pytest -q && ruff check .
+pytest -q tests/test_planner.py
+ruff check src/vllm_ascend_split_batch/planner.py tests/test_planner.py
 ```
 
 ⚠️ **`vllm-hust-ext` is not on PyPI** (see the org's own note on
@@ -188,15 +189,33 @@ python -m pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extensio
 
 The repository owns the executable ladder at `tools/bench-ladder.sh`; `opt bench`
 dispatches to this checked-in source rather than mutating archived evidence scripts.
-The enforced cadence is:
+Select checks by change type using [the development contract](docs/agent-guide.md#2-开发工作流).
+Documentation/results/pointers require format, reference, hash and Git-scope checks,
+not model smoke or full pytest. Development runs affected CPU tests and static
+checks; full pytest needs an explicit shared-impact, dependency/packaging,
+release/merge or insufficient-targeted-coverage reason. Share full-suite results
+for the same relevant source snapshot and environment across parallel sessions;
+evidence, pointer, commit-hash or wording updates alone do not invalidate them.
+Release admission remains unchanged.
 
-1. static checks and CPU tests;
-2. `opt bench serve`, then `opt bench screen <unique-tag>` on a **plain** server
-   (`L1×3 + L2×3 + L3×1`), producing `screen.json`;
-3. after recording the candidate as `ready`/`validating`, run a bounded light L4
-   with `--trace-tier light --screen-report <screen.json>`;
-4. use `--trace-tier deep` only with `--collection-reason mechanism-gap`;
-5. parse offline and slim immediately after delivery.
+For operator/weight/execution-order changes:
+
+1. affected static checks and CPU tests, then necessary L0;
+2. plain L3 + `opt bench compare`; numerical failure blocks promotion independently;
+3. once `ready`/`validating`, bounded light L4 through the registered operator gate
+   (`--candidate <ID> --trace-tier light --collection-reason candidate-ab
+   --gap <question> --reuse-evidence <path>`); see `/root/opt-ops/AGENTS.md`;
+4. deep only with `--collection-reason mechanism-gap` for an explicit mechanism gap;
+5. parse offline and slim after delivery; never recollect historical data for cadence.
+
+L1/L2 screen is explicit for an independent end-to-end question, not an operator
+prerequisite. Graph/system collection retains the complete plain screen gate
+(`L1×3 + L2×3 + L3×1`, then `--screen-report <screen.json>`); never relabel a route
+to bypass it. Service smoke and package-loading smoke each need an independent
+question; without packaging/registration/loading changes, do not repeat loading
+smoke. Flow-only repairs do not rerun model L3 unless loading, execution branches,
+input/output protocol or comparison semantics change. `opt bench run` is an
+explicit end-to-end convenience command, not a per-commit gate.
 
 `light` defaults to the host's `max_iterations=32` bounded window, disables stack/memory/shape collection,
 stamps the capture scope into the opstat, and removes profiler databases after the
