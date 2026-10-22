@@ -8,4 +8,5 @@ build/
 /bench/results/
 /docs/evidence/
 /host-proposals/*/validation/
-
+kernel_meta/
+fusion_result.json
