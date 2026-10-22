@@ -29,8 +29,8 @@ def test_historical_reports_are_references_not_metric_copies():
 def test_unrecovered_probes_are_explicit_and_not_successful_urls():
     source = json.loads((ROOT / "EVIDENCE_AVAILABILITY.json").read_text())
     assert source["local_reference_occurrences"] == 39
-    assert source["unrecovered_occurrences"] == 37
-    assert source["sha256_recovered_occurrences"] == 2
+    assert source["unrecovered_occurrences"] == 33
+    assert source["sha256_recovered_occurrences"] == 6
     closure = json.loads(
         (ROOT / "host-proposals/GDN-qkv-norm/registration-closure.json").read_text()
     )
@@ -53,3 +53,30 @@ def test_installation_consumers_and_boundary_are_retained():
     assert "within noise" in readme
     assert "fail-closed" in readme
     assert "must not be crossed" in readme
+
+
+def test_recovered_consumers_link_originals_without_requalifying():
+    source = json.loads((ROOT / "EVIDENCE_AVAILABILITY.json").read_text())
+    recovery = source["recovery_audit"]
+    assert re.fullmatch(r"[a-f0-9]{40}", recovery["commit"])
+    assert re.fullmatch(r"[a-f0-9]{64}", recovery["sha256"])
+    gdn = json.loads(
+        (ROOT / "host-proposals/GDN-qkv-norm/proposal_meta.json").read_text()
+    )
+    for url, name in zip(
+        gdn["evidence"][:2],
+        ["l0-fused-norm.json", "kernel-trace-summary.json"],
+        strict=True,
+    ):
+        assert url.startswith("https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/")
+        assert url.endswith("/" + name)
+    assert "withdrawn bundle registration" in gdn["decision"]
+    delivery = json.loads(
+        (ROOT / "host-proposals/OPT-delivery-workflow/proposal_meta.json").read_text()
+    )
+    assert delivery["motivation_evidence"].endswith(
+        "/model-validation/20261018T145800Z_gdn_model_receipt.json"
+    )
+    pitfalls = (ROOT / "docs/pitfalls.md").read_text()
+    assert "multibuffer-graph.json" in pitfalls
+    assert "两份 separate-graph 崩溃日志仍未找回" in pitfalls

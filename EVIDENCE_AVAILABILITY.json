@@ -37,8 +37,8 @@
     "host-proposals/OPT-toolchain-repair/validation.json"
   ],
   "local_reference_occurrences": 39,
-  "sha256_recovered_occurrences": 2,
-  "unrecovered_occurrences": 37,
+  "sha256_recovered_occurrences": 6,
+  "unrecovered_occurrences": 33,
   "limits": "Archived documentary assertions are not raw probe recovery or new qualification. Runtime constants, installation metadata, cohort limits and source hashes are not measurement copies.",
   "integrity": {
     "manifest.json": {
@@ -51,5 +51,11 @@
       "bytes": 18361,
       "sha256": "80532d345bcfb31d1eb9889274fef320906926097d84fddd6b94647c904a9419"
     }
+  },
+  "recovery_audit": {
+    "commit": "ba341ca915c0c8556865c8f662346ced9fc0e0c7",
+    "path": "archive/mod-git-20261022/split-probe-recovery/local-reference-audit.json",
+    "sha256": "0501afbd761229778ca66efc986cf68164262908860f39d34858bfad1ae60554",
+    "bytes": 23117
   }
 }

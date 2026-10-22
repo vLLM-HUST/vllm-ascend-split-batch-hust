@@ -55,8 +55,10 @@ entering future packages. No published installation asset is deleted here.
 
 Historical prose and report-only JSON now link to immutable benchmark originals.
 See [EVIDENCE_AVAILABILITY.json](EVIDENCE_AVAILABILITY.json) for scope and the
-central availability audit. Two local references resolve to an existing raw log
-by their previously recorded SHA256. Other originals are unrecovered; null
+central availability audit. Six reference occurrences resolve to five archived
+originals: two aliases by declared SHA256 and four references by original-path
+provenance mappings plus SHA256. CI downloads and checks the recovery mappings
+and original bytes. The other 33 occurrences remain unrecovered; null
 references and archived summaries must not be reported as successful raw checks.
 Failures, rejected methods, registration withdrawal and cohort boundaries are
 retained. Numeric routing/shape constants and installation identities are not
