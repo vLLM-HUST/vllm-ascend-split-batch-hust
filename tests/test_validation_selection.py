@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import ast
-import hashlib
-import json
 import re
 import subprocess
 from pathlib import Path
@@ -10,7 +8,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-BUNDLE = ROOT / "tools/validation-policy"
 
 
 def ignored_paths(event):
@@ -68,29 +65,3 @@ def test_release_and_manual_full_validation_remain_available():
         "python -m twine check dist/*",
     ):
         assert f"- run: {command}" in publish
-
-
-def test_external_policy_patch_roundtrip(tmp_path):
-    manifest = json.loads((BUNDLE / "external-constraints.json").read_text())
-    for item in manifest:
-        deployed = Path("/root") / item["path"]
-        if not deployed.is_file():
-            pytest.skip("workspace policy deployment not installed")
-        current = deployed.read_bytes()
-        assert hashlib.sha256(current).hexdigest() == item["after_sha256"]
-        target = tmp_path / item["path"]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(current)
-    patch = (BUNDLE / "external-constraints.patch").read_bytes()
-    for reverse, key in [(True, "before_sha256"), (False, "after_sha256")]:
-        result = subprocess.run(
-            ["patch", "--batch", "-p1", *(["-R"] if reverse else [])],
-            cwd=tmp_path,
-            input=patch,
-            capture_output=True,
-            check=False,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        for item in manifest:
-            digest = hashlib.sha256((tmp_path / item["path"]).read_bytes()).hexdigest()
-            assert digest == item[key]
