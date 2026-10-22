@@ -11,7 +11,7 @@
   `knowledge/surveys/contrast/norm-rope-act/对照-rope.md`（修前断点）、
   `.../对照-rope.md`（fork 分支 `/tmp/vah-ropefix` 的修法与修后数字）、
   `.../patches_ropefix_2026-09-10/combined-main-to-fix.diff`（参考 diff）。
-- 本仓证据：`docs/evidence/rope-fix/`（CPU 守卫 + NPU 探针 carrier 形态复现）。
+- 本仓证据：[docs/evidence/rope-fix/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/rope-fix/)（CPU 守卫 + NPU 探针 carrier 形态复现）。
 
 ## 0. 结论速览
 
@@ -137,7 +137,7 @@ CPU 门槛要求的就是这三层断言真的执行。`VLLM_ASCEND_HUST_ROOT` �
 与"锚点漂移"两种变异，用 `VLLM_ASCEND_HUST_ROOT` 指向副本运行）：3 条反向断言 +
 镜像断言按预期红，措辞分别为 `upstream fixed defect ①②③` 与 `anchor drifted`
 （02 变异同时命中两条——这正是 §5 末尾"区分原因"的作用）。证据：
-`docs/evidence/rope-fix/guard-selftest/`。
+[docs/evidence/rope-fix/guard-selftest/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/rope-fix/guard-selftest/)。
 
 ## 6. 已知偏差与未尽事项
 
@@ -147,7 +147,7 @@ CPU 门槛要求的就是这三层断言真的执行。`VLLM_ASCEND_HUST_ROOT` �
    `load_general_plugins()` / `vllm-hust-ext` 发现（本任务的纪律禁 pip 动作，
    故未刷新）。CPU 侧用 `test_descriptor_declares_both_entry_point_groups`
    钉住声明，NPU 侧探针用**直接调用 carrier `load()`** 的 runner 触发（见
-   `docs/evidence/rope-fix/`）。
+   [docs/evidence/rope-fix/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/rope-fix/)）。
 2. **未做真模型服务级 e2e A/B**：本机无 llama3 / Qwen2.5-yarn / Qwen2.5-VL
    checkpoint，价值仍以算子级/构造级证据闭环（与 fork 侧报告同口径）。
 3. **310P（兼容档）与未来上游变体**：

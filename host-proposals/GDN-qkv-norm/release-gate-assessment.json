@@ -19,12 +19,12 @@
   },
   "existing_evidence": [
     {
-      "path": "host-proposals/GDN-qkv-norm/validation/multibuffer-determinism-20261018/receipt.json",
+      "path": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/multibuffer-determinism-20261018/receipt.json",
       "credit": "L0 exact 5/5, stable-address graph replay 8/8, FULL fixed-batch L3 16/16 and standard L3+compare 8/8",
       "limit": "Only multibuffer=True production FULL evidence; older failures retained, PIECEWISE deterministic protocol is not interchangeable"
     },
     {
-      "path": "host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019/receipt.json",
+      "path": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019/receipt.json",
       "credit": "Accepted operator evidence: 6->1 kernels/call on both ranks, all-kernel denominators recorded",
       "limit": "One paired truncated light window, not three repeats; A540/B570 calls, compare per-call not totals; no throughput claim"
     },

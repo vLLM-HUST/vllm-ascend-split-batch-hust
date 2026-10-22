@@ -32,9 +32,9 @@ ruff check .                                       # lint 门槛:零告警
 # 涉及行为/门控/patch 面的改动,追加 NPU 冒烟:单卡、小 batch、default-off 对比
 ```
 
-NPU 层验证顺序:先小规模冒烟(单卡 `npu:0`),再场景化;正确性(token 对齐/
-容差声明)与性能(TPOT/latency 对比)证据同时留存,写进 `docs/evidence/` 或
-`docs/progress.md`(**不写 PR 描述**——本仓不做上游 PR,见 §1 第 6 条)。
+设备验证仍需按原审批及实验协议执行。结果先写到仓库外，审核后发布到
+`vllm-hust-benchmark`；本仓只保留固定版本链接、解析工具和测试。
+失败记录与适用边界不得丢弃。历史原件见 [benchmark 归档](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git)。
 
 ## 3. 代码规范
 

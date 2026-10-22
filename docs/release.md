@@ -224,7 +224,7 @@ python3 tools/seam_diff.py --selftest      # 判别力自证（tools 没在空�
 - 退出码 0 = 静态面一致；1 = 有签名/调用点/结构面差异，需逐条处理。
 - 它**只证明静态面**：方法体语义（对象如何被构造、`BatchDescriptor` 如何被填充、
   aclgraph 变体表在运行时怎么组织）必须靠下面的真机冒烟。
-- 首次对拍的实测结论与原始输出：`docs/evidence/host-drift-2026-09-26.md`
+- 首次对拍报告与原始输出：[归档](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/host-drift-2026-09-26.md)
   （已钉版本 vs 2026-09-25 的 main：vllm-ascend +480 提交、core +991 提交，
   12 个接缝符号签名全一致；rope-fix 反向守卫对新树 11/11 通过）。
 
@@ -275,7 +275,7 @@ GLIBC 环境缺口,fail-open 兜底,非代码冲突)。两点警示见证据文�
 ①版本串漂移——hust 构建的 vllm_ascend 版本串停在 0.25.1rc2.dev 窗口而代码已追平
 0.28,**门的满足不能推断宿主代码代际**,升级核对仍须走本清单;②cascade 内核在 2.35
 底座不可载,0.28 主栈暂不启用(用户裁定),重启用条件=22.04 底座重建 wheel。
-完整证据:[evidence/host-028-2026-10-11.md](evidence/host-028-2026-10-11.md)。
+完整证据:[evidence/host-028-2026-10-11.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/host-028-2026-10-11.md)。
 
 ### 4.2 W1R GMM 补丁核对（tier-2 提案，未发布）
 
@@ -424,7 +424,7 @@ CI runner 是**干净 ubuntu**(只装 `.[test]`),没有 torch / torch_npu / vllm
 
 - ~~`ruff format --check .` 不通过~~ **已修**:`59e8dfa` 做了纯格式化提交,
   格式与两套运行面自那以后全绿。
-- `docs/evidence/cascade/` 与 `src/vllm_ascend_split_batch/fi_sampling/` 是**存档/
+- [docs/evidence/cascade/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/) 与 `src/vllm_ascend_split_batch/fi_sampling/` 是**存档/
   vendor 件**,ruff 通过 `extend-exclude` 排除(重排会破坏 `MANIFEST.sha256`)。
 - 发布渠道未启用:证据齐后走 `uv publish` 到 pypi 或内部索引(见 §1)。
 
@@ -972,3 +972,16 @@ core `0aee727ff6`;其它 core 会 import 期报错(§0.3 有逐条报错原文)�
 ① 干净 venv 打 `pypi.org/simple` ⇒ `Would install … 0.1.3`,且 `importlib.metadata` 读出
 `Version: 0.1.3`;② 反向:`==0.1.2` 的元数据里 `host.version_range` 仍是点钉(证明"放宽只在新版生效");
 ③ 两代宿主 `extension check` 均 `compatible`。
+# Distribution custody
+
+Source distributions include only runtime source, packaging metadata, README,
+license and provenance. Benchmark results, logs and evidence directories are not
+installation inputs. CI, index publishing and GitHub Release upload must run
+`python tools/check_distribution.py <artifact-directory>` after building or
+downloading both distributions. The gate checks runtime inventory parity,
+extension manifests and entry points as well as evidence exclusion.
+
+Published versions are immutable: do not rebuild or overwrite their assets to
+remove historical evidence. Historical result members belong in benchmark custody;
+retire an installation artifact only after its installation consumers are resolved.
+

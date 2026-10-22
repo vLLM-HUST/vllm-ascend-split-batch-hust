@@ -9,6 +9,7 @@
 # SPARE-card lock /tmp/w3-npu.lock so a concurrent job cannot steal card 7.
 #
 # Usage:
+#   export SPLIT_BATCH_RESULTS_DIR=/tmp/split-batch-new-run
 #   nohup flock /tmp/w3-npu.lock -c \
 #     'cd /tmp && ASCEND_RT_VISIBLE_DEVICES=7 bash \
 #      /vllm-workspace/vllm-ascend-split-batch-hust/bench/bench_fisampling_refresh_e2e.sh' \

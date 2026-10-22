@@ -127,7 +127,8 @@ pytest -q tests/test_provenance_hashes.py     # 机械守卫（离线）
 
 - 源侧 hash 若要"直接比对"复核，用**已入仓的冻结快照** `frozen-20260909`
   （`docs/evidence/fi-sampling-frozen-20260909/`）：`cd` 该目录后 `sha256sum -c FROZEN.sha256`
-  即得 4 行 OK，**不需要**自己推逆变换。快照 id、逐件记录值与边界见该目录 `README.md`。
+  即得 4 行 OK，**不需要**自己推逆变换。快照 id、逐件记录值与边界见
+  [归档说明](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/fi-sampling-frozen-20260909/README.md)。
 - **"打 tag 冻结"已被实测排除**（2026-09-26）：W2 源包是活工作区，且工作区仓的 git 历史里
   没有那一版（`git log --format=%H -- knowledge/surveys/sampling/fi_sampling/api.py` 只返回
   `9e98559`，其内容即漂移后的 `4e3ce156…`）⇒ 快照只能由 §4.1 的逆变换重建，这也是

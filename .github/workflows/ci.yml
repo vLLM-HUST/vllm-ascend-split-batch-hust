@@ -62,4 +62,5 @@ jobs:
           git commit -qm "ci diag for ${{ github.sha }}"
           git push -q origin +HEAD:refs/heads/ci-diag-${{ matrix.python }}
       - run: python -m build
+      - run: python tools/check_distribution.py dist
       - run: vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
