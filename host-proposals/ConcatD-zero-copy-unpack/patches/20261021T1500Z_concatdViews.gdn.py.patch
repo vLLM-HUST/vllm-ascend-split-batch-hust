@@ -1,5 +1,5 @@
---- /root/operator-experiments/records/tree-patches/20261021T1355Z_d4_conv_hoist_site2.orig-gdn.py	2026-10-21 13:55:26.712824784 +0000
-+++ /root/operator-experiments/records/tree-patches/20261021T1459Z_concatdViews.gdn.py.proposed	2026-10-21 14:55:33.904509237 +0000
+--- /root/包体恢复/records/tree-patches/20261021T1355Z_d4_conv_hoist_site2.orig-gdn.py	2026-10-21 13:55:26.712824784 +0000
++++ /vllm-workspace/vllm-ascend/vllm_ascend/ops/gdn.py	2026-10-21 17:26:55.551772766 +0000
 @@ -51,6 +51,43 @@
  _MERGE_GDN_INPROJ = os.environ.get("VLLM_HUST_GDN_MERGE_INPROJ", "0") == "1"
  
@@ -94,7 +94,7 @@
                      activation_num = 1 if self.activation else 0
                      mixed_qkv_non_spec_output = torch.empty_like(mixed_qkv_non_spec)
                      torch.ops._C_ascend.npu_causal_conv1d_custom(
-@@ -453,11 +499,17 @@
+@@ -453,11 +499,14 @@
                      )
                      mixed_qkv_non_spec = mixed_qkv_non_spec_output
          elif attn_metadata.num_decodes > 0:
@@ -103,18 +103,15 @@
              non_spec_causal_conv1d_meta = attn_metadata.non_spec_decode_metadata.causal_conv1d
              non_spec_query_start_loc_device = non_spec_causal_conv1d_meta.query_start_loc
 -            output_non_spec = torch.empty_like(mixed_qkv_non_spec)
-+            if _UNPACK_VIEWS_ON:
-+                output_non_spec = torch.empty(
-+                    mixed_qkv_non_spec.shape,
-+                    dtype=mixed_qkv_non_spec.dtype,
-+                    device=mixed_qkv_non_spec.device,
-+                )
-+            else:
-+                output_non_spec = torch.empty_like(mixed_qkv_non_spec)
++            output_non_spec = torch.empty(
++                mixed_qkv_non_spec.shape,
++                dtype=mixed_qkv_non_spec.dtype,
++                device=mixed_qkv_non_spec.device,
++            )
              torch.ops._C_ascend.npu_causal_conv1d_custom(
                  output_non_spec,
                  mixed_qkv_non_spec,
-@@ -477,7 +529,16 @@
+@@ -477,7 +526,16 @@
              mixed_qkv_non_spec = None
  
          query_spec, key_spec, value_spec = self.rearrange_mixed_qkv(mixed_qkv_spec)
@@ -123,7 +120,7 @@
 +            query_non_spec, key_non_spec, value_non_spec = None, None, None
 +        elif (not _UNPACK_VIEWS_ON) or attn_metadata.num_prefills != 0:
 +            query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(mixed_qkv_non_spec)
-+        elif mixed_qkv_non_spec.is_contiguous() and mixed_qkv_non_spec.shape[0] == 1:
++        elif mixed_qkv_non_spec.is_contiguous():
 +            query_non_spec, key_non_spec, value_non_spec = _unpack_mixed_qkv_views(
 +                mixed_qkv_non_spec, self
 +            )

@@ -40,32 +40,32 @@
    "why": "静默失效防线: gate-fp32 载体的全部收益依赖宿主消费者仍读 gate.weight_fp32; 上游去掉该读取 → 载体装了但没人读, fail-open 无感知。"
   },
   {
-   "id": "d4site2-pack-fingerprint",
+   "id": "husk-rsp-VLLM_HUST_D4_CONV_PACK",
    "kind": "text",
-   "consumer": "ops/gdn.py",
-   "call_token": "_PACKED_CONV_WEIGHT_NAME",
-   "note": "D4 conv 权重连续分配载体指纹; 缺失=运行树被重置, 载波静默失效"
+   "consumer": "/root/vllm-workspace/vllm-ascend-split-batch-hust/src/vllm_ascend_split_batch/runtime_source_patches.py",
+   "call_token": "VLLM_HUST_D4_CONV_PACK",
+   "note": "C 轮: 变换表在 husk(重灌免疫); 运行树应 stock"
   },
   {
-   "id": "concatd-views-fingerprint",
+   "id": "husk-rsp-VLLM_HUST_GDN_UNPACK_VIEWS",
    "kind": "text",
-   "consumer": "ops/gdn.py",
-   "call_token": "_UNPACK_VIEWS_ON",
-   "note": "ConcatD 零拷贝视图载体指纹"
+   "consumer": "/root/vllm-workspace/vllm-ascend-split-batch-hust/src/vllm_ascend_split_batch/runtime_source_patches.py",
+   "call_token": "VLLM_HUST_GDN_UNPACK_VIEWS",
+   "note": "C 轮: 变换表在 husk(重灌免疫); 运行树应 stock"
   },
   {
-   "id": "moe-init-triton-fingerprint",
+   "id": "husk-rsp-VLLM_HUST_MOE_INIT_TRITON",
    "kind": "text",
-   "consumer": "ops/fused_moe/token_dispatcher.py",
-   "call_token": "_moe_init_routing_t1_kernel",
-   "note": "decode M=1 triton init-routing 指纹"
+   "consumer": "/root/vllm-workspace/vllm-ascend-split-batch-hust/src/vllm_ascend_split_batch/runtime_source_patches.py",
+   "call_token": "VLLM_HUST_MOE_INIT_TRITON",
+   "note": "C 轮: 变换表在 husk(重灌免疫); 运行树应 stock"
   },
   {
-   "id": "nz-skip-gate-fingerprint",
+   "id": "husk-rsp-VLLM_HUST_NZ_SKIP_GATE",
    "kind": "text",
-   "consumer": "ops/linear.py",
+   "consumer": "/root/vllm-workspace/vllm-ascend-split-batch-hust/src/vllm_ascend_split_batch/runtime_source_patches.py",
    "call_token": "VLLM_HUST_NZ_SKIP_GATE",
-   "note": "NZ mode2 标量门豁免指纹(default-off)"
+   "note": "C 轮: 变换表在 husk(重灌免疫); 运行树应 stock"
   }
  ]
 }
