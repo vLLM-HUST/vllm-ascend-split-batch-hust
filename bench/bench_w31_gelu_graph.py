@@ -67,12 +67,12 @@ import sys
 import time
 import traceback
 from collections.abc import Callable
-from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torch_npu
+from evidence_paths import output_directory
 
 from vllm_ascend_split_batch.fi_gelu import api, reference
 
@@ -91,7 +91,7 @@ GRAPH_ROUNDS = 3
 BF16_RTOL = 2.0**-6
 BF16_ATOL = 2.0**-6
 
-OUT = Path(__file__).resolve().parent / "results" / "bench_w31_gelu_graph.json"
+OUT = output_directory() / "bench_w31_gelu_graph.json"
 
 
 def bench_event(

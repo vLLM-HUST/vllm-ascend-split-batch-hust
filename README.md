@@ -68,7 +68,7 @@ Existing tier-2 activation requires the reviewed host patch plus
 unsupported inputs retain native fallback. No automatic patching is provided.
 Rollback requires disabling the env and restarting/recapturing; reverse the
 host patch only through its separately reviewed procedure.
-Acceptance evidence: `host-proposals/GDN-qkv-norm/validation/`.
+Acceptance evidence: [host-proposals/GDN-qkv-norm/validation/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/).
 Registration decision: `host-proposals/GDN-qkv-norm/registration-closure.json`.
 Delivery gates: [docs/release.md](docs/release.md#算子-bundle-最短交付路径).
 
@@ -99,6 +99,7 @@ Unset the environment variable and restart workers/recapture graphs to disable.
 `fi_gelu_plugin.uninstall()` removes only its own registration for future
 instances; it does not change existing instances or captured graphs.
 
+
 Registration checks and remaining-plugin migration boundaries are in
 [HOST_CONTRACT.md](HOST_CONTRACT.md). Device gates (real host import, real
 constructor dispatch, kernel numeric gate, ACL graph replay bit-exactness,
@@ -110,6 +111,65 @@ evidence is directional only (the fused kernel measured slower than the host
 native chain at the probed standalone shapes), so default-off remains correct.
 Serving-level L3 + compare and light L4 remain pending; historical kernel
 evidence does not validate this integration.
+Cascade admits **one query row per request**. The two-stage path flattens the
+shared prefix once and re-derives the per-request suffix from the query-row
+count, so MTP verification and chunked prefill (which feed `k + 1` rows) are
+rejected by the dispatch gate and skip the cascade twin capture; those steps
+keep native attention and the standard FULL graph. `speculative_config` being
+set at all is treated as fail-closed, even when a step happens to carry single
+rows, because the `k > 1` query layout is neither supported nor measured yet.
+This is a guard, **not** MTP support: Split-Batch/dual-pad fails closed the
+same way (`planner.precheck_reason` -> `speculative_decode_conflict`). Enabling
+Cascade with speculative decoding therefore yields no cascade speedup — it is
+a compatibility boundary, not an enabled-Cascade result.
+
+### Cohort scope (what our evidence does and does not cover)
+
+> Authority: [`docs/cohort-and-ownership.md`](docs/cohort-and-ownership.md) — the cohort boundary plus the four
+> ownership items returned to this repository; binding rule: [`AGENTS.md`](AGENTS.md) hard constraint 6.
+
+Stated here so the numbers below are not over-extended. **2026-10-13 owner ruling: the baseline moved to the
+0.28 image + Qwen3.5-35B-A3B** ("we no longer work on Qwen2.5"). The upstream audit quotes in
+[`docs/cohort-and-ownership.md`](docs/cohort-and-ownership.md) §1 are kept verbatim as historical receipts;
+the table below is the current claim surface. The Qwen2.5 / 0.25 evidence is retained as an **independent,
+historical** set and must not be crossed with the numbers below.
+
+| This repository's evidence covers (0.28 baseline) | This repository's evidence does **not** cover |
+|---|---|
+| 0.28 image stack: vllm `0.28.1.post1.dev143+gf18cf803c` + vllm-ascend `0.25.1rc2.dev125+hust…`, CANN 9.1.0, 2×910B2 TP=2 | other host builds outside the measured 0.28 image |
+| Qwen3.5-35B-A3B (40L: 30 GDN + 10 MoE) hybrid **TP2** | native **MTP2** verification rows / any speculative decoding |
+| chunked prefill **on**, APC **off**, `cudagraph_mode=NONE` | `async` scheduling combinations we did not run |
+| bf16 | the retired Qwen2.5 / 0.25 line (historical set only) |
+
+⇒ **Do not cross-extrapolate**: the historical Qwen2.5/0.25 numbers do not carry over to the 0.28/Qwen3.5
+baseline, and vice versa. Speculative decoding (incl. MTP2) stays **fail-closed** on both domains — a
+"cascade ON" run under it measures the native path, not this feature. Entering the unified cohort would
+still first require a dual-pad/graph bucket contract for `k + 1` verification rows plus real replay
+correctness on that configuration — that work is **not** planned here (see `docs/support-matrix.md` §5 and
+the workspace ledger, OPEN-05).
+
+
+Microbatching: the plugin mirrors the official vllm core gate and keeps the
+two-stage path off under ANY microbatching (`use_ubatching`, i.e. DBO or
+`ubatch_size > 1`).  On the current vllm-ascend the platform layer resets both
+`enable_dbo` and `ubatch_size`, so this gate is dormant there by construction.
+
+Verified evidence — **historical (Qwen2.5 / 0.25 domain)**, Qwen2.5-Coder-14B-Instruct, 910B2, CANN 9.0.1:
+
+[Original correctness, timing and failure observations](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/README.md#L148).
+These historical observations do not qualify a different cohort.
+
+The full evidence set is archived in benchmark; retrieval and custody rules are
+in [EVIDENCE.md](EVIDENCE.md). See
+[docs/evidence/cascade/README.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/README.md) for the
+per-section reports (`section2-correctness.md`, `section3-performance.md`,
+`section4-active-enablement.md`), the reproduction scripts, the raw result
+JSONs and the sha256 manifest (including the list of large sweep logs left in
+the development workspace). Read its §1 before quoting any number: the Coder
+model is a **performance stand-in** and must not be compared with the real
+`Qwen2.5-14B-Instruct` on behavior. This whole set is **historical (Qwen2.5 /
+0.25)** and must not be crossed with the current 0.28/Qwen3.5 baseline.
+
 
 ## fi_sampling plugin (default-off, evidence-only)
 
@@ -136,18 +196,13 @@ all five mandatory fallbacks: per-request generators, processed
 logits/logprobs modes, batch-invariant, reduce-sample, async-exponential)
 stays on the fork chain with no device sync.
 
-Evidence (`docs/evidence/w2b-fi-sampling/REPORT.md`, Qwen2.5-Coder-14B, 910B2 —
+Evidence ([docs/evidence/w2b-fi-sampling/REPORT.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/w2b-fi-sampling/REPORT.md), Qwen2.5-Coder-14B, 910B2 —
 **historical Qwen2.5/0.25 domain**, see the cohort scope above):
 
-- default-off is zero-diff (no host/kernel import, no patch) and NPU smoke is
-  6/6 PASS;
-- untruncated e2e (4k ctx, B=64, 2 repeats): median TPOT off 112.67 ms vs on
-  112.52 ms (**-0.14%**, within noise) with the FI api1 route confirmed on
-  1300/1300 steps -- sampling is only ~1% of TPOT at that batch size;
-- joint route is unreachable in the 4k-context single-card shape (B_max ~= 122
-  < the 256 floor); it only fires with a ~512-token context, so the joint
-  branch is a safe, currently dormant branch in normal deployments;
-- `pytest -q` 73 passed + `ruff check .` green.
+[Original sampling measurements and route observations](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/README.md#L193).
+The reported end-to-end difference was within noise. The joint route was not
+reachable in the long-context single-card shape. Neither observation is a new
+qualification; routing guards and the historical cohort boundary above remain.
 
 ## Extension framework
 

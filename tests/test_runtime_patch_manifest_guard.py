@@ -77,6 +77,12 @@ def test_live_tree_is_anchor_matchable_for_husk():
             rsp.apply_transforms(src, transforms)
         except rsp.AnchorError as exc:
             mismatches.append(f"{rel}: {exc}")
+    # C-ON 验证态钉子(1021-182645 L3 8/8): views 变换的 empty_like 恒 2
+    gdn_src = (TREE / "ops/gdn.py").read_text(encoding="utf-8", errors="replace")
+    assert "ops/gdn.py" in merged
+    out_gdn, _ = rsp.apply_transforms(gdn_src, merged["ops/gdn.py"])
+    assert out_gdn.count("torch.empty_like(mixed_qkv_non_spec)") == 3, (
+        "views 验证态漂移(C-ON 运行时: stock prefill 回退 1 + views 2)")
     assert not mismatches, (
         "运行树锚点失配 -> loader fail-closed 回 stock, 载波失效"
         "（旧 vintage 树内补丁残留? 恢复: 用 tree-patches 对应 .orig 覆盖）: "

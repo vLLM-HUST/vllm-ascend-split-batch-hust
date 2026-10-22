@@ -1,0 +1,61 @@
+{
+  "schema": "split-prose-custody-reference/v1",
+  "repository": "vLLM-HUST/vllm-hust-benchmark",
+  "commit": "4bf3c6b7af6ddb4cdcf193e348302758386f8a2f",
+  "snapshot": "archive/mod-git-20261022/split-prose-source/snapshot",
+  "audit": "archive/mod-git-20261022/split-prose-source/local-reference-audit.json",
+  "source_commit": "499d0d9d33df50c04f2e2abbb987b912535f2f50",
+  "reviewed_files": [
+    "HOST_CONTRACT.md",
+    "README.md",
+    "docs/design/fia-decode-demask.md",
+    "docs/design/rope-variant-defects.md",
+    "docs/pitfalls.md",
+    "docs/progress.md",
+    "docs/release.md",
+    "docs/upstream/fia-decode-demask.md",
+    "host-proposals/GDN-qkv-norm/progress.json",
+    "host-proposals/GDN-qkv-norm/proposal_meta.json",
+    "host-proposals/GDN-qkv-norm/registration-assessment.json",
+    "host-proposals/GDN-qkv-norm/registration-closure.json",
+    "host-proposals/GDN-qkv-norm/release-candidate.json",
+    "host-proposals/GDN-qkv-norm/release-gate-assessment.json",
+    "host-proposals/OPT-delivery-workflow/proposal_meta.json",
+    "host-proposals/OPT-delivery-workflow/validation.json",
+    "host-proposals/OPT-operator-lean-profile/validation.json",
+    "host-proposals/OPT-toolchain-repair/candidate.json",
+    "host-proposals/OPT-toolchain-repair/proposal_meta.json",
+    "host-proposals/OPT-toolchain-repair/validation.json",
+    "host-proposals/W1R-gmm-tuning-config/proposal_meta.json"
+  ],
+  "report_reference_files": [
+    "host-proposals/GDN-qkv-norm/progress.json",
+    "host-proposals/GDN-qkv-norm/registration-assessment.json",
+    "host-proposals/GDN-qkv-norm/release-gate-assessment.json",
+    "host-proposals/OPT-delivery-workflow/validation.json",
+    "host-proposals/OPT-operator-lean-profile/validation.json",
+    "host-proposals/OPT-toolchain-repair/validation.json"
+  ],
+  "local_reference_occurrences": 39,
+  "sha256_recovered_occurrences": 6,
+  "unrecovered_occurrences": 33,
+  "limits": "Archived documentary assertions are not raw probe recovery or new qualification. Runtime constants, installation metadata, cohort limits and source hashes are not measurement copies.",
+  "integrity": {
+    "manifest.json": {
+      "path": "archive/mod-git-20261022/split-prose-source/manifest.json",
+      "bytes": 10302,
+      "sha256": "e6afc2657a58cf5aa2d25dc45afc75508441569660dccc96b5b61f64a9f4bca3"
+    },
+    "local-reference-audit.json": {
+      "path": "archive/mod-git-20261022/split-prose-source/local-reference-audit.json",
+      "bytes": 18361,
+      "sha256": "80532d345bcfb31d1eb9889274fef320906926097d84fddd6b94647c904a9419"
+    }
+  },
+  "recovery_audit": {
+    "commit": "ba341ca915c0c8556865c8f662346ced9fc0e0c7",
+    "path": "archive/mod-git-20261022/split-probe-recovery/local-reference-audit.json",
+    "sha256": "0501afbd761229778ca66efc986cf68164262908860f39d34858bfad1ae60554",
+    "bytes": 23117
+  }
+}

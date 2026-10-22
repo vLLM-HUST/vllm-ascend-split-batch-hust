@@ -19,8 +19,13 @@
     "historical evidence and registration assessments",
     "read-only registration probe and tests"
   ],
-  "evidence": "/root/包体恢复/records/probes/20261019T042000Z_opt_repair/gdn-final-probe.json",
+  "evidence": null,
   "limits": "CPU export and static call inventory, not a production graph dump or universal proof that no registration route can ever exist. No new correctness/performance acceptance claim.",
   "reopen_condition": "Host exposes a reachable narrow dispatch/inner graph boundary, or new mechanism evidence establishes one without whole-core decomposition, global norm bypass or registry overwrite. Declare integration validation budget, then L3+compare and graph replay before release lifecycle checks.",
-  "runtime": "No service started; no host patch/env changed; tier-2 remains default-off. Pre-existing unrelated user work preserved, not discarded or committed."
+  "runtime": "No service started; no host patch/env changed; tier-2 remains default-off. Pre-existing unrelated user work preserved, not discarded or committed.",
+  "evidence_availability": {
+    "status": "Original local probe references unavailable unless a verified URL is present; null is not a passing result",
+    "audit": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/ba341ca915c0c8556865c8f662346ced9fc0e0c7/archive/mod-git-20261022/split-probe-recovery/local-reference-audit.json",
+    "original_document": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/host-proposals/GDN-qkv-norm/registration-closure.json"
+  }
 }

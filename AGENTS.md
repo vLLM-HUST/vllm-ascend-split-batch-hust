@@ -42,12 +42,13 @@ vllm-ascend 宿主的插件壳与 split-batch 规划契约；cascade 实现源�
 ## 算子交付检查点
 
 - 本仓是交付目标，不是实验附件。开工记录分支、起点 HEAD、本轮路径和已有 dirty 文件；任务句与动作约束见 `/root/AGENTS.md`「算子任务执行合同」。
-- 分支口径：`main` 只承接"可发布且 Extension CI 三条腿全绿"的改动，开发默认留在 `版本/方向` 分支。判据是这次改动动的是哪一侧：只影响"能不能验证"的（CI/测试基建、只读文档与证据、让红腿转绿的修复）可直推 `main`；影响"被验证的东西是什么"的（载体实现、注册面 entry points、默认值或行为变更、host proposal、任何改 kernel/数值的提交）必须走分支后合入。合入前先同步 `origin/main`；`main` 现未设保护，本口径靠约定，不靠平台。
-- 已推送的 `版本/方向` 分支用 `merge origin/main` 同步，不改写历史：分支 commit sha 被 `docs/evidence/` 与 L2 回执引用，`rebase` 会让这些引用指空。
+- 分支口径：`main` 只承接"可发布且 Extension CI 三条腿全绿"的改动，开发默认留在 `版本/方向` 分支。判据是这次改动动的是哪一侧：只影响"能不能验证"的（CI/测试基建、只读文档与证据、让红腿转绿的修复）可直推 `main`；影响"被验证的东西是什么"的（载体实现、注册面 entry points、默认值或行为变更、host proposal、任何改 kernel/数值的提交）必须走分支后合入。合入前先同步 `origin/main`；`main` 已启用可信 benchmark-only 必需检查；全部 CI 通过后走 PR 合并，不绕过保护。
+- 已推送的 `版本/方向` 分支用 `merge origin/main` 同步，不改写历史：分支 commit sha 被 [docs/evidence/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/) 与 L2 回执引用，`rebase` 会让这些引用指空。
 - 算子默认执行 L0 → plain L3 + compare → light L4；不强制 L1/L2 screen。端到端问题显式跑完整 screen；无 screen 的采集条件以 `/root/opt-ops/AGENTS.md` 为准。历史报告保留，不为新流程重采旧数据。
-- 最小实现可测后、完整验证或明确阻塞后，各检查一次是否应提交。提交包含实现/测试/接入与回滚材料/结果边界；大 trace 留 L2，仓内保留摘要、解析入口和哈希，不复制逐调用明细制造无效审查负担。
-- 数值失败保持 default-off，把失败复现和证据提交入库；不得将失败项从报告删除，或将局部收益写成已验收。Git 提交与优化验收是两个状态。
-- 按 [docs/agent-guide.md §2](docs/agent-guide.md#2-开发工作流) 选择受影响的定向测试与静态检查，失败后定位子集；全仓 pytest 不作每次实验/JSON/提交的默认前置。全量触发原因、稳定源码快照及复用范围必须明确；发布/合入准入不变。纯文档/结果/证据指针只做格式、引用、哈希与 Git 范围检查，不起服、不跑模型 smoke。验证后审查 `git diff` 与 staged diff，仅 `git add <本轮明确路径>`。不提交无关 dirty 文件，不改正在执行的脚本。
+- 最小实现可测后、完整验证或明确阻塞后，各检查一次是否应提交。实现、测试、接入与回滚材料留本仓；结果原件、报告和 trace 统一归档 benchmark，本仓保留固定引用、解析入口和哈希，见 [EVIDENCE.md](EVIDENCE.md)。
+- 数值失败保持 default-off，失败复现和证据同样归档 benchmark；不得将失败项从报告删除，或将局部收益写成已验收。Git 提交与优化验收是两个状态。
+- 先跑测试，再审查 `git diff` 与 staged diff，仅 `git add <本轮明确路径>`。不提交无关 dirty 文件，不改正在执行的脚本。
+
 - commit 后用 `opt delivery --base <起点HEAD> --path <本轮路径> ... --check` 核验；工作台未部署时可用 `python3 tools/operator_delivery.py` 的相同参数。无范围不算通过，push 另需授权及远端 hash 核验。
 - `/root/opt-ops` 的流程修改必须有本仓可校验补丁及测试；运行树仅为部署副本。
 

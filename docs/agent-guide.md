@@ -33,6 +33,7 @@
 | 算子、权重处理、调度执行顺序 | 定向测试、必要 L0、plain L3 + compare；成熟后必要 light L4 | 无端到端问题的 L1/L2 screen、反复 trace |
 | 广泛公共接口/共享基础设施、依赖/打包、发布/合入要求、定向覆盖不足 | 写明触发原因，在稳定源码快照集中全量验证；发布门见 release.md | 每个实验/JSON/提交重跑全套 |
 
+
 开发只跑受影响的定向测试与静态检查，失败后定位子集，不从头重放全套。
 不得删除有效用例、降低数值判据或吞掉失败来省时。L3 失败不能被 pytest、
 coverage、吞吐或其他通过项抵消；失败证据保留，能力保持 default-off。
@@ -53,6 +54,10 @@ JSON/TXT/LOG 结果；混合源码改动、测试、workflow、依赖或打包�
 
 正确性(token 对齐/容差声明)与性能证据留在 `docs/evidence/` 或 L2；
 形状事实与权重标签必须随证据保留。
+设备验证仍需按原审批及实验协议执行。结果先写到仓库外，审核后发布到
+`vllm-hust-benchmark`；本仓只保留固定版本链接、解析工具和测试。
+失败记录与适用边界不得丢弃。历史原件见 [benchmark 归档](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git)。
+
 
 ## 3. 代码规范
 

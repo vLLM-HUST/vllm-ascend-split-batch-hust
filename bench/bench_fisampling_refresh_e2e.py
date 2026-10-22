@@ -50,7 +50,7 @@ Two cases, copied verbatim from the W2b protocol:
     out, 512 prompts, concurrency 512.  One ON leg only, purely to re-test the
     ``B >= 256`` reachability fact (§3.4 of the REPORT) -- no TPOT attribution.
 
-Outputs (all under ``bench/results/``)
+Outputs (all under the required external ``SPLIT_BATCH_RESULTS_DIR``)
 --------------------------------------
 ``fisampling_refresh_e2e.json``        pre-registration meta + per-leg rows
                                        (written incrementally) + summary;
@@ -80,6 +80,8 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from evidence_paths import output_directory
 
 # --------------------------------------------------------------------------
 # Pre-registered constants (written into the JSON ``meta`` before any leg runs).
@@ -134,7 +136,7 @@ SERVER_READY_TIMEOUT_S = 1800
 CLIENT_TIMEOUT_S = 3600
 
 REPO = Path(__file__).resolve().parents[1]
-RESULTS = REPO / "bench" / "results"
+RESULTS = output_directory()
 LOG_DIR = RESULTS / "logs_fisampling_refresh"
 OUT_JSON = RESULTS / "fisampling_refresh_e2e.json"
 

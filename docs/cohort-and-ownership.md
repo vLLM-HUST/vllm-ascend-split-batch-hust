@@ -38,8 +38,8 @@
 |---|---|---|---|
 | ① | independent cohort definition | 宿主域 [release.md](release.md) §0.1/§0.3；能力域 [support-matrix.md](support-matrix.md) §5.1 | 缺一页正式 cohort 声明（本文件 §2 即其初版） |
 | ② | kernel-wheel licensing / distribution | 许可齐全（wheel 内含 CANN OSL 2.0 协议文本、METADATA 已订正、根 `LICENSE`/`NOTICE`）；已按 GitHub Release 附件分发（算子仓 `v2026.9.27`，附件 = 本地构建字节） | **算子仓仍在个人账号 `Raing5Days/vllm-hust-cascade-kernel`**，org 归属未定 |
-| ③ | NPU evidence | 0.28 基准：[evidence/host-028-2026-10-11.md](evidence/host-028-2026-10-11.md)、[evidence/d4-gate-fp32-cohort.md](evidence/d4-gate-fp32-cohort.md)；历史：[evidence/cascade/](evidence/cascade/README.md)（147 件）+ 目标栈验证程序 | **MTP2 域仍未验证**（保持 fail-closed）；历史 cascade 证据只覆盖 0.25 线 + Qwen2.5 |
-| ④ | performance claims | [evidence/cascade/section3-performance.md](evidence/cascade/section3-performance.md) §13.5 | 对外引用必须带 §3 的 cohort 边界 |
+| ③ | NPU evidence | 0.28 基准：[evidence/host-028-2026-10-11.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/host-028-2026-10-11.md)、[evidence/d4-gate-fp32-cohort.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/d4-gate-fp32-cohort.md)；历史：[evidence/cascade/](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/README.md)（147 件）+ 目标栈验证程序 | **MTP2 域仍未验证**（保持 fail-closed）；历史 cascade 证据只覆盖 0.25 线 + Qwen2.5 |
+| ④ | performance claims | [evidence/cascade/section3-performance.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/section3-performance.md) §13.5 | 对外引用必须带 §3 的 cohort 边界 |
 
 ## 2. 本仓 cohort（我们能声称的适用域）
 
@@ -47,10 +47,10 @@
 
 | 维度 | 取值 | 依据 |
 |---|---|---|
-| 宿主 `vllm-ascend` | `>=0.25.1rc2.dev125,<0.25.2`（0.28 镜像的 hust 构建，版本串仍停在 0.25.1rc2 窗口） | manifest `host.version_range`；[evidence/host-028-2026-10-11.md](evidence/host-028-2026-10-11.md) |
+| 宿主 `vllm-ascend` | `>=0.25.1rc2.dev125,<0.25.2`（0.28 镜像的 hust 构建，版本串仍停在 0.25.1rc2 窗口） | manifest `host.version_range`；[evidence/host-028-2026-10-11.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/host-028-2026-10-11.md) |
 | vllm core | `0.28.1.post1.dev143+gf18cf803c`（0.28 镜像默认栈配对） | 同上 |
 | 底座 / 设备 | Ubuntu 22.04.5 + CANN 9.1.0 + Python 3.12.13；2×910B2（**TP=2**） | 同上 |
-| 模型 | **Qwen3.5-35B-A3B**（40 层：30 GDN + 10 MoE），hybrid **TP2** | 同上 + [evidence/d4-gate-fp32-cohort.md](evidence/d4-gate-fp32-cohort.md) |
+| 模型 | **Qwen3.5-35B-A3B**（40 层：30 GDN + 10 MoE），hybrid **TP2** | 同上 + [evidence/d4-gate-fp32-cohort.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/d4-gate-fp32-cohort.md) |
 | 请求形态 | chunked prefill **on**；APC **off**；max_model_len 8192 | D4 serve 固定协议 |
 | 调度 / 图 | `cudagraph_mode=NONE`（本栈 `FULL_AND_PIECEWISE` 在 `capture_model` 阶段崩，见 [pitfalls.md](pitfalls.md) §1.3） | d4-gate-fp32-cohort.md |
 | 精度档 | bf16 | 同上 |
@@ -63,7 +63,7 @@
 - **历史 Qwen2.5 / 0.25 域**的结论不再自动适用于本基准，反之亦然。
 
 **历史 / 独立专项（保留，勿删）**：Qwen2.5-14B-Instruct（行为类）与 Qwen2.5-Coder-14B（性能替身）在
-0.25 线上的全套证据（[evidence/cascade/](evidence/cascade/README.md)）是**独立专项**；按原口径引用时
+0.25 线上的全套证据（[evidence/cascade/](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/README.md)）是**独立专项**；按原口径引用时
 必须同时标注"历史域"，且**不得与 0.28/Qwen3.5 的数字互推**。
 
 ## 3. 引用纪律（写结论时逐条对照）
@@ -74,7 +74,7 @@
 3. **MTP 只能写成"边界/拒绝"**，不得写成"支持"。可引用 README
    [「Speculative decoding boundary」](../README.md) 与 `HOST_CONTRACT.md:11`。
 4. **要再改 cohort** 须由 owner 裁定并在本文件留档；2026-10-13 的基准切换即按此执行
-   （`docs/evidence/host-028-2026-10-11.md`、`docs/evidence/d4-gate-fp32-cohort.md` 为本次切换的实测依据）。
+   （[docs/evidence/host-028-2026-10-11.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/host-028-2026-10-11.md)、[docs/evidence/d4-gate-fp32-cohort.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/d4-gate-fp32-cohort.md) 为本次切换的实测依据）。
 5. MTP / k+1 形态的"进统一 cohort"前置**当前未立项**（与工作区台账 OPEN-05 的既有裁定一致：
    维持 fail-closed 边界）。立项需项目侧明确裁定；**不得通过"绕过 precheck"来造出形式上的成功点**。
 

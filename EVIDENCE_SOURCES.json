@@ -1,0 +1,272 @@
+{
+  "schema": "benchmark-evidence-reference/v1",
+  "repository": "vLLM-HUST/vllm-hust-benchmark",
+  "commit": "67505eee3dc71fa3dbbc0fc365620f0a2e5658f4",
+  "manifest": {
+    "path": "archive/mod-git-20261022/split-current-git/manifest.json",
+    "bytes": 127077,
+    "sha256": "1e80802b0b88d7144821a4d581af69354ca3363465a012a53a979e27b76a5ee0"
+  },
+  "snapshot": "archive/mod-git-20261022/split-current-git/snapshot",
+  "source_repository": "vLLM-HUST/vllm-ascend-split-batch-hust",
+  "source_commit": "c24721b671342e4beeb438ae05faa3a52dc32ed9",
+  "admission": "custody-only; original failures retained; no new qualification",
+  "retained_source_paths": [
+    {
+      "path": "docs/evidence/cascade/ev2_compare.py",
+      "sha256": "a9f2d05f999c9e0ea6aa74a3fefc0a3c58026fbaeb3055469a513bd50661f559"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_controls.sh",
+      "sha256": "b7573d30776908d419892429740d52cfb61662ffd6d0ff1f6144e04330ded66b"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_eager_matrix.sh",
+      "sha256": "dc640132d8c3be003e08de89c5eb146c7e59eb24ca7445d0f3b224c0a8d9ae3e"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_graph_diag.sh",
+      "sha256": "ba5d8846885e6bb7e8db9fdbc33376f4b9ed8c349c1f42eea8a5b9e892ab4d4f"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_graph_fresh.sh",
+      "sha256": "90ee276441692b9af1c4a9d2fddd09abd1fdf5d1f9cfcf71c4dfa806a1898f99"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_graph_isolate.sh",
+      "sha256": "b808ce607a52b1dd2a4f3c2bdfad49de4587f02e071b2fc63ed2ef33ed2756b7"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_graph_shim.sh",
+      "sha256": "a23fb266828f9319d58907be51513d7c0fc96e3db729ca5002e999e52931a258"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_graph_trace.sh",
+      "sha256": "b9f3921e8a3f690c24cb74733c7d858a1db84a971dc56857ec3c49c3ffcb7b95"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_matrix.sh",
+      "sha256": "9ab8ff2acd33d1cce29fbc5189fe461872c0175cdc89e6a135805a666473ed9d"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_natural_prefix.py",
+      "sha256": "9a6c07dfda936542a15d8f1c3642a826693f309a69d7847eb168c89f72e7aa8a"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_run.py",
+      "sha256": "824fae9c7e251a5c932f99d923e4d65c70969aa062d5ff97991dac8f12571df7"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_serve_compare.py",
+      "sha256": "b870bd76039418f2c38e5be974edcc2fb4415c3c4335e3dccc4bb26a53d04305"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_shim.py",
+      "sha256": "22e129f31bfc51ae75310aa630aadb82ab1ac82a36e4471b9c5f385cbd71fad2"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_smoke.sh",
+      "sha256": "a1e1f83424a44e7fb34be1a79c0cff0935bf6770184af77998a62acaca02fff4"
+    },
+    {
+      "path": "docs/evidence/cascade/ev2_summarize.sh",
+      "sha256": "4a8a330195d4c1acbf8f1f7fc978ce7a1546d34e2222aee8f91a95990d5e370b"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/sig-audit/d4_repro.py",
+      "sha256": "3a4d30dcabfc7de685fd9160bcca80fd880b755e8e7235a2c421eaed420d16fd"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/sig-audit/sig_audit2.py",
+      "sha256": "f0a98497149410aa10db33f6024b15ee5ff4a66360dcea58ae32e90b758f4bef"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev2-rerun/engagement_proof.sh",
+      "sha256": "a4e5161f59846b49b9ae8818513d5829f8f3fe2cc5bba8fd9e3a53da8329821f"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev2-rerun/rerun_compare.sh",
+      "sha256": "d106a1a0a02cd986d73b6ea98eaf4a69ecbe295e97213debf058e216c6e62226"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev2-rerun/rerun_matrix.sh",
+      "sha256": "df0ce5af8a3580df653913b519abaf5c092563253087eb825ffa0e25e010ad6d"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev2-rerun/rerun_matrix_literal.sh",
+      "sha256": "daccf89adfb5bb0984f397b67358fd407e7bb3fa9b2c8dad1101418e5e2817fe"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3-gatefix/run_gatefix_all.sh",
+      "sha256": "64cf721ba3ec1be3e51214a3a2e4d1a9d993dcf787d98b640dce7f0275e877ce"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3-rerun/analyze_rerun.py",
+      "sha256": "f12a197b01953286e56a753ee7c88f229ad2e005cf28727499b7c77596586ab0"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3-rerun/run_b64_control.sh",
+      "sha256": "a2e951ec590fda0194dc63b80977d0ef45a5421923302236e21d9dd1fcce1e1b"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3-rerun/run_gate64_rerun.sh",
+      "sha256": "ad8838b67473c78c0f03e96cc1d41c19990411ef08eb4f8819356ee9d9bb43bf"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3-rerun/run_gate_and_anchors_rerun.sh",
+      "sha256": "6d33b1c9aaa96927a16ada6adc3cbe4a1787fe52997a1fe07a37393eec827edd"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3-rerun/run_gate_override64.sh",
+      "sha256": "990340df7589d0e17181c21f7aef259eee8cd09e5eb662a20ad8a7fb70ab230e"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3-rerun/run_matrix_rerun.sh",
+      "sha256": "8d9fa2fdeea52a282e998f58a4b155e4b87a169f49cfcc07a2ec472ec602bdf3"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3/analyze.py",
+      "sha256": "162c16657475629be01cafc216bb867462b64d601112957144413e66dfeadb3e"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3/cascade_sweep_ev3.py",
+      "sha256": "94d6760256d3d6ac20f22600d5630e05841452c3559b2dc846a88b2f8fe1fa4b"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3/run_gate_and_anchors.sh",
+      "sha256": "52b94cf773f04599cd07d395db7cea4b210c96f86bb18e7a1a9a1612e996553d"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3/run_matrix.sh",
+      "sha256": "282590d00eee250f0307a26a3e9c5c99331c50010dd2f87680a338034f0f69e8"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3/run_on_graph64.sh",
+      "sha256": "53b9b83e6b5f92a3cd6a57288d44aebf0f077c8c55233203c5d70d4bffa7a7f9"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3/run_primary.sh",
+      "sha256": "6a67f95e709546e2c82f3a0a87a285cc4bd8189d061483e042a05934062aa207"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3/run_repeats.sh",
+      "sha256": "0a8bc18a0b1f693bc6398942e9cee2e79c393fa6d2f54180ebd79f487cf862d7"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3/run_smoke_on.sh",
+      "sha256": "92ed75efa40fadd9e9a33fdf30229c87b2bf6b58c9a918999152267580e60ed1"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-ev3/shim/sitecustomize.py",
+      "sha256": "f48dc5186cc41df822392b2b0dc8de97c00773e909f86a3e27b0dfb5b83fda72"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-real-model/compare_real.sh",
+      "sha256": "65bb49c6568587b906d54628b4fdedde4601f5ae52f250d63d351e7af1f536b6"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-real-model/engagement_real.sh",
+      "sha256": "d984d0e399e04842f2eb2bc71a3717702700320cb9e143253c5f68539cfb2d30"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-real-model/env_real.sh",
+      "sha256": "c7f0abec7117337d2a091ebda703c405f528e38bab64f6a63d153d3a22f49603"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-real-model/ev2_natural_prefix_real.py",
+      "sha256": "d9ef624637762afbd8ce0b6287c1151ef13ed55274d6199cff75663fbf7db972"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-real-model/ev2_run_real.py",
+      "sha256": "2daabb4148dfb74c07c16cd964f4476ec5750053b54e7e4b6e0580c93594d36f"
+    },
+    {
+      "path": "docs/evidence/cascade/logs/v1-real-model/matrix_real.sh",
+      "sha256": "43bd89b6f53df35a99a3c0d50ad66a662359461d762fa133322b8bc7fff328b4"
+    },
+    {
+      "path": "docs/evidence/cascade/run_evidence1_default_off.sh",
+      "sha256": "4b8534257976a6f8e94bb6950ee2dbcc82836bedcb30adaa30c35949213524cd"
+    },
+    {
+      "path": "docs/evidence/fi-sampling-frozen-20260909/FROZEN.sha256",
+      "sha256": "c94190968837a96aea64a06d166d91fc7384a5f505755f879c711b99e8a767e1"
+    },
+    {
+      "path": "docs/evidence/fi-sampling-frozen-20260909/make_snapshot.py",
+      "sha256": "c546ca75a2cf82b2206bf5d8afa191038850930bfce1cda6867b8e199e16c704"
+    },
+    {
+      "path": "docs/evidence/fi-sampling-frozen-20260909/snapshot/api.py",
+      "sha256": "902884d6cd64c78b8b917f6404f51305a1f23a37760b80a005466b770918a03c"
+    },
+    {
+      "path": "docs/evidence/fi-sampling-frozen-20260909/snapshot/kernels.py",
+      "sha256": "8d0b20cca2559a2c4d893a96bc6c2398569eb2805258848f54ccde114b17d27e"
+    },
+    {
+      "path": "docs/evidence/fi-sampling-frozen-20260909/snapshot/npu_env.py",
+      "sha256": "04a3a122f66a74b7176cfaf7f3b1b701871bfe0e55e252fcf58f8a85b352a77a"
+    },
+    {
+      "path": "docs/evidence/fi-sampling-frozen-20260909/snapshot/pure.py",
+      "sha256": "923d7db26a704e778dfafb4bd74a2742364e6a5b8de250518bc08dfd6954ab08"
+    },
+    {
+      "path": "docs/evidence/fi-sampling-s3/raw/fi-s3-serve.sh",
+      "sha256": "a79f5d41711ec8927308a3746ab924f49b2e42e3ad70aed93bb33466af47d47e"
+    },
+    {
+      "path": "docs/evidence/rope-fix-smoke-20260912/raw/rope-smoke.sh",
+      "sha256": "dd6738497a17e94c28608e042b98e8f852198a71de3b5f6358f38bf8b881e654"
+    },
+    {
+      "path": "docs/evidence/rope-fix-smoke-20260912/raw/run_smoke.sh",
+      "sha256": "f2872ba145c08ce375783577ffba422e6c1a72d079fd4a8664a8680ca6297dcd"
+    },
+    {
+      "path": "docs/evidence/rope-fix/compare.py",
+      "sha256": "65c8f3e802bf50bfa42a81f783cdf4035f7002e15251f96c91d104f5e748176a"
+    },
+    {
+      "path": "docs/evidence/rope-fix/guard-selftest/run.sh",
+      "sha256": "f5cc55e3fa12d02c270cd2c57b8c7405f9af839676c5e5d420b17e5b45c8d266"
+    },
+    {
+      "path": "docs/evidence/rope-fix/logs/run-probe-with-carrier.py",
+      "sha256": "354164012e800968831436e82e96de5ec4dd91f784910cf24f6b4641d0f55895"
+    },
+    {
+      "path": "docs/evidence/w2b-fi-sampling/run_e2e_matrix.sh",
+      "sha256": "beb7a2f35fd89c6220525c077f3c0877fa620a94acb071a2cadaccd7e22818b6"
+    },
+    {
+      "path": "docs/evidence/w2b-fi-sampling/run_e2e_tpot.sh",
+      "sha256": "c4fe62a06a55bd48700764cf660806d898dfc8518007176e6d09023c5924c316"
+    },
+    {
+      "path": "docs/evidence/w2b-fi-sampling/smoke_npu_fi_sampling.py",
+      "sha256": "d73ec4c7550d3ac219cd445c75753547fd93693c25dfbdf887b6e9c9727efacf"
+    },
+    {
+      "path": "docs/evidence/w2b-fi-sampling/summarize_e2e.py",
+      "sha256": "6f56881461f7314b42f3e5e6919a36a1fad2a1da0889836ab9157f21b8963f0f"
+    },
+    {
+      "path": "docs/evidence/zerocost-activation-20260913/raw-fix/fix-smoke.sh",
+      "sha256": "ff2d8892519ec63cb7bb882ac0f53e62773f5cdef28aa3857366f7ff8afcdc85"
+    },
+    {
+      "path": "docs/evidence/zerocost-activation-20260913/raw/run_smoke.sh",
+      "sha256": "d6d3a05c85954266db3996526c2cafad6a186e27eedffc2d55435bdf0bb6e3ed"
+    },
+    {
+      "path": "docs/evidence/zerocost-activation-20260913/raw/zerocost-iso.sh",
+      "sha256": "7ec3adbf177f21417de07d8b73750cbefa2833a4bd783bcad11b64abb57aa57c"
+    },
+    {
+      "path": "docs/evidence/zerocost-activation-20260913/raw/zerocost-smoke.sh",
+      "sha256": "a72b11164111b08e38a9d2576ca2602c30bfbd7620488f5af093aff570de86a9"
+    }
+  ]
+}

@@ -17,12 +17,17 @@
     "scope": "offline assessment only"
   },
   "evidence": [
-    "/root/包体恢复/records/probes/20261019T031100Z_gdn_release_assessment.json",
-    "/root/包体恢复/records/probes/20261019T034200Z_gdn_registration/assessment.json",
-    "/root/包体恢复/records/probes/20261019T034200Z_gdn_registration/probe-final.json",
-    "/root/包体恢复/records/probes/20261019T042000Z_opt_repair/gdn-final-probe.json",
-    "/root/包体恢复/records/probes/20261019T042000Z_opt_repair/gdn-closure.json"
+    null,
+    null,
+    null,
+    null,
+    null
   ],
   "reason": "Registered APIs exist but target remains inside opaque core; static inventory confirms direct unpack/norm calls and KV/communication side effects. No safe narrow dispatch proven; bundle attempt withdrawn, no rejection of the accepted kernel.",
-  "reopen_condition": "Prove a reachable narrow registration boundary and declare the missing integration/lifecycle verification budget; not reopening rejected operator methods."
+  "reopen_condition": "Prove a reachable narrow registration boundary and declare the missing integration/lifecycle verification budget; not reopening rejected operator methods.",
+  "evidence_availability": {
+    "status": "Original local probe references unavailable unless a verified URL is present; null is not a passing result",
+    "audit": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/ba341ca915c0c8556865c8f662346ced9fc0e0c7/archive/mod-git-20261022/split-probe-recovery/local-reference-audit.json",
+    "original_document": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/host-proposals/GDN-qkv-norm/release-candidate.json"
+  }
 }

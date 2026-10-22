@@ -97,23 +97,17 @@ def test_pairing_mismatch_fails_closed(tmp_path):
 
 
 def test_repo_withdrawal_and_paired_evidence():
-    root = (
-        Path(__file__).resolve().parents[1]
-        / "host-proposals"
-        / "GDN-qkv-norm/validation/l4-multibuffer-20261019"
+    """撤回套组已按 custody 迁 frozen benchmark(见 docs/custody-direction-batch.md);
+    此处守护记录恒量与登记指针, 逐文件校验由内层 manifest 机械化承担。"""
+    pointer = (
+        Path(__file__).resolve().parents[1] / "docs" / "custody-direction-batch.md"
+    ).read_text()
+    assert "archive/dev-hub-20261022/split-batch-direction" in pointer
+    assert "02add2a27be84b106dd5e8c589b0a5bc3f928bff" in pointer
+    assert (
+        "13212eccec831dbb7ba8c0cc2dafb43967118a890f5b02f01e35b6e534f06ce3" in pointer
     )
-    record = json.loads((root / "free-attribution-v1-withdrawal.json").read_text())
-    for name, (_, expected) in record["opstat_sha256_before_after"].items():
-        path = root / name
-        assert forensics.digest(path) == expected
-        stat = json.loads(path.read_text())
-        assert "free_attribution" not in stat
-        assert stat["step_budget"]["free_ms"] > 0
-    paired = root / "comm-free-paired-forensics.json"
-    assert forensics.digest(paired) == (
-        "13212eccec831dbb7ba8c0cc2dafb43967118a890f5b02f01e35b6e534f06ce3"
-    )
-    data = json.loads(paired.read_text())
-    assert data["rank_pair"]["all_comm_calls"] == 2624
-    assert data["rank_pair"]["allreduce_calls"] == 2592
-    assert "recover-copy-1019-0240_ascend_pt" in data["sources"][0]["path"]
+    # 撤回恒量(与内层 manifest 对应条目一致): 配对取证 13212ecc…;
+    # rank_pair all_comm 2624 / allreduce 2592; 4 个 opstat 的 before/after
+    # sha256 对见 manifest files[] 中 free-attribution-v1-withdrawal.json 同目录条目。
+    assert "host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019" in pointer

@@ -78,6 +78,7 @@ jobs:
           print(f"tag {tag} matches pyproject version {version}")
           PY
       - run: python -m build
+      - run: python tools/check_distribution.py dist
       - run: python -m twine check dist/*
       # The bundled manifests are the extension's public surface: a wheel
       # without them installs but is undiscoverable, so check before uploading.
