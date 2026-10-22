@@ -104,7 +104,8 @@ Registration checks and remaining-plugin migration boundaries are in
 constructor dispatch, kernel numeric gate, ACL graph replay bit-exactness,
 fallback delegation) are closed by `tools/probe_gelu_device.py` and
 `tests/test_npu_w31_gelu_plugin.py`; results:
-`docs/evidence/gelu-device-gate-20261020.json`. The op-level microbench in that
+[gelu-device-gate-20261020.json](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/411e14c5a67dac52b3bba51ac3f25e4c593fcc28/archive/dev-hub-20261022/split-batch-direction/manifest.json)
+(frozen custody original; see docs/evidence/README.md). The op-level microbench in that
 evidence is directional only (the fused kernel measured slower than the host
 native chain at the probed standalone shapes), so default-off remains correct.
 Serving-level L3 + compare and light L4 remain pending; historical kernel

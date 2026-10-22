@@ -1,1 +1,0 @@
-	HBM Usage Rate(%)              : 5

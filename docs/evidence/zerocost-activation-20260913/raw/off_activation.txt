@@ -1,2 +1,0 @@
-## default-off leg (plain vllm serve, no zerocost env)
-  <none>
