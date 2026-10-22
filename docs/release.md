@@ -220,6 +220,12 @@ environment/additional_config → 正式 `vllm-hust-ext run -- vllm serve ...`�
 
 ## 4. 宿主升级核对清单
 
+> **MoE 双门合并（`VLLM_HUST_MOE_GATE_MERGE`）**：升级宿主后先跑
+> `pytest -q tests/test_runtime_gate_merge_patch.py`。其中
+> `test_host_source_anchors_still_unique` 会在 `Qwen3NextSparseMoeBlock.forward`
+> 的签名块或 `qwen2_moe` import 行发生变化时报红（锚点失配）——此时变换会
+> fail-closed 回 stock，**不是**静默生效；需按新源码重钉锚点后再评估。
+
 **先跑机械前半程**（2026-09-26 起）：`tools/seam_diff.py` 把下面这份清单的**静态部分**
 （签名 + 调用点 + 结构面）变成可执行判定，而且是纯 AST、**不需要安装宿主**，
 因此可以在只有一份已安装宿主的环境里对拍两棵树：

@@ -71,8 +71,23 @@ L192 `ReplicatedLinear(2048, 1)`；`qwen2_moe.py` L121
   `tests/test_moe_gate_merge.py`（12 用例，纯 Python、不依赖 torch）：行序契约
   （前 256 行 router / 最后 1 行 shared gate）、两路切片**返回拷贝**（对应 device 侧
   `contiguous` 要求）、以及「一次 257 行 matvec」与「两次 256+1 matvec」在真实维度
-  （M=1、K=2048）与稠密小维度上**逐元素精确相等**。设备侧（bf16 GEMM 重结合、实测收益）
-  仍未验证。
+  （M=1、K=2048）与稠密小维度上**逐元素精确相等**。
+- **运行时载体已实现（default-off，可回滚）**：`src/vllm_ascend_split_batch/moe_gate_merge.py`
+  + `runtime_source_patches._GATE_MERGE_TRANSFORMS`，env 门 `VLLM_HUST_MOE_GATE_MERGE`（仅 `=1`）。
+  安装点在 `Qwen3NextSparseMoeBlock.forward` 开头（幂等，必须早于该函数体内
+  `self.shared_expert(...)`，否则 FULL 图捕获到的是 stock 两路）：把 router 消费者
+  （`experts.gate` / `experts._gate`）与 shared 消费者（`shared_expert.expert_gate`）换成共享
+  同一 `GateMergeState` 的代理 → 每层一次 257×hidden GEMM，两路 `narrow().contiguous()`；
+  两消费者拿到同一张量对象时**只跑一次**，对象身份不成立则**重算**（`state.recomputes` 计数）。
+  fail-closed：两路消费者缺一即不安装、保持原对象。宿主暴露 `weight_fp32` 时按 fp32 建合并
+  权重并返回 fp32 logits，shared 列转回输入 dtype（避免 `sigmoid(gate)*out` 被提升）。
+  **回滚**：`VLLM_HUST_MOE_GATE_MERGE=0`（默认）→ 变换不注册、安装器不执行；不改 checkpoint
+  键、不改宿主文件，重启即复原。宿主升级后跑 `tests/test_runtime_gate_merge_patch.py`，
+  锚点失配会 fail-closed 回 stock（不是静默生效）。
+- **L0 配对 A/B 已就绪**（卡回来一条命令）：`tools/bench_moe_gate_merge.py` → 图捕获回放
+  （eager 提交地板 34.6–36.6µs 大于本候选量级，故不用 eager 判读）；臂 = 两次 GEMM vs 一次
+  合并 GEMM；预声明门 `gain ≥ 5%` 且两路 bitwise 全等才进 plain L3 + compare。
+- 设备侧（bf16 重结合、实测收益）仍未验证。
 - 收益上限估算：两桶窗内合计 15.78ms/32 iters，按省一次 ~4.77µs/call 级发车估
   **~0.5–0.7% stage**，属估算，**未测**；实现风险见下。
 - 实现风险（L3 前必须交代）：合并后 `hidden` 维不变、行数 257，切片
@@ -116,6 +131,10 @@ L192 `ReplicatedLinear(2048, 1)`；`qwen2_moe.py` L121
 | 合并 L0 工具（旧前提） | `tools/bench_router_merge.py` |
 | 桶级归因工具 | `tools/analysis/matmulv2_shape_attribution.py` |
 | 双门合并 CPU 参考实现 | `tools/moe_gate_merge.py` |
+| 双门合并运行时载体（default-off） | `src/vllm_ascend_split_batch/moe_gate_merge.py` |
+| 双门合并锚点变换 | `src/vllm_ascend_split_batch/runtime_source_patches.py`（`_GATE_MERGE_TRANSFORMS`） |
+| 双门合并 L0 配对 A/B | `tools/bench_moe_gate_merge.py` |
+| 载体/变换测试 | `tests/test_moe_gate_merge_carrier.py`、`tests/test_runtime_gate_merge_patch.py` |
 | 双门合并契约测试 | `tests/test_moe_gate_merge.py` |
 
 工作台侧（本仓外）：候选 `matmulv2-decode-m1-l0-ruler` / `matmulv2-decode-shape-attribution` /

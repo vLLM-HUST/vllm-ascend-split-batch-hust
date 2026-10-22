@@ -29,6 +29,8 @@ fail-closed 语义:
 * VLLM_HUST_GDN_UNPACK_VIEWS -> vllm_ascend.ops.gdn（decode T=1 零拷贝视图; 依赖上者）
 * VLLM_HUST_MOE_INIT_TRITON  -> vllm_ascend.ops.fused_moe.token_dispatcher（decode T=1 triton init）
 * VLLM_HUST_NZ_SKIP_GATE     -> vllm_ascend.ops.linear（NZ mode2 标量门豁免）
+* VLLM_HUST_MOE_GATE_MERGE   -> vllm.model_executor.models.qwen3_next（MoE router 与
+  shared_expert_gate 合并成一次 GEMM; default-off, 消费者不全即 fail-closed 不安装）
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ import sys
 logger = logging.getLogger(__name__)
 
 ENV_D4 = "VLLM_HUST_D4_CONV_PACK"
+ENV_GATE_MERGE = "VLLM_HUST_MOE_GATE_MERGE"
 ENV_VIEWS = "VLLM_HUST_GDN_UNPACK_VIEWS"
 ENV_INIT_TRITON = "VLLM_HUST_MOE_INIT_TRITON"
 ENV_NZ_SKIP = "VLLM_HUST_NZ_SKIP_GATE"
@@ -49,6 +52,7 @@ ENV_NZ_SKIP = "VLLM_HUST_NZ_SKIP_GATE"
 GDN = "vllm_ascend.ops.gdn"
 TD = "vllm_ascend.ops.fused_moe.token_dispatcher"
 LIN = "vllm_ascend.ops.linear"
+QWEN3NEXT = "vllm.model_executor.models.qwen3_next"
 
 # ---------------------------------------------------------------- gdn: D4 pack
 _D4_TRANSFORMS = [
@@ -336,6 +340,38 @@ _DBO_NPU_WRAP_TRANSFORMS = [
     ),
 ]
 
+# ------------------------------------------------- MoE 双门合并 (router + shared gate)
+# 语义: MoE 输入 x 同时喂 self.gate(2048→256) 与 self.shared_expert_gate(2048→1),
+# 故 cat([W_router, W_shared], 0) = 257×2048 一次 GEMM + 两路 contiguous 切片成立。
+# 安装点在 block.forward 开头（幂等）: 必须在 self.shared_expert(hidden_states) 之前,
+# 否则 FULL 图捕获到的仍是 stock 两路。载体实现见 vllm_ascend_split_batch.moe_gate_merge。
+_GATE_MERGE_TRANSFORMS = [
+    (
+        "from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP",
+        "from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP\n"
+        "from vllm_ascend_split_batch.moe_gate_merge import (\n"
+        "    install_gate_merge as _hust_install_gate_merge,\n"
+        ")",
+        1,
+    ),
+    (
+        """    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        already_sequence_parallel: bool = False,
+    ) -> torch.Tensor:
+        # NOTE: hidden_states can have either 1D or 2D shape.""",
+        """    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        already_sequence_parallel: bool = False,
+    ) -> torch.Tensor:
+        _hust_install_gate_merge(self)
+        # NOTE: hidden_states can have either 1D or 2D shape.""",
+        1,
+    ),
+]
+
 TABLES = [
     (ENV_D4, GDN, _D4_TRANSFORMS),
     (ENV_VIEWS, GDN, _VIEWS_TRANSFORMS),
@@ -344,6 +380,7 @@ TABLES = [
     (ENV_DBO, PLATFORM, _DBO_PLATFORM_TRANSFORMS),
     (ENV_DBO, CORE_RUNNER, _DBO_CORE_TRIGGER_TRANSFORMS),
     (ENV_DBO, NPU_RUNNER, _DBO_NPU_WRAP_TRANSFORMS),
+    (ENV_GATE_MERGE, QWEN3NEXT, _GATE_MERGE_TRANSFORMS),
 ]
 
 
