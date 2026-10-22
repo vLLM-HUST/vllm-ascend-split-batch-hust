@@ -269,4 +269,4 @@ segment == 0 else K`)。栈顶均在
 形态,仅作诊断工具,默认路径不用)。根因未查(bisheng/MLIR 下游),升级
 triton-ascend 后需重验。
 
-**证据可用性**：该段原始 probe 尚未找回。原引用保存在 [可用性审计](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/local-reference-audit.json)；这里只保留历史故障描述，不声称已回验原始栈或重新验证根因。
+**证据可用性**：已通过原路径映射和 SHA256 核实 [multibuffer graph probe](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/multibuffer-determinism-20261018/multibuffer-graph.json)；两份 separate-graph 崩溃日志仍未找回。原引用保存在 [可用性审计](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/ba341ca915c0c8556865c8f662346ced9fc0e0c7/archive/mod-git-20261022/split-probe-recovery/local-reference-audit.json)；这里只保留历史故障描述，不声称已回验原始栈或重新验证根因。
