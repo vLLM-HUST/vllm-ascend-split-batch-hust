@@ -10,8 +10,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace as NS
 
-import numpy as np
-
 
 def load_method(source, name, namespace):
     tree = ast.parse(source)
@@ -53,6 +51,8 @@ def expect_assert(call, expected):
 
 
 def probe(core, ascend):
+    import numpy as np
+
     files = {
         "v1": ascend / "vllm_ascend/worker/model_runner_v1.py",
         "v2": ascend / "vllm_ascend/worker/v2/model_states/mamba_hybrid.py",

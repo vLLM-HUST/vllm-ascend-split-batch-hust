@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from types import SimpleNamespace as NS
 
 import pytest
-import torch
 
 from vllm_ascend_split_batch.d5_decode_pair import (
     eligible,
@@ -14,6 +13,8 @@ from vllm_ascend_split_batch.d5_decode_pair import (
     require_disjoint,
     split_decode,
 )
+
+torch = pytest.importorskip("torch")
 
 
 @dataclass
