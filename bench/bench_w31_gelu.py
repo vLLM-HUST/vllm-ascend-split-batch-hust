@@ -41,10 +41,10 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
-from pathlib import Path
 
 import torch
 import torch_npu
+from evidence_paths import output_directory
 
 from vllm_ascend_split_batch.fi_gelu import api
 from vllm_ascend_split_batch.fi_gelu.kernels import _erf_probe_kernel
@@ -55,7 +55,7 @@ WARMUP = 10
 ITERS = 100
 ROUNDS = 3
 
-OUT = Path(__file__).resolve().parent / "results" / "bench_w31_gelu.json"
+OUT = output_directory() / "bench_w31_gelu.json"
 
 
 def bench_event(

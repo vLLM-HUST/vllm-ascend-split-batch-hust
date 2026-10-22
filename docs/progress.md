@@ -101,7 +101,7 @@
   默认关闭、不建议生产启用**——triton eager launch ~110µs 主导(eager 负结果);
   图模式 kernel 可捕获且 replay bit 精确,B=64 单算子 −31%(23.7 vs 34.2µs)但
   e2e A/B 噪声带内不可判(Δmedian −0.311% < spread 1.95%,预注册投影 0.2–0.6%)。
-  报告 `docs/evidence/w31-fi-gelu/REPORT.md`;附带发现宿主基线缺陷
+  报告 [docs/evidence/w31-fi-gelu/REPORT.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/w31-fi-gelu/REPORT.md);附带发现宿主基线缺陷
   FULL_AND_PIECEWISE 启动崩(见 pitfalls §1.3)。
 - CPU 门槛:`pytest -q` **153 passed**(2026-09-10,+29 gelu kernel +13 接线)
   + `ruff check` 干净。
@@ -126,7 +126,7 @@
 - 分流:无截断 → FI api1;k=1 → argmax;B≥256 且 k≥32 且 top-p → FI joint;
   其余 → fork 链。五类强制回退(per-request generators / processed_logprobs /
   batch-invariant / reduce-sample / async-exponential)全部落地且**零设备同步**。
-- e2e 证据(见 `docs/evidence/w2b-fi-sampling/REPORT.md`):无截断 on/off 两轮
+- e2e 证据(见 [docs/evidence/w2b-fi-sampling/REPORT.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/w2b-fi-sampling/REPORT.md)):无截断 on/off 两轮
   median TPOT 差 **−0.14%**(噪声带内;采样仅占 TPOT ≈1%,路由 1300/1300 已确认
   生效);joint cell 在 4k 上下文单卡形态 B_max≈122 < 256 门槛而**不可达**
   (需 ~512 上下文),即 joint 分支是安全保留的死分支。**e2e 正收益未显形,
@@ -166,7 +166,7 @@
    形态显形须下调 `VLLM_HUST_FI_SAMPLING_JOINT_MIN_BATCH`,但下调前须补
    B∈[64,256) 区间证据(W2 bench 显示该区间 ours 输 1.33×–3.83×)。
 
-每条动手前:更新本文件状态,证据落到 `docs/evidence/`(新建)或本文件。
+每条动手前:更新本文件状态,证据落到 [docs/evidence/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/)(新建)或本文件。
 (2026-09-11:**不写 PR 描述**——本仓不做上游 PR,改动只本地落地。)
 
 ## 2026-09-11 fia-demask（decode FIA 去掩码）
@@ -186,7 +186,7 @@
   capture_sizes 封顶）→ `de-mask applied` + `ACTIVE` 证据行 → /health → 冒烟 OK，
   0 fail-open。补账：六格 TPOT +3.3~+10.1%（geomean +6.43%）、e2e 吞吐 +3.52%。
 - 证据：`profiles/.../probe-fia/E2E-mask-removal.md` §3.1、`serve_demask_s3.log`、
-  review 材料 `docs/evidence/fia-demask-review.md`、~~上游素材~~ `docs/upstream/fia-decode-demask.md`
+  review 材料 [docs/evidence/fia-demask-review.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/fia-demask-review.md)、~~上游素材~~ `docs/upstream/fia-decode-demask.md`
   （**2026-09-11 冻结**：不做上游 PR，该素材只作技术论据留档，不再维护）。
 
 ## 2026-09-11 rope-fix（fork RoPE 三缺陷的插件侧 carrier + 反向漂移守卫）
@@ -209,7 +209,7 @@
   env 未置的对照腿逐字复现修前三断点（llama3 落 `CustomOp.forward_oot`、
   mrope `TypeError: triton_mrope() missing 1 required positional argument`、
   yarn 公式分歧 5.09375）。
-- 证据：`docs/evidence/rope-fix/REPORT.md` + `comparison.md`（四腿对比表）+
+- 证据：[docs/evidence/rope-fix/REPORT.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/rope-fix/REPORT.md) + `comparison.md`（四腿对比表）+
   `guard-selftest/`；设计说明 `docs/design/rope-variant-defects.md`；
   宿主 seam 与锚点 `HOST_CONTRACT.md`「rope_fix component」；
   宿主升级核对项 `docs/release.md` §4。manifest 保持 `import_only`（三证据未齐）。
@@ -257,7 +257,7 @@
 - **处置**：按 release.md §0/§3 与硬纪律**不翻 active**，manifest 保持 `import_only`；manager 侧 `enable`
   已 `disable` 回退；`_host_func` 修复（穿双层 wrapper）与文档纠偏列为未决 B1/B2。
 - CPU：`pytest -q` **272 passed**、`ruff check .` 干净。证据：
-  `docs/evidence/zerocost-activation-20260913.md` + `docs/evidence/zerocost-activation-20260913/raw/`。
+  [docs/evidence/zerocost-activation-20260913.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/zerocost-activation-20260913.md) + [docs/evidence/zerocost-activation-20260913/raw/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/zerocost-activation-20260913/raw/)。
 
 ## 2026-09-13 zerocost-wiring `_host_func` 多 wrapper 修复 → **§3 通过，已翻 active**
 
@@ -278,8 +278,8 @@
   收尾：三腿子树 `residual children: <none>`、卡 7 HBM 回 5%、manager enable 态 `disable` 回退到任务前。
 - **处置**：三项证据齐备 + §3 门控生效 ⇒ 翻 `implementation[0].status: import_only → active`；
   `test_zerocost_bundle_is_*` 守卫同步改为断言 `active`。
-- 证据：`docs/evidence/zerocost-activation-20260913.md`（追加「修复后 ON 腿」一节，保留上一程失败记录）
-  + `docs/evidence/zerocost-activation-20260913/raw-fix/`。
+- 证据：[docs/evidence/zerocost-activation-20260913.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/zerocost-activation-20260913.md)（追加「修复后 ON 腿」一节，保留上一程失败记录）
+  + [docs/evidence/zerocost-activation-20260913/raw-fix/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/zerocost-activation-20260913/raw-fix/)。
 
 ## 2026-09-26 cascade 准入与默认关闭隔离（PR #5 评审落地）
 
@@ -315,7 +315,7 @@
   `activation_ready=True` / `blocker=None` ⇒ 此前"管理器仍按 import_only 拒绝启用"闭环。
 - **首发前拦下的两个问题**：① `publish.yml` 缺 `vllm-hust-ext` 的 git 安装（该包无 PyPI 发布，
   而 test extra 钉 `==0.2.0.dev0`）⇒ runner 上必然解析失败；② **内网地址泄漏**：
-  `docs/evidence/w2b-fi-sampling/logs/` 下 10 个日志含未遮蔽的私网地址（cascade 目录当时已遮蔽，
+  [docs/evidence/w2b-fi-sampling/logs/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/w2b-fi-sampling/logs/) 下 10 个日志含未遮蔽的私网地址（cascade 目录当时已遮蔽，
   这批早先提交的漏了）⇒ 一并遮蔽 + 新增 `tests/test_public_hygiene.py` 把判据机械化。
 - **0.1.1**：0.1.0 不可覆盖，而它的 `kernels` extra 钉着任何索引都查不到的 `ascend-kernel==2026.3.9`
   ⇒ 修钉子只能发新版。现钉 `2026.9.26`，来源 = 算子仓 GitHub Release 附件；
@@ -380,7 +380,7 @@
   `-m "not host_tree"`，两个源码级漂移守卫在 CI 是**显式 deselect** ⇒ 发布前必须在本机跑一次
   全量。已把"本机跑全量 `pytest -q`（含 `host_tree`）"写成 §5「构建前」的固定步骤并给出判据；
   自托管 NPU runner job 仍属基础设施决策，未动。
-- **W2 `fi_sampling` 源侧冻结快照**（新 `docs/evidence/fi-sampling-frozen-20260909/`）：任务是让
+- **W2 `fi_sampling` 源侧冻结快照**（新 [docs/evidence/fi-sampling-frozen-20260909/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/fi-sampling-frozen-20260909/)）：任务是让
   "源侧 hash 可直接比对"。实测排除了打 tag：源包是活工作区（`api.py` 已漂移为 `4e3ce156…`），
   且工作区仓历史里**只有**漂移后那一版（`9e98559`）⇒ 快照只能由 §4.1 的逆变换重建。
   已产出 `snapshot/{api,kernels,npu_env,pure}.py`（4 件源侧字节，`sha256sum -c FROZEN.sha256`
