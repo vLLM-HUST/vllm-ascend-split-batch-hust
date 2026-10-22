@@ -73,9 +73,15 @@ def bitwise(a: torch.Tensor, b: torch.Tensor) -> dict:
     va, vb = int_view(a), int_view(b)
     eq = bool(torch.equal(va, vb))
     diff = (va != vb).sum().item()
-    mad = (a.detach().to("cpu").float() - b.detach().to("cpu").float()).abs().max().item()
-    return {"bitwise_ok": eq, "mismatch": int(diff), "numel": int(va.numel()),
-            "max_abs_diff": mad}
+    mad = (
+        (a.detach().to("cpu").float() - b.detach().to("cpu").float()).abs().max().item()
+    )
+    return {
+        "bitwise_ok": eq,
+        "mismatch": int(diff),
+        "numel": int(va.numel()),
+        "max_abs_diff": mad,
+    }
 
 
 def timed(fn, iters: int) -> dict:
@@ -103,9 +109,21 @@ def run_cell(variant: str, m: int, ctx: dict) -> dict:
     main_n = VARIANTS[variant]["main_n"]
     dev, seed, iters = ctx["device"], ctx["seed"], ctx["iters"]
     gen = torch.Generator(device="cpu").manual_seed(seed + m * 10 + main_n)
-    x = torch.randn(m, HIDDEN, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
-    w_main = torch.randn(main_n, HIDDEN, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
-    w_r = torch.randn(ROUTER_N, HIDDEN, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
+    x = (
+        torch.randn(m, HIDDEN, generator=gen, dtype=torch.float32)
+        .to(torch.bfloat16)
+        .to(dev)
+    )
+    w_main = (
+        torch.randn(main_n, HIDDEN, generator=gen, dtype=torch.float32)
+        .to(torch.bfloat16)
+        .to(dev)
+    )
+    w_r = (
+        torch.randn(ROUTER_N, HIDDEN, generator=gen, dtype=torch.float32)
+        .to(torch.bfloat16)
+        .to(dev)
+    )
     w_m = torch.cat([w_main, w_r], dim=0).contiguous()
 
     def base_pair():
@@ -126,22 +144,31 @@ def run_cell(variant: str, m: int, ctx: dict) -> dict:
     numerics = {
         "main_slice_vs_baseline": bitwise(yc, yb),
         "router_slice_vs_baseline": bitwise(lc, lb),
-        "weight_contiguous": {"w_merged": bool(w_m.is_contiguous()),
-                              "w_baseline": bool(w_main.is_contiguous())},
+        "weight_contiguous": {
+            "w_merged": bool(w_m.is_contiguous()),
+            "w_baseline": bool(w_main.is_contiguous()),
+        },
         "router_slice_contiguous_after_copy": bool(lc.is_contiguous()),
-        "merged_row_stride_pollutes_main_view": {"main_view_stride": list(yc.stride()),
-                                                 "baseline_stride": list(yb.stride())},
+        "merged_row_stride_pollutes_main_view": {
+            "main_view_stride": list(yc.stride()),
+            "baseline_stride": list(yb.stride()),
+        },
     }
 
     # ---- 计时 ----
-    arms = {"baseline_pair": base_pair, "candidate_merged": cand_merged,
-            "diag_router_only": diag_router}
+    arms = {
+        "baseline_pair": base_pair,
+        "candidate_merged": cand_merged,
+        "diag_router_only": diag_router,
+    }
     for f in arms.values():
         for _ in range(ctx["warmup"]):
             f()
     torch.npu.synchronize()
-    schedule = [list(arms) if i % 2 == 0 else list(reversed(arms))
-                for i in range(ctx["repeats"])]
+    schedule = [
+        list(arms) if i % 2 == 0 else list(reversed(arms))
+        for i in range(ctx["repeats"])
+    ]
     rows: dict[str, list[dict]] = {a: [] for a in arms}
     for order in schedule:
         for arm in order:
@@ -151,24 +178,45 @@ def run_cell(variant: str, m: int, ctx: dict) -> dict:
         vals = [r["us_per_iter_event_elapsed"] for r in rs]
         perf[arm] = {"us_median": round(statistics.median(vals), 3), "runs": rs}
     b_key = "us_per_iter_event_elapsed"
-    paired = [round((c["us_per_iter_event_elapsed"] / b["us_per_iter_event_elapsed"] - 1) * 100, 3)
-              for b, c in zip(rows["baseline_pair"], rows["candidate_merged"])]
+    paired = [
+        round(
+            (c["us_per_iter_event_elapsed"] / b["us_per_iter_event_elapsed"] - 1) * 100,
+            3,
+        )
+        for b, c in zip(rows["baseline_pair"], rows["candidate_merged"])
+    ]
     doc = {
         "id": f"{variant}-M{m}",
-        "variant": variant, "callsite": VARIANTS[variant]["callsite"],
-        "m": m, "phase": TMS.get(m, "undeclared"),
-        "shapes": {"x": [m, HIDDEN], "w_main": [main_n, HIDDEN],
-                   "w_router": [ROUTER_N, HIDDEN], "w_merged": [main_n + ROUTER_N, HIDDEN]},
+        "variant": variant,
+        "callsite": VARIANTS[variant]["callsite"],
+        "m": m,
+        "phase": TMS.get(m, "undeclared"),
+        "shapes": {
+            "x": [m, HIDDEN],
+            "w_main": [main_n, HIDDEN],
+            "w_router": [ROUTER_N, HIDDEN],
+            "w_merged": [main_n + ROUTER_N, HIDDEN],
+        },
         "numerics": numerics,
         "perf": {
-            "dtype": "bfloat16", "iters": iters, "repeats": ctx["repeats"],
-            "warmup": ctx["warmup"], "timer_scope": TIMER_SCOPE,
-            "schedule": schedule, "arms": perf,
+            "dtype": "bfloat16",
+            "iters": iters,
+            "repeats": ctx["repeats"],
+            "warmup": ctx["warmup"],
+            "timer_scope": TIMER_SCOPE,
+            "schedule": schedule,
+            "arms": perf,
             "paired_delta_pct": paired,
             "paired_delta_pct_median": round(statistics.median(paired), 3),
             "delta_pct_median_of_medians": round(
-                (perf["candidate_merged"]["us_median"]
-                 / perf["baseline_pair"]["us_median"] - 1) * 100, 3),
+                (
+                    perf["candidate_merged"]["us_median"]
+                    / perf["baseline_pair"]["us_median"]
+                    - 1
+                )
+                * 100,
+                3,
+            ),
         },
     }
     del x, w_main, w_r, w_m, yb, lb, yc, lc
@@ -216,16 +264,23 @@ def main(argv: list[str] | None = None) -> int:
     t_start = time.monotonic()
     repo = "/root/vllm-workspace/vllm-ascend-split-batch-hust"
     try:
-        head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True,
-                              text=True, timeout=20).stdout.strip()
+        head = subprocess.run(
+            ["git", "-C", repo, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        ).stdout.strip()
     except Exception:  # noqa: BLE001
         head = None
     product = {
         "schema": SCHEMA,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "status": "ok",
-        "command": {"argv": list(sys.argv if argv is None else argv), "cwd": os.getcwd(),
-                    "python": sys.executable},
+        "command": {
+            "argv": list(sys.argv if argv is None else argv),
+            "cwd": os.getcwd(),
+            "python": sys.executable,
+        },
         "candidate": "router-merge-into-inproj-qkv",
         "route": "028/D7-matmulv2-decode-fusion",
         "caliber_note": "L0 eager 单卡；窗口 1021-031741 的 decode M=1 / prefill M=353 实测形状",
@@ -239,11 +294,16 @@ def main(argv: list[str] | None = None) -> int:
             "applied": "路由输出切片强制 contiguous; 权重 cat(dim=0) 保行连续 ND",
         },
         "hardware": {
-            "device": "npu", "device_name": torch.npu.get_device_name(0),
-            "host": platform.node(), "torch": torch.__version__,
+            "device": "npu",
+            "device_name": torch.npu.get_device_name(0),
+            "host": platform.node(),
+            "torch": torch.__version__,
         },
-        "code": {"repo": repo, "repo_head": head,
-                 "tool_sha256": sha256_file(os.path.abspath(__file__))},
+        "code": {
+            "repo": repo,
+            "repo_head": head,
+            "tool_sha256": sha256_file(os.path.abspath(__file__)),
+        },
         "cells": [],
         "not_claimed": [
             "eager 链流程局部延迟，不是 FULL/图模式时长、不是 all-kernel 占比、不换算端到端",
@@ -252,19 +312,26 @@ def main(argv: list[str] | None = None) -> int:
             "w_merged 为加载期一次性构造；本基准不含构造耗时（一次性 pay）",
         ],
     }
-    ctx = {"device": "npu", "seed": args.seed, "iters": args.iters,
-           "repeats": args.repeats, "warmup": args.warmup}
+    ctx = {
+        "device": "npu",
+        "seed": args.seed,
+        "iters": args.iters,
+        "repeats": args.repeats,
+        "warmup": args.warmup,
+    }
     for variant in variants:
         for m in ms:
             doc = run_cell(variant, m, ctx)
             product["cells"].append(doc)
             p = doc["perf"]
-            print(f"  {doc['id']:20s} pair={p['arms']['baseline_pair']['us_median']:.2f}us "
-                  f"merged={p['arms']['candidate_merged']['us_median']:.2f}us "
-                  f"router_only={p['arms']['diag_router_only']['us_median']:.2f}us "
-                  f"paired_median={p['paired_delta_pct_median']}% "
-                  f"bitwise(router)={doc['numerics']['router_slice_vs_baseline']['bitwise_ok']} "
-                  f"bitwise(main)={doc['numerics']['main_slice_vs_baseline']['bitwise_ok']}")
+            print(
+                f"  {doc['id']:20s} pair={p['arms']['baseline_pair']['us_median']:.2f}us "
+                f"merged={p['arms']['candidate_merged']['us_median']:.2f}us "
+                f"router_only={p['arms']['diag_router_only']['us_median']:.2f}us "
+                f"paired_median={p['paired_delta_pct_median']}% "
+                f"bitwise(router)={doc['numerics']['router_slice_vs_baseline']['bitwise_ok']} "
+                f"bitwise(main)={doc['numerics']['main_slice_vs_baseline']['bitwise_ok']}"
+            )
     product["budget"] = {"elapsed_s": round(time.monotonic() - t_start, 2)}
     if args.out:
         with open(args.out, "w") as f:

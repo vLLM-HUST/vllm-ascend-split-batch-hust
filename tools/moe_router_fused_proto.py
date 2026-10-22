@@ -28,7 +28,6 @@ import argparse
 import hashlib
 import json
 import os
-import statistics
 import subprocess
 import sys
 import time
@@ -44,10 +43,16 @@ HIDDEN, E, K = 2048, 256, 8
 
 @triton.jit
 def fused_router_kernel(
-    logits_ptr, x_ptr,
-    topk_ids_ptr, topk_w_ptr,
-    sorted_ptr, rowidx_ptr, counts_ptr,
-    H: tl.constexpr, E: tl.constexpr, K: tl.constexpr,
+    logits_ptr,
+    x_ptr,
+    topk_ids_ptr,
+    topk_w_ptr,
+    sorted_ptr,
+    rowidx_ptr,
+    counts_ptr,
+    H: tl.constexpr,
+    E: tl.constexpr,
+    K: tl.constexpr,
 ):
     offs = tl.arange(0, E)
     lg = tl.load(logits_ptr + offs).to(tl.float32)
@@ -69,7 +74,9 @@ def fused_router_kernel(
     iv = ids[:, None].to(tl.int32)
     less = tl.sum((ids[None, :] < iv).to(tl.int32), axis=1)
     sidx = kidx[None, :]
-    ties_before = tl.sum(((ids[None, :] == iv) & (sidx < kidx[:, None])).to(tl.int32), axis=1)
+    ties_before = tl.sum(
+        ((ids[None, :] == iv) & (sidx < kidx[:, None])).to(tl.int32), axis=1
+    )
     tl.store(rowidx_ptr + kidx, (less + ties_before).to(tl.int32))
     counts = tl.zeros((E,), tl.int32)
     for k in tl.static_range(K):
@@ -82,9 +89,16 @@ def baseline_chain(logits, x):
     lg = logits.view(1, -1).to(torch.float32)
     w, i, _ = torch_npu.npu_moe_gating_top_k(lg, renorm=1, k=K)
     y, e, t, s = torch_npu.npu_moe_init_routing_v2(
-        x, i.to(torch.int32), scale=None, active_num=i.numel(), expert_num=E,
-        expert_tokens_num_type=1, expert_tokens_num_flag=True,
-        active_expert_range=[0, E], quant_mode=-1)
+        x,
+        i.to(torch.int32),
+        scale=None,
+        active_num=i.numel(),
+        expert_num=E,
+        expert_tokens_num_type=1,
+        expert_tokens_num_flag=True,
+        active_expert_range=[0, E],
+        quant_mode=-1,
+    )
     return w, i, y, t
 
 
@@ -96,8 +110,16 @@ def main(argv=None):
     dev = "npu"
     t0 = time.monotonic()
     gen = torch.Generator(device="cpu").manual_seed(args.seed)
-    W = torch.randn(E, HIDDEN, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
-    x = torch.randn(1, HIDDEN, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
+    W = (
+        torch.randn(E, HIDDEN, generator=gen, dtype=torch.float32)
+        .to(torch.bfloat16)
+        .to(dev)
+    )
+    x = (
+        torch.randn(1, HIDDEN, generator=gen, dtype=torch.float32)
+        .to(torch.bfloat16)
+        .to(dev)
+    )
     logits = torch.nn.functional.linear(x, W).flatten()  # [256] bf16
     out = {"schema": "opt-ops-l0-trio-proto.v1"}
     try:
@@ -107,29 +129,55 @@ def main(argv=None):
         sorted_p = torch.empty(K, HIDDEN, device=dev, dtype=torch.bfloat16)
         rowidx_p = torch.empty(K, device=dev, dtype=torch.int32)
         counts_p = torch.empty(E, device=dev, dtype=torch.int64)
-        fused_router_kernel[(1,)](logits.contiguous(), x.contiguous(), ids_p, w_p,
-                                  sorted_p, rowidx_p, counts_p,
-                                  H=HIDDEN, E=E, K=K, num_warps=1)
+        fused_router_kernel[(1,)](
+            logits.contiguous(),
+            x.contiguous(),
+            ids_p,
+            w_p,
+            sorted_p,
+            rowidx_p,
+            counts_p,
+            H=HIDDEN,
+            E=E,
+            K=K,
+            num_warps=1,
+        )
         torch.npu.synchronize()
         # 契约
         set_ok = torch.equal(torch.sort(ib.flatten())[0], torch.sort(ids_p)[0])
-        w_close = bool(torch.allclose(wb.flatten().float(), w_p.float(), atol=1e-5, rtol=1e-5))
+        w_close = bool(
+            torch.allclose(wb.flatten().float(), w_p.float(), atol=1e-5, rtol=1e-5)
+        )
         counts_ok = bool(torch.equal(tb, counts_p))
         sorted_ok = bool(torch.equal(yb.view(-1), sorted_p.view(-1)))
         doc = {
-            "topk_set_ok": set_ok, "weights_close": w_close,
-            "counts_bitwise": counts_ok, "sorted_rows_bitwise": sorted_ok,
+            "topk_set_ok": set_ok,
+            "weights_close": w_close,
+            "counts_bitwise": counts_ok,
+            "sorted_rows_bitwise": sorted_ok,
             "baseline_ids": ib.flatten().cpu().tolist(),
             "proto_ids": ids_p.cpu().tolist(),
         }
+
         # 计时: 两臂 graph k16
         def base_arm():
             baseline_chain(logits, x)
 
         def proto_arm():
-            fused_router_kernel[(1,)](logits.contiguous(), x.contiguous(), ids_p, w_p,
-                                      sorted_p, rowidx_p, counts_p,
-                                      H=HIDDEN, E=E, K=K, num_warps=1)
+            fused_router_kernel[(1,)](
+                logits.contiguous(),
+                x.contiguous(),
+                ids_p,
+                w_p,
+                sorted_p,
+                rowidx_p,
+                counts_p,
+                H=HIDDEN,
+                E=E,
+                K=K,
+                num_warps=1,
+            )
+
         def t_graph(fn, k=16, iters=40):
             torch.npu.synchronize()
             g = torch.npu.NPUGraph()
@@ -139,13 +187,17 @@ def main(argv=None):
             for _ in range(5):
                 g.replay()
             torch.npu.synchronize()
-            s, e = torch.npu.Event(enable_timing=True), torch.npu.Event(enable_timing=True)
+            s, e = (
+                torch.npu.Event(enable_timing=True),
+                torch.npu.Event(enable_timing=True),
+            )
             s.record()
             for _ in range(iters):
                 g.replay()
             e.record()
             torch.npu.synchronize()
             return round(s.elapsed_time(e) * 1000.0 / (iters * k), 3)
+
         doc["baseline_us"] = t_graph(base_arm)
         doc["proto_us"] = t_graph(proto_arm)
         doc["savings_pct"] = round((1 - doc["proto_us"] / doc["baseline_us"]) * 100, 2)
@@ -154,12 +206,28 @@ def main(argv=None):
         doc = {"status": "FAILED", "error": repr(exc)[:300]}
         print(f"FAILED {exc!r}")
     repo = "/root/vllm-workspace/vllm-ascend-split-batch-hust"
-    head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True,
-                          text=True, timeout=20).stdout.strip() or None
-    doc.update({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "hardware": {"device": "npu"},
-                "code": {"repo_head": head, "tool_sha256": hashlib.sha256(open(os.path.abspath(__file__), 'rb').read()).hexdigest()},
-                "elapsed_s": round(time.monotonic() - t0, 2)})
+    head = (
+        subprocess.run(
+            ["git", "-C", repo, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        ).stdout.strip()
+        or None
+    )
+    doc.update(
+        {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "hardware": {"device": "npu"},
+            "code": {
+                "repo_head": head,
+                "tool_sha256": hashlib.sha256(
+                    open(os.path.abspath(__file__), "rb").read()
+                ).hexdigest(),
+            },
+            "elapsed_s": round(time.monotonic() - t0, 2),
+        }
+    )
     if args.out:
         with open(args.out, "w") as f:
             json.dump(doc, f, indent=1, ensure_ascii=False)

@@ -91,24 +91,31 @@ def run_cell(name: str, n: int, k: int, ctx: dict) -> dict:
     t_m1 = median_us(lambda: F.linear(x, w), warmup, iters, repeats)
 
     w2 = torch.empty_like(w)
+
     def copy_w():
         w2.copy_(w)
+
     t_copy = median_us(copy_w, warmup, max(iters // 4, 20), repeats)
     bytes_moved = w.numel() * w.element_size() * 2  # 读+写
     bw_gbps = bytes_moved / (t_copy * 1e-6) / 1e9
     bw_floor_us = round((w.numel() * w.element_size()) / (bw_gbps * 1e9) * 1e6, 3)
 
-    w_min = torch.randn(8, k, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
+    w_min = (
+        torch.randn(8, k, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
+    )
     t_launch = median_us(lambda: F.linear(x, w_min), warmup, iters, repeats)
 
     effective_floor = max(bw_floor_us, t_launch)
     headroom = round((t_m1 - effective_floor) / t_m1 * 100, 2)
     doc = {
         "id": name,
-        "weight": [n, k], "weight_mb": round(w.numel() * w.element_size() / 1e6, 2),
-        "callsite": CELLS[name][3], "window_ms": CELLS[name][2],
+        "weight": [n, k],
+        "weight_mb": round(w.numel() * w.element_size() / 1e6, 2),
+        "callsite": CELLS[name][3],
+        "window_ms": CELLS[name][2],
         "t_m1_us": t_m1,
-        "t_copy_us": t_copy, "copy_bw_gbps": round(bw_gbps, 1),
+        "t_copy_us": t_copy,
+        "copy_bw_gbps": round(bw_gbps, 1),
         "bw_floor_us": bw_floor_us,
         "t_launch_probe_us": t_launch,
         "effective_floor_us": round(effective_floor, 3),
@@ -158,16 +165,23 @@ def main(argv: list[str] | None = None) -> int:
     t_start = time.monotonic()
     repo = "/root/vllm-workspace/vllm-ascend-split-batch-hust"
     try:
-        head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True,
-                              text=True, timeout=20).stdout.strip()
+        head = subprocess.run(
+            ["git", "-C", repo, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        ).stdout.strip()
     except Exception:  # noqa: BLE001
         head = None
     product = {
         "schema": SCHEMA,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "status": "ok",
-        "command": {"argv": list(sys.argv if argv is None else argv), "cwd": os.getcwd(),
-                    "python": sys.executable},
+        "command": {
+            "argv": list(sys.argv if argv is None else argv),
+            "cwd": os.getcwd(),
+            "python": sys.executable,
+        },
         "candidate": "matmulv2-decode-m1-l0-ruler",
         "route": "028/D7-matmulv2-decode-fusion",
         "goal": {
@@ -178,10 +192,17 @@ def main(argv: list[str] | None = None) -> int:
                 "effective": "max(bw, launch)",
             },
         },
-        "hardware": {"device": "npu", "device_name": torch.npu.get_device_name(0),
-                     "host": platform.node(), "torch": torch.__version__},
-        "code": {"repo": repo, "repo_head": head,
-                 "tool_sha256": sha256_file(os.path.abspath(__file__))},
+        "hardware": {
+            "device": "npu",
+            "device_name": torch.npu.get_device_name(0),
+            "host": platform.node(),
+            "torch": torch.__version__,
+        },
+        "code": {
+            "repo": repo,
+            "repo_head": head,
+            "tool_sha256": sha256_file(os.path.abspath(__file__)),
+        },
         "cells": [],
         "not_claimed": [
             "eager Event 链延迟, 不是 FULL/图模式时长; 图模式 kernel 时长以窗 1021-031741 为准",
@@ -189,22 +210,32 @@ def main(argv: list[str] | None = None) -> int:
             "headroom 不构成 kernel 替换收益结论; W1R 相邻家族进入需先问",
         ],
     }
-    ctx = {"device": "npu", "seed": args.seed, "iters": args.iters,
-           "repeats": args.repeats, "warmup": args.warmup}
+    ctx = {
+        "device": "npu",
+        "seed": args.seed,
+        "iters": args.iters,
+        "repeats": args.repeats,
+        "warmup": args.warmup,
+    }
     for name in cells:
         n, k, _, _ = CELLS[name]
         doc = run_cell(name, n, k, ctx)
         product["cells"].append(doc)
-        print(f"  {name:16s} W={doc['weight']} {doc['weight_mb']:>7}MB  "
-              f"t_m1={doc['t_m1_us']:>8.2f}us  bw_floor={doc['bw_floor_us']:>7.2f}us"
-              f"(@{doc['copy_bw_gbps']:.0f}GB/s)  launch={doc['t_launch_probe_us']:>5.2f}us  "
-              f"headroom={doc['headroom_vs_effective_floor_pct']:>6.2f}%  [{doc['binding']}]")
+        print(
+            f"  {name:16s} W={doc['weight']} {doc['weight_mb']:>7}MB  "
+            f"t_m1={doc['t_m1_us']:>8.2f}us  bw_floor={doc['bw_floor_us']:>7.2f}us"
+            f"(@{doc['copy_bw_gbps']:.0f}GB/s)  launch={doc['t_launch_probe_us']:>5.2f}us  "
+            f"headroom={doc['headroom_vs_effective_floor_pct']:>6.2f}%  [{doc['binding']}]"
+        )
     big = [c for c in product["cells"] if c["weight_mb"] > 4]
     product["reading"] = {
         "rule": ">4MB 桶 headroom<20% → D7 无 kernel 杠杆（收敛）; 单桶高 headroom 仅立候选不裁决",
         "big_cells": [c["id"] for c in big],
-        "big_headroom_median_pct": round(statistics.median(
-            [c["headroom_vs_effective_floor_pct"] for c in big]), 2) if big else None,
+        "big_headroom_median_pct": round(
+            statistics.median([c["headroom_vs_effective_floor_pct"] for c in big]), 2
+        )
+        if big
+        else None,
     }
     product["budget"] = {"elapsed_s": round(time.monotonic() - t_start, 2)}
     if args.out:

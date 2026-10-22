@@ -38,9 +38,14 @@ HIDDEN, TOPK, EXPERTS = 2048, 8, 256
 
 @triton.jit
 def init_only_kernel(
-    x_ptr, ids_ptr,
-    sorted_ptr, rowidx_ptr, counts_ptr,
-    H: tl.constexpr, E: tl.constexpr, K: tl.constexpr,
+    x_ptr,
+    ids_ptr,
+    sorted_ptr,
+    rowidx_ptr,
+    counts_ptr,
+    H: tl.constexpr,
+    E: tl.constexpr,
+    K: tl.constexpr,
 ):
     kidx = tl.arange(0, K)
     ids = tl.load(ids_ptr + kidx).to(tl.int32)
@@ -50,7 +55,9 @@ def init_only_kernel(
     iv = ids[:, None].to(tl.int32)
     less = tl.sum((ids[None, :] < iv).to(tl.int32), axis=1)
     sidx = kidx[None, :]
-    ties_before = tl.sum(((ids[None, :] == iv) & (sidx < kidx[:, None])).to(tl.int32), axis=1)
+    ties_before = tl.sum(
+        ((ids[None, :] == iv) & (sidx < kidx[:, None])).to(tl.int32), axis=1
+    )
     tl.store(rowidx_ptr + kidx, (less + ties_before).to(tl.int32))
     counts = tl.zeros((E,), tl.int32)
     for j in tl.static_range(K):
@@ -85,22 +92,42 @@ def main(argv=None):
     dev = "npu"
     t0 = time.monotonic()
     gen = torch.Generator(device="cpu").manual_seed(args.seed)
-    x = torch.randn(1, HIDDEN, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
+    x = (
+        torch.randn(1, HIDDEN, generator=gen, dtype=torch.float32)
+        .to(torch.bfloat16)
+        .to(dev)
+    )
     ids = torch.randint(0, EXPERTS, (1, TOPK), generator=gen, dtype=torch.int32).to(dev)
 
     def v2():
         return torch_npu.npu_moe_init_routing_v2(
-            x, ids, scale=None, active_num=TOPK, expert_num=EXPERTS,
-            expert_tokens_num_type=1, expert_tokens_num_flag=True,
-            active_expert_range=[0, EXPERTS], quant_mode=-1)
+            x,
+            ids,
+            scale=None,
+            active_num=TOPK,
+            expert_num=EXPERTS,
+            expert_tokens_num_type=1,
+            expert_tokens_num_flag=True,
+            active_expert_range=[0, EXPERTS],
+            quant_mode=-1,
+        )
 
     sorted_p = torch.empty(TOPK, HIDDEN, device=dev, dtype=torch.bfloat16)
     rowidx_p = torch.empty(TOPK, device=dev, dtype=torch.int32)
     counts_p = torch.empty(EXPERTS, device=dev, dtype=torch.int64)
 
     def tri():
-        init_only_kernel[(1,)](x, ids, sorted_p, rowidx_p, counts_p,
-                               H=HIDDEN, E=EXPERTS, K=TOPK, num_warps=4)
+        init_only_kernel[(1,)](
+            x,
+            ids,
+            sorted_p,
+            rowidx_p,
+            counts_p,
+            H=HIDDEN,
+            E=EXPERTS,
+            K=TOPK,
+            num_warps=4,
+        )
 
     y2, e2, t2, _ = v2()
     tri()
@@ -119,21 +146,40 @@ def main(argv=None):
     for rep in range(3):
         for name, f in (("v2", v2), ("tri", tri)):
             rows[name].append(replay_time(f))
-    perf = {"v2_us": round(statistics.median(rows["v2"]), 3),
-            "tri_us": round(statistics.median(rows["tri"]), 3),
-            "delta_pct": round((statistics.median(rows["tri"]) / statistics.median(rows["v2"]) - 1) * 100, 2)}
+    perf = {
+        "v2_us": round(statistics.median(rows["v2"]), 3),
+        "tri_us": round(statistics.median(rows["tri"]), 3),
+        "delta_pct": round(
+            (statistics.median(rows["tri"]) / statistics.median(rows["v2"]) - 1) * 100,
+            2,
+        ),
+    }
     gate_pass = perf["delta_pct"] <= -10.0 and all(num.values())
     repo = "/root/vllm-workspace/vllm-ascend-split-batch-hust"
-    head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True,
-                          text=True, timeout=20).stdout.strip() or None
-    doc = {"schema": "opt-ops-l0-moe-init-triton-only.v1",
-           "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-           "status": "OK" if gate_pass else "GATE-FAIL",
-           "numerics": num, "perf": perf,
-           "gate": {"rule": "tri <= v2-10% 且 三输出 bitwise", "passed": gate_pass},
-           "code": {"repo_head": head,
-                    "tool_sha256": hashlib.sha256(open(os.path.abspath(__file__), "rb").read()).hexdigest()},
-           "elapsed_s": round(time.monotonic() - t0, 2)}
+    head = (
+        subprocess.run(
+            ["git", "-C", repo, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        ).stdout.strip()
+        or None
+    )
+    doc = {
+        "schema": "opt-ops-l0-moe-init-triton-only.v1",
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "status": "OK" if gate_pass else "GATE-FAIL",
+        "numerics": num,
+        "perf": perf,
+        "gate": {"rule": "tri <= v2-10% 且 三输出 bitwise", "passed": gate_pass},
+        "code": {
+            "repo_head": head,
+            "tool_sha256": hashlib.sha256(
+                open(os.path.abspath(__file__), "rb").read()
+            ).hexdigest(),
+        },
+        "elapsed_s": round(time.monotonic() - t0, 2),
+    }
     if args.out:
         with open(args.out, "w") as f:
             json.dump(doc, f, indent=1, ensure_ascii=False)

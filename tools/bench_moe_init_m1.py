@@ -29,7 +29,6 @@ import argparse
 import hashlib
 import json
 import os
-import statistics
 import subprocess
 import sys
 import time
@@ -44,24 +43,38 @@ HIDDEN, TOPK, EXPERTS = 2048, 8, 256
 
 def v2_call(x, ids, eslot=TOPK):
     return torch_npu.npu_moe_init_routing_v2(
-        x, ids, scale=None, active_num=ids.numel(), expert_num=EXPERTS,
-        expert_tokens_num_type=1, expert_tokens_num_flag=True,
-        active_expert_range=[0, EXPERTS], quant_mode=-1)
+        x,
+        ids,
+        scale=None,
+        active_num=ids.numel(),
+        expert_num=EXPERTS,
+        expert_tokens_num_type=1,
+        expert_tokens_num_flag=True,
+        active_expert_range=[0, EXPERTS],
+        quant_mode=-1,
+    )
 
 
 def composition_call(x, ids, eslot=TOPK):
     n = ids.numel()
     flat = ids.flatten().to(torch.int32)
-    token_ids = (torch.arange(n, device=x.device, dtype=torch.int32) // eslot).clamp(max=x.shape[0] - 1)
-    expanded = x[token_ids.long()]            # [8,2048] topk 展开行
-    order = torch.argsort(flat)               # [8]
+    token_ids = (torch.arange(n, device=x.device, dtype=torch.int32) // eslot).clamp(
+        max=x.shape[0] - 1
+    )
+    expanded = x[token_ids.long()]  # [8,2048] topk 展开行
+    order = torch.argsort(flat)  # [8]
     ys = expanded[order].contiguous()
     tt = torch_npu.npu_moe_compute_expert_tokens(flat, EXPERTS)
     return ys, order.to(torch.int32), tt
 
 
 def bit(a, b):
-    return bool(torch.equal(a.detach().to("cpu").contiguous().view(-1), b.detach().to("cpu").contiguous().view(-1)))
+    return bool(
+        torch.equal(
+            a.detach().to("cpu").contiguous().view(-1),
+            b.detach().to("cpu").contiguous().view(-1),
+        )
+    )
 
 
 def replay_time(fn, k=16, iters=40):
@@ -100,27 +113,45 @@ def main(argv=None):
     t0 = time.monotonic()
     dev = "npu"
     gen = torch.Generator(device="cpu").manual_seed(args.seed)
-    x = torch.randn(1, HIDDEN, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
+    x = (
+        torch.randn(1, HIDDEN, generator=gen, dtype=torch.float32)
+        .to(torch.bfloat16)
+        .to(dev)
+    )
     ids = torch.randint(0, EXPERTS, (1, TOPK), generator=gen, dtype=torch.int32).to(dev)
     y2, e2, t2, s2 = v2_call(x, ids)
-    arms = {"v2_init": lambda: v2_call(x, ids),
-            "composition": lambda: composition_call(x, ids)}
+    arms = {
+        "v2_init": lambda: v2_call(x, ids),
+        "composition": lambda: composition_call(x, ids),
+    }
     doc = {"cells": []}
     ok_all = True
     for name, fn in arms.items():
         try:
-            ys, ei, tt = composition_call(x, ids) if name == "composition" else (y2, e2, t2)
+            ys, ei, tt = (
+                composition_call(x, ids) if name == "composition" else (y2, e2, t2)
+            )
             if name == "composition":
                 # torch_npu 兼容收集: composition 输出与 v2 v2_contract 对照（组内排序 tie 顺序可能不同, 用 set 语义+计数核）
                 counts_ok = bool(torch.equal(tt, t2))
-                sorted_ok = torch.equal(ys.view(-1), y2.view(-1))  # tie 顺序差异会被此捕获
+                sorted_ok = torch.equal(
+                    ys.view(-1), y2.view(-1)
+                )  # tie 顺序差异会被此捕获
                 eidx_ok = torch.equal(ei.view(-1), e2.view(-1))
                 ok = sorted_ok and eidx_ok and counts_ok
-                doc["cells"].append({"arm": name, "sorted_bitwise": sorted_ok,
-                                     "rowidx_bitwise": eidx_ok, "tokens_bitwise": counts_ok,
-                                     "dur_us": replay_time(fn)})
+                doc["cells"].append(
+                    {
+                        "arm": name,
+                        "sorted_bitwise": sorted_ok,
+                        "rowidx_bitwise": eidx_ok,
+                        "tokens_bitwise": counts_ok,
+                        "dur_us": replay_time(fn),
+                    }
+                )
             else:
-                doc["cells"].append({"arm": name, "baseline": True, "dur_us": replay_time(fn)})
+                doc["cells"].append(
+                    {"arm": name, "baseline": True, "dur_us": replay_time(fn)}
+                )
         except Exception as exc:  # noqa: BLE001
             ok_all = False
             doc["cells"].append({"arm": name, "error": repr(exc)[:220]})
@@ -129,15 +160,33 @@ def main(argv=None):
     base = [c for c in doc["cells"] if c["arm"] == "v2_init"]
     if comp and base and "dur_us" in comp[0] and "dur_us" in base[0]:
         delta = round((comp[0]["dur_us"] / base[0]["dur_us"] - 1) * 100, 2)
-        doc["verdict"] = {"composition_delta_pct": delta,
-                          "composition_ok": all(k for k in comp[0] if k.endswith("bitwise"))}
+        doc["verdict"] = {
+            "composition_delta_pct": delta,
+            "composition_ok": all(k for k in comp[0] if k.endswith("bitwise")),
+        }
         print(f"  composition delta {delta}% vs v2_init {base[0]['dur_us']}us")
-    head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True,
-                          text=True, timeout=20).stdout.strip() or None
-    doc.update({"schema": SCHEMA, "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "hardware": {"device": "npu", "device_name": torch.npu.get_device_name(0)},
-                "code": {"repo": repo, "repo_head": head, "tool_sha256": sha256_file(os.path.abspath(__file__))},
-                "elapsed_s": round(time.monotonic() - t0, 2)})
+    head = (
+        subprocess.run(
+            ["git", "-C", repo, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        ).stdout.strip()
+        or None
+    )
+    doc.update(
+        {
+            "schema": SCHEMA,
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "hardware": {"device": "npu", "device_name": torch.npu.get_device_name(0)},
+            "code": {
+                "repo": repo,
+                "repo_head": head,
+                "tool_sha256": sha256_file(os.path.abspath(__file__)),
+            },
+            "elapsed_s": round(time.monotonic() - t0, 2),
+        }
+    )
     if args.out:
         with open(args.out, "w") as f:
             json.dump(doc, f, indent=1, ensure_ascii=False)

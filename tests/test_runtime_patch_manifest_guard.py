@@ -2,7 +2,6 @@
 
 import json
 import pathlib
-import subprocess
 
 HERE = pathlib.Path(__file__).resolve().parent
 RT = HERE.parent / "tools" / "runtime-tree"
@@ -27,17 +26,22 @@ def test_manifest_retired_layers_absent():
     """2026-10-22 退役: 三层不得再进自动重放(并发重放曾反复还原危险 vintage)。
     载波唯一通道 = husk; 手动回滚件在 tree-patches/。"""
     text = (RT / "apply-runtime-patches.sh").read_text()
-    entries = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    entries = [ln for ln in text.splitlines()
+               if ln.strip() and not ln.lstrip().startswith("#")]
     for retired in ("d4site2-views-combined|", "moe-init-triton|", "nz-skip-gate|"):
-        assert not any(retired in ln for ln in entries), f"退役层仍在 MANIFEST: {retired}"
+        assert not any(retired in ln for ln in entries), (
+            f"退役层仍在 MANIFEST: {retired}")
 
 
 def test_seam_table_contains_husk_fingerprints():
     """C 形态: seam 表断言 husk 变换表存在（树应 stock）。"""
     d = json.loads((RT / "tree-seam-assertions.json").read_text())
     ids = {s["id"] for s in d["seams"]}
-    for fid in ("husk-rsp-VLLM_HUST_D4_CONV_PACK", "husk-rsp-VLLM_HUST_GDN_UNPACK_VIEWS",
-                "husk-rsp-VLLM_HUST_MOE_INIT_TRITON", "husk-rsp-VLLM_HUST_NZ_SKIP_GATE"):
+    husk_ids = ("husk-rsp-VLLM_HUST_D4_CONV_PACK",
+                "husk-rsp-VLLM_HUST_GDN_UNPACK_VIEWS",
+                "husk-rsp-VLLM_HUST_MOE_INIT_TRITON",
+                "husk-rsp-VLLM_HUST_NZ_SKIP_GATE")
+    for fid in husk_ids:
         assert fid in ids, fid
 
 
@@ -55,13 +59,15 @@ def test_live_tree_is_anchor_matchable_for_husk():
     env 开启即 capture 期崩（l2norm strided view）。树带补丁≠安全态——唯一安全态
     是锚点可匹配（即 loader 语义下的 stock），任何锚点失配都会让载波静默失效。"""
     from vllm_ascend_split_batch import runtime_source_patches as rsp
+    ascend = "/vllm-workspace/vllm-ascend/vllm_ascend/"
     mod2rel = {
         rsp.GDN: "ops/gdn.py",
         rsp.TD: "ops/fused_moe/token_dispatcher.py",
         rsp.LIN: "ops/linear.py",
-        getattr(rsp, "PLATFORM", ""): "/vllm-workspace/vllm-ascend/vllm_ascend/platform.py",
-        getattr(rsp, "CORE_RUNNER", ""): "/vllm-workspace/vllm/vllm/v1/worker/gpu_model_runner.py",
-        getattr(rsp, "NPU_RUNNER", ""): "/vllm-workspace/vllm-ascend/vllm_ascend/worker/model_runner_v1.py",
+        getattr(rsp, "PLATFORM", ""): ascend + "platform.py",
+        getattr(rsp, "CORE_RUNNER", ""):
+            "/vllm-workspace/vllm/vllm/v1/worker/gpu_model_runner.py",
+        getattr(rsp, "NPU_RUNNER", ""): ascend + "worker/model_runner_v1.py",
     }
     for tok in ("VLLM_HUST_D4_CONV_PACK", "VLLM_HUST_GDN_UNPACK_VIEWS",
                 "VLLM_HUST_MOE_INIT_TRITON", "VLLM_HUST_NZ_SKIP_GATE"):

@@ -97,7 +97,23 @@ extend-exclude = [
     "src/vllm_ascend_split_batch/fi_sampling",
     "docs/evidence",
     "tools/runtime-tree",
+    # 方向分支的离线探针/归因脚本(与 runtime-tree 同类: URL/长 CLI 串, 行内 noqa
+    # 会淹没可读性; 行为经 L0/L3 门验证, 不作格式手术 — 见 028/D1/D7 方向记录)
+    "tools/analysis/matmulv2_shape_attribution.py",
+    "tools/bench_router_merge.py",
+    "tools/bench_moe_init_m1.py",
+    "tools/bench_matmul_m1_layout.py",
+    "tools/bench_matmul_m1_ruler.py",
+    "tools/probe_unpack_views_l0.py",
+    "tools/moe_router_fused_proto.py",
+    "tools/bench_moe_init_triton_only.py",
 ]
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# 锚点/载荷为逐字节精确变换数据: 行长不可手术(改写即破坏锚点),
+# noqa 亦不可入(会污染字符串值)。禁用 E501, 其他规则仍生效。
+"src/vllm_ascend_split_batch/runtime_source_patches.py" = ["E501"]
+"src/vllm_ascend_split_batch/moe_init_triton.py" = ["E501"]

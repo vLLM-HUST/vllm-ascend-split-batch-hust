@@ -65,7 +65,8 @@ def main():
             "window_reference": {
                 "opstat": "1021-182739-opstat.json",
                 "in_graph_us": 153.0, "avg_kb": 58.0,
-                "note": "窗内为 FULL graph 图内值(无 host launch); eager 值含 ~35µs host 提交地板",
+                "note": "窗内为 FULL graph 图内值(无 host launch); "
+                        "eager 值含 ~35µs host 提交地板",
             },
         }
         with open(out, "w") as f:

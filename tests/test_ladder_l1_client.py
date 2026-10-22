@@ -101,7 +101,8 @@ def test_success_records_usage_annotations(fake_serve, tmp_path: Path) -> None:
     assert set(data["median"]) == {"ttft_ms", "e2e_ms", "tpot_ms"}
 
 
-def test_midloop_failure_keeps_rows_and_exits_nonzero(fake_serve, tmp_path: Path) -> None:
+def test_midloop_failure_keeps_rows_and_exits_nonzero(
+    fake_serve, tmp_path: Path) -> None:
     behave, port = fake_serve
     behave["fail_at"] = {2}
     out = tmp_path / "l1.json"

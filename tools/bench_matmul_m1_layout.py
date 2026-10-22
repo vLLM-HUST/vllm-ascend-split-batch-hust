@@ -36,10 +36,8 @@ import hashlib
 import json
 import os
 import platform
-import statistics
 import subprocess
 import sys
-import tempfile
 import time
 
 import torch
@@ -105,11 +103,14 @@ def timed_arm(fn, warmup: int, prof_iters: int, evict_mb: int = 0) -> dict:
         per = (t1 - t2) / k
         return {
             "method": "npu_graph_capture_k16_replay_l2cold",
-            "kernels_per_graph": k, "replays": iters, "evict_mb": evict_mb,
+            "kernels_per_graph": k,
+            "replays": iters,
+            "evict_mb": evict_mb,
             "with_evict_us_per_block": round(t1, 3),
             "evict_only_us_per_block": round(t2, 3),
             "median_us": round(per, 3),
-            "min_us": None, "n_kernels_found": iters * k,
+            "min_us": None,
+            "n_kernels_found": iters * k,
             "caveat": "差值法; 含 evict 与 GEMM 的重叠扰动, 为冷态上界近似",
         }
 
@@ -120,8 +121,11 @@ def timed_arm(fn, warmup: int, prof_iters: int, evict_mb: int = 0) -> dict:
     per = replay_time(g, iters)
     return {
         "method": "npu_graph_capture_k16_replay_l2warm",
-        "kernels_per_graph": k, "replays": iters, "evict_mb": 0,
-        "median_us": round(per, 3), "min_us": None,
+        "kernels_per_graph": k,
+        "replays": iters,
+        "evict_mb": 0,
+        "median_us": round(per, 3),
+        "min_us": None,
         "n_kernels_found": iters * k,
         "caveat": "背靠背同权重 L2 热态, 不代表窗口 HBM 冷流",
     }
@@ -154,7 +158,11 @@ def run_cell(name: str, n: int, ctx: dict) -> dict:
         f_nz()
         torch.npu.synchronize()
         arms["nz_linear"] = f_nz
-        nz_meta = {"requested_format": NZ_FORMAT, "observed_format": int(fmt), "applied": True}
+        nz_meta = {
+            "requested_format": NZ_FORMAT,
+            "observed_format": int(fmt),
+            "applied": True,
+        }
     except Exception as exc:  # noqa: BLE001 — 单臂失败如实记录, 其余臂继续
         nz_meta = {"applied": False, "error": repr(exc)[:200]}
 
@@ -177,17 +185,22 @@ def run_cell(name: str, n: int, ctx: dict) -> dict:
 
     perf = {}
     for arm, fn in arms.items():
-        perf[arm] = timed_arm(fn, ctx["warmup"], ctx["prof_iters"],
-                              evict_mb=ctx.get("evict_mb", 0))
+        perf[arm] = timed_arm(
+            fn, ctx["warmup"], ctx["prof_iters"], evict_mb=ctx.get("evict_mb", 0)
+        )
     base = perf["nd_linear"]["median_us"]
     for arm, p in perf.items():
         if arm != "nd_linear" and p["median_us"] and base:
             p["delta_pct_vs_nd"] = round((p["median_us"] / base - 1) * 100, 2)
     doc = {
-        "id": name, "weight": [n, k],
+        "id": name,
+        "weight": [n, k],
         "weight_mb": round(w.numel() * w.element_size() / 1e6, 2),
-        "window_dur_us": CELLS[name][1], "window_note": CELLS[name][2],
-        "nz": nz_meta, "numerics": numerics, "perf": perf,
+        "window_dur_us": CELLS[name][1],
+        "window_note": CELLS[name][2],
+        "nz": nz_meta,
+        "numerics": numerics,
+        "perf": perf,
     }
     del x, w, w_t, ref
     torch.npu.empty_cache()
@@ -207,11 +220,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--prof-iters", type=int, default=30)
     ap.add_argument("--warmup", type=int, default=20)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--evict-mb", type=int, default=0,
-                    help=">0 时启用 L2 冷态仿真(graph 内逐出缓冲整写, 差值法)")
+    ap.add_argument(
+        "--evict-mb",
+        type=int,
+        default=0,
+        help=">0 时启用 L2 冷态仿真(graph 内逐出缓冲整写, 差值法)",
+    )
     ap.add_argument("--cells", default=",".join(CELLS))
-    ap.add_argument("--gate-pct", type=float, default=15.0,
-                    help="预声明门: inproj 桶改进 >=此百分比 -> 立候选")
+    ap.add_argument(
+        "--gate-pct",
+        type=float,
+        default=15.0,
+        help="预声明门: inproj 桶改进 >=此百分比 -> 立候选",
+    )
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
     try:
@@ -227,16 +248,23 @@ def main(argv: list[str] | None = None) -> int:
     t_start = time.monotonic()
     repo = "/root/vllm-workspace/vllm-ascend-split-batch-hust"
     try:
-        head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True,
-                              text=True, timeout=20).stdout.strip()
+        head = subprocess.run(
+            ["git", "-C", repo, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        ).stdout.strip()
     except Exception:  # noqa: BLE001
         head = None
     product = {
         "schema": SCHEMA,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "status": "ok",
-        "command": {"argv": list(sys.argv if argv is None else argv), "cwd": os.getcwd(),
-                    "python": sys.executable},
+        "command": {
+            "argv": list(sys.argv if argv is None else argv),
+            "cwd": os.getcwd(),
+            "python": sys.executable,
+        },
         "candidate": "matmulv2-decode-m1-layout",
         "route": "028/D7-matmulv2-decode-fusion",
         "goal": {
@@ -244,11 +272,18 @@ def main(argv: list[str] | None = None) -> int:
             "arbiter": "profiler chrome-trace kernel 设备时长中位（与窗口 kernel_details 同口径）",
             "gate": f"in_proj 任一臂改进 >= {args.gate_pct}% -> 立 L3 候选; 否则布局领地关闭",
         },
-        "hardware": {"device": "npu", "device_name": torch.npu.get_device_name(0),
-                     "host": platform.node(), "torch": torch.__version__,
-                     "torch_npu": getattr(torch_npu, "__version__", "")},
-        "code": {"repo": repo, "repo_head": head,
-                 "tool_sha256": sha256_file(os.path.abspath(__file__))},
+        "hardware": {
+            "device": "npu",
+            "device_name": torch.npu.get_device_name(0),
+            "host": platform.node(),
+            "torch": torch.__version__,
+            "torch_npu": getattr(torch_npu, "__version__", ""),
+        },
+        "code": {
+            "repo": repo,
+            "repo_head": head,
+            "tool_sha256": sha256_file(os.path.abspath(__file__)),
+        },
         "cells": [],
         "not_claimed": [
             "profiler 设备时长与 FULL 图模式非严格同构（含 profiling 开销差异），只比方向",
@@ -256,14 +291,21 @@ def main(argv: list[str] | None = None) -> int:
             "单变量=布局; 不含 kernel 模板替换（那属更进一步的新领地）",
         ],
     }
-    ctx = {"device": "npu", "seed": args.seed, "warmup": args.warmup,
-           "prof_iters": args.prof_iters, "evict_mb": args.evict_mb}
+    ctx = {
+        "device": "npu",
+        "seed": args.seed,
+        "warmup": args.warmup,
+        "prof_iters": args.prof_iters,
+        "evict_mb": args.evict_mb,
+    }
     for name in cells:
         n, _, _ = CELLS[name]
         doc = run_cell(name, n, ctx)
         product["cells"].append(doc)
-        row = "  ".join(f"{a}={p['median_us']}us{('(' + str(p.get('delta_pct_vs_nd')) + '%)') if p.get('delta_pct_vs_nd') is not None else ''}"
-                        for a, p in doc["perf"].items())
+        row = "  ".join(
+            f"{a}={p['median_us']}us{('(' + str(p.get('delta_pct_vs_nd')) + '%)') if p.get('delta_pct_vs_nd') is not None else ''}"
+            for a, p in doc["perf"].items()
+        )
         print(f"  {name:12s} {doc['weight']} {row}")
     gate = None
     for cell in product["cells"]:
@@ -271,16 +313,26 @@ def main(argv: list[str] | None = None) -> int:
             continue
         for arm in ("tnd_matmul", "nz_linear"):
             p = cell["perf"].get(arm) or {}
-            if p.get("delta_pct_vs_nd") is not None and -p["delta_pct_vs_nd"] >= args.gate_pct:
-                gate = {"arm": arm, "delta_pct": p["delta_pct_vs_nd"],
-                        "bitwise_ok": (cell["numerics"].get(arm) or {}).get("bitwise_ok")}
-    product["gate"] = gate or {"passed": False,
-                               "reason": f"无臂达 in_proj 改进 >= {args.gate_pct}%"}
+            if (
+                p.get("delta_pct_vs_nd") is not None
+                and -p["delta_pct_vs_nd"] >= args.gate_pct
+            ):
+                gate = {
+                    "arm": arm,
+                    "delta_pct": p["delta_pct_vs_nd"],
+                    "bitwise_ok": (cell["numerics"].get(arm) or {}).get("bitwise_ok"),
+                }
+    product["gate"] = gate or {
+        "passed": False,
+        "reason": f"无臂达 in_proj 改进 >= {args.gate_pct}%",
+    }
     product["budget"] = {"elapsed_s": round(time.monotonic() - t_start, 2)}
     if args.out:
         with open(args.out, "w") as f:
             json.dump(product, f, indent=1, ensure_ascii=False)
-        print(f"saved -> {args.out}  status={product['status']}  gate={product['gate']}")
+        print(
+            f"saved -> {args.out}  status={product['status']}  gate={product['gate']}"
+        )
     return RC_OK
 
 
