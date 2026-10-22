@@ -9,9 +9,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from _deployment import deployed_file
 
 # 运行树真身由 bench-ladder.sh 的 SCRIPTS 指向; 测试允许环境覆盖以便移植。
 SCRIPT = Path(os.environ.get("LADDER_L1_SCRIPT", "/root/包体恢复/scripts/ladder-l1.py"))
+if not deployed_file(SCRIPT):
+    pytest.skip("ladder L1 client is not deployed", allow_module_level=True)
 
 
 def sse(*objs: dict) -> bytes:
