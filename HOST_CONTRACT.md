@@ -257,11 +257,9 @@ of a fork subclass; (c) `gqa_interleaved_layout` and the four dim attributes;
 merged-consumption seam now exists** — if it does, delete this blocker and run the
 L3/L4 acceptance.
 
-Statistics scope: the accepted evidence (L1 card `f2_accepted_verdict_1016`) —
-decode `MatMulV2` -30.1/step, device kernel time -15.4% per pattern, TPOT -1.10%
-(no regression), L3 8/8 identical, zero new `ConcatD`/`CopyD` — belongs to caliber
-`mmlu-pro-eval-traffic` / cohort `028-qwen35-35b-a3b-tp2-fullgraph` **and to the
-runtime-tree patch**, not to this carrier: any performance number for this carrier
+Statistics scope: [original runtime-tree evidence and limitations](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/HOST_CONTRACT.md#L260).
+The historical evidence belongs to caliber `mmlu-pro-eval-traffic` / cohort
+`028-qwen35-35b-a3b-tp2-fullgraph` **and to the runtime-tree patch**, not to this carrier: any performance number for this carrier
 must be re-accepted with a fresh L4 window on the same caliber. Nothing here may
 be extrapolated to another caliber, cohort, `capture_size` or the eager path.
 

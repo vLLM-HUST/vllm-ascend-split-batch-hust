@@ -92,7 +92,7 @@
   "idempotent_check": "apply-runtime-patches.sh --check -> [skip] w1r-gmm-tuning",
   "seam_check": "接口面校验 PASS（4 条）",
   "deployed_at": "2026-10-18T07:5xZ",
-  "receipt": "/root/包体恢复/records/probes/20261018T075800Z_w1r_p0_recheck_deploy.json"
+  "receipt": null
  },
  "blocker_status": {
   "id": "fixture-unreachable-fullgraph-decode",
@@ -100,5 +100,10 @@
   "none_diagnostic_path": "unblocked by user authorization 2026-10-18T07:5xZ；仅用于取真实 counts，不作测量窗",
   "constraints_doc": "OWNERSHIP.md §5.2",
   "p1_0a_executed": "no（尚未运行任何 NPU 动作）"
+ },
+ "evidence_availability": {
+  "status": "Original local probe references unavailable unless a verified URL is present; null is not a passing result",
+  "audit": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/local-reference-audit.json",
+  "original_document": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/host-proposals/W1R-gmm-tuning-config/proposal_meta.json"
  }
 }

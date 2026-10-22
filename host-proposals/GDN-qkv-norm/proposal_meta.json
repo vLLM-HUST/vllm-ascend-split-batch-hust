@@ -39,8 +39,8 @@
     "host_orig/gdn.py.orig": "1081d19738da1130cf85beb7c1bcb4d061a0ca83f0edd4f3a7f2b30bd185e35d"
   },
   "evidence": [
-    "/root/包体恢复/records/ladder/1018-125822-l0-gdn-qkv-norm.json",
-    "/root/包体恢复/records/probes/20261018T130700Z_gdn_norm_trace_analysis.json",
+    null,
+    null,
     "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/multibuffer-determinism-20261018/receipt.json",
     "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019/receipt.json"
   ],
@@ -51,6 +51,12 @@
     "Matched model L4 target counts/durations and all-kernel denominator: PASS, both ranks (validation/l4-multibuffer-20261019/receipt.json)"
   ],
   "rollback": "patch -R -p1 < host-proposals/GDN-qkv-norm/patch.diff; verified on a temporary copy only",
-  "decision": "Optimization accepted 2026-10-19: paired same-day L4 (6->1 kernels/call, per-call active -69.2%/-67.6%) with L3 exact equality (16/16 batch, 8/8 standard) and L0 exact+graph replay; plugin remains default-off pending bundle release gate",
-  "delete_when": "host source changes or candidate is superseded; fail closed until source and evidence are revalidated"
+  "decision": "Historical kernel acceptance is separate from the withdrawn bundle registration. Default-off tier-2 boundary unchanged; measurements and exact acceptance history are in the archived document.",
+  "delete_when": "host source changes or candidate is superseded; fail closed until source and evidence are revalidated",
+  "evidence_availability": {
+    "status": "Original local probe references unavailable unless a verified URL is present; null is not a passing result",
+    "audit": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/local-reference-audit.json",
+    "original_document": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/host-proposals/GDN-qkv-norm/proposal_meta.json"
+  },
+  "historical_document": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/host-proposals/GDN-qkv-norm/proposal_meta.json"
 }

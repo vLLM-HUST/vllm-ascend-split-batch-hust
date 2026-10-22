@@ -24,7 +24,7 @@
 |---|---|---|---|
 | ① | llama3-scaling 未接线：`REGISTERED_ASCEND_OPS` 无 `Llama3RotaryEmbedding` 键 → 落到 `CustomOp.forward_oot` 默认实现（`forward_native`，bf16 逐元素数学），triton rope 不可达 | `vllm_ascend/utils.py:688-817`（dict 在 `:735-765`） | 新增子类 `AscendFixLlama3RotaryEmbedding(Llama3RotaryEmbedding)`，把 `op_registry_oot["Llama3RotaryEmbedding"]` 指向它 |
 | ② | mrope 少传参：`AscendMRotaryEmbedding.forward_triton` 调 `triton_mrope` 只给 8 个位置参（host 签名 9 个，末位 `is_neox_style` 无缺省）→ `positions.ndim==2 ∧ mrope_interleaved`（Qwen2.5-VL 形态）必抛 `TypeError` | `vllm_ascend/ops/rotary_embedding.py:513-552`（调用在 `:541-550`） | 子类 `AscendFixMRotaryEmbedding` 镜像 `forward_triton` 并补 `self.is_neox_style`，把 `op_registry_oot["MRotaryEmbedding"]` 指向它 |
-| ③ | yarn `truncate` 缺省分歧：fork 缺省 `False`，vLLM/HF 缺省 `True` → Qwen2.5 系 yarn 配置（`rope_scaling` 无 `truncate` 键）cache 与 host/GPU 不等价（19.0% 元素不同） | `vllm_ascend/ops/rotary_embedding.py:281-298`（缺省在 `:297`） | 子类 `AscendFixYaRNRotaryEmbedding` 只改缺省为 `True`（显式传参仍生效），把 `op_registry_oot["YaRNScalingRotaryEmbedding"]` 指向它 |
+| ③ | yarn `truncate` 缺省分歧：fork 缺省 `False`，vLLM/HF 缺省 `True` → Qwen2.5 系 yarn 配置（`rope_scaling` 无 `truncate` 键）cache 与 host/GPU 不等价（量化对照见 [原始报告](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/design/rope-variant-defects.md#L27)） | `vllm_ascend/ops/rotary_embedding.py:281-298`（缺省在 `:297`） | 子类 `AscendFixYaRNRotaryEmbedding` 只改缺省为 `True`（显式传参仍生效），把 `op_registry_oot["YaRNScalingRotaryEmbedding"]` 指向它 |
 
 ## 1. 宿主 seam：为什么是"覆写 `op_registry_oot` 条目"这唯一杠杆
 

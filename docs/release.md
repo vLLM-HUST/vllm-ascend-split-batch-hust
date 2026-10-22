@@ -225,8 +225,7 @@ python3 tools/seam_diff.py --selftest      # 判别力自证（tools 没在空�
 - 它**只证明静态面**：方法体语义（对象如何被构造、`BatchDescriptor` 如何被填充、
   aclgraph 变体表在运行时怎么组织）必须靠下面的真机冒烟。
 - 首次对拍报告与原始输出：[归档](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/host-drift-2026-09-26.md)
-  （已钉版本 vs 2026-09-25 的 main：vllm-ascend +480 提交、core +991 提交，
-  12 个接缝符号签名全一致；rope-fix 反向守卫对新树 11/11 通过）。
+  历史检查结果以原始归档为准，不代替待升级宿主的重新核对。
 
 **再逐项核对（人眼 + 真机）**：
 
@@ -732,246 +731,24 @@ PyPI 只在 Add 时做**一次只读校验**,然后在你名下存一条 "pendin
 
 ### 11.6 首发回执:0.1.0 已发布(2026-09-26T11:12Z) — 历史留档,已被 11.7 取代
 
-**结论:插件包已上公共 PyPI。** 过程与产物如下(全部可核对)。
-
-| 项 | 值 |
-|---|---|
-| 索引 | `https://pypi.org/project/vllm-ascend-split-batch/`(正式 PyPI,非 TestPyPI) |
-| 版本 | `0.1.0` |
-| 发布 commit | `ceebea15355c0830619c0564a39a10eef599f085`(`main`) |
-| 触发方式 | `workflow_dispatch` → `target: pypi`(`gh-action-pypi-publish` + OIDC,无 token) |
-| 工作流运行 | run #1 <https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/actions/runs/36238065982>(全步骤 success) |
-| 上传目标 | `https://upload.pypi.org/legacy/` |
-
-| 制品 | 大小 | sha256 |
-|---|---|---|
-| `vllm_ascend_split_batch-0.1.0-py3-none-any.whl` | 129 128 B | `b45aff34dd2d3c2cb5cafdda0a72b49f8b7e5f5e7eb9a6063a6921e8910df511` |
-| `vllm_ascend_split_batch-0.1.0.tar.gz` | 1 262 939 B | `4d309887cac9b0b99da72bcf13f833504f86d99201c9c499a21ae030738ab9b3` |
-
-- 两个哈希与 PyPI JSON API(`/pypi/vllm-ascend-split-batch/json`)报告的值**逐位一致**。
-- 发布同时生成 **PEP 740 attestations**(工作流日志里有 `predicateType:
-  https://docs.pypi.org/attestations/publish/v1` 与 DSSE PAE 载荷),即 PyPI 页面可核验"这个文件由该仓库该 commit 的该工作流构建"。
-
-**从 PyPI 装的实测(干净 venv,无 `--find-links`)**:
-
-```
-installed version = 0.1.0
-entry points = 12   (8 × vllm.general_plugins + 4 × vllm_hust.extension_bundles)
-manifests    = 4    (org.vllm-hust.split-batch-full-graph / .fia-demask / .rope-fix / .zerocost-wiring)
-```
-
-**管理器侧的关键结果**(用非 editable 的 `site-packages` 做发现,即"别人装完之后的状态"):
-
-```
-manifest_path    = .../site-packages/vllm_ascend_split_batch/vllm-hust-extension-v0.2.json
-activation_ready = True
-blocker          = None
-implementation   = [plan_dual_pad: import_only, load: active, install: active]
-check states     = [discovered, compatible, configured, enabled]
-host.version_range = ==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27
-```
-
-⇒ **"管理器仍按 import_only 拒绝启用"这一条到此闭环**:任何人 `pip install
-vllm-ascend-split-batch` 之后,`vllm-hust-ext extension enable org.vllm-hust.split-batch-full-graph`
-不再被拒(此前他装的是只有一个 `import_only` 描述符的旧副本)。
-
-**仍未随包解决的边界(诚实登记)**:
-
-1. `host.version_range` 是**点钉**(§0.1):在其它 `vllm-ascend` build 上 `check` 会判
-   `incompatible`,`vllm-hust-ext run` 拒启(env 直接注入的路由不受影响)。放宽需按 §4
-   在目标 build 上重核并留档。
-2. `kernels` extra 钉 `ascend-kernel==2026.3.9`,该版本**任何索引上都没有** ⇒
-   `pip install "vllm-ascend-split-batch[kernels]"` 必须带 `--find-links`(README Install 段已写明)。
-   算子轮的公共分发位(选项 A:GitHub Release 附件)还差两件前置:给它补 CANN OSL 2.0 协议文本
-   (catlass 衍生,见 §12.2/facts §M)与修正轮内 METADATA 的 license 字段(现误写 BSD-3)。
-3. cascade 在缺算子轮时是**整体禁用**(fail-open),所以只装插件包不会启用 cascade。
+[发布原始记录、安装字节摘要与历史验证](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/release.md#L733).
+安装消费者入口：[PyPI](https://pypi.org/project/vllm-ascend-split-batch/0.1.0/)、[Release](https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/releases/tag/v0.1.0)。已发布安装包保持不可改写；历史结果不自动继承到新宿主。
 
 ### 11.7 0.1.1 已发布:修 `kernels` 钉子 + 算子轮改走 Release 附件(2026-09-26)
 
-**为什么发 0.1.1**:0.1.0 已上 PyPI 且**不可覆盖**,而它的 `kernels` extra 钉着一个
-任何索引都查不到的版本(`ascend-kernel==2026.3.9`)⇒ `pip install "vllm-ascend-split-batch[kernels]"`
-在任何机器上都会失败。修钉子只能发新版本。
-
-| 项 | 值 |
-|---|---|
-| 索引 | `https://pypi.org/project/vllm-ascend-split-batch/0.1.1/` |
-| 版本 | `0.1.1` |
-| 算子轮钉子 | `ascend-kernel==2026.9.26`(原 `==2026.3.9`) |
-| 算子轮来源 | GitHub Release 附件:`Raing5Days/vllm-hust-cascade-kernel` 的 tag `v2026.9.26` |
-| 解析实测 | `pip install "vllm-ascend-split-batch[kernels]" --find-links <含该轮的目录>` ⇒ `Would install ascend-kernel-2026.9.26 vllm-ascend-split-batch-0.1.1` |
-
-**算子轮的补齐内容**(见算子仓 `NOTICE` 与 `ascend-kernel/README.md`):
-
-1. **许可**:根 `LICENSE` 补齐 CANN Open Software License Agreement 2.0 全文
-   (实测定性:`csrc` 有 40 处 `#include "catlass/..."`,即 `.so` 在编译期实例化了该 vendored
-   模板树 ⇒ 属 CANN 开源软件的衍生件,§3.3 要求分发时随附协议)；vendored 树补 `LICENSE`；
-   **协议文本随 wheel 安装**(`ascend_kernel-2026.9.26.dist-info/licenses/LICENSE`)。
-2. **METADATA**:`license` 字段由误写的 `BSD 3 License` 改为实际协议名。
-3. **版本↔内容对齐**:`config.ini` bump `2026.09.16` → `2026.09.26`(禁止覆盖同名轮子),
-   `pip show` 不再报错位版本;判据仍是 **lib md5 `ca8de2d70fe0504d`**。
-4. **目标码未变(实测)**:重跑 `./build.sh`(CANN 9.1.0 / torch_npu 2.13.0rc1)后
-   `_C.so` md5 `add6e6951d253328`、`libascend_kernel.so` md5 `ca8de2d70fe0504d`,
-   与 `2026.9.16` 轮**逐字节相同** ⇒ 此前 cascade 验证过的同一份目标码。
-5. 附件含 `dist.sha256`(自行下载后可自校验;`fa_fp32_stage1` / `lse_merge` /
-   `add_rms_norm_stats` 三个 op 在安装后实测均已注册)。
-
-**仍未解决(与 0.1.0 相同)**:`host.version_range` 仍是点钉 ⇒ 在其它 `vllm-ascend` build 上
-管理器判 `incompatible`、`vllm-hust-ext run` 拒启(env 注入路由不受影响)。放宽须按 §4 在目标
-build 上重核并留档,该工作属"环境核验",按工作区分工归测试机。
-
-**两个 extra 的可解析性(2026-09-26 实测;同日已修 `test` 侧)**:发布出去的元数据里有两个 extra,处境不同 ——
-
-| extra | 钉的东西 | 第三方能否解析 |
-|---|---|---|
-| `kernels` | `ascend-kernel==2026.9.26`(GitHub Release 附件) | ✅ 带 `--find-links <该目录>` 即可(§11.7) |
-| `test`(**0.1.1 及以前**) | `vllm-hust-ext==0.2.0.dev0`(**不在任何索引上**) | ❌ 实测报 `Could not find a version that satisfies the requirement vllm-hust-ext==0.2.0.dev0 (from versions: none)` |
-| `test`(**本次改动后,随下一个版本生效**) | 无该钉(`pytest` + `ruff` + `tomli` 回退) | ✅ 单独可解析(判据见下) |
-
-`vllm-hust-ext` 是**组织的框架包**,维护在 `vLLM-HUST/extension-manager`,**不由本仓管理/发布**
-(官网自己写着"No public vllm-hust-ext PyPI alpha exists yet; install the current source")。
-本仓只是它的消费方:**只有 `tests/test_manifest.py` 需要它**(`load_manifest` /
-`activation_blocker`),CI 与 `publish.yml` 都先 `pip install "vllm-hust-ext @ git+..."` 再装 `.[test]`。
-
-- **已做的改动(2026-09-26,`pyproject.toml`)**:从 `test` extra 删掉该钉,并加注释说明为什么不能钉;
-  README「Extension framework」一节改成"装 extra 不需要它 / 跑 manifest 测试需要它(从 git 装)"。
-- **机械守卫**:`tests/test_manifest.py::test_test_extra_does_not_pin_an_unresolvable_extension_manager`
-  —— 谁再把它钉回去,测试即红(避免静默恢复"第三方装 `[test]` 必失败")。
-- **可解析≠可跑**:摘钉后 `pip install ".[test]"` 能解析,但 `tests/test_manifest.py` 仍会因缺
-  `vllm_hust_ext` 而 ImportError ⇒ 开发者仍需那一步 git 安装(这是**测试依赖**,不是发行依赖)。
-- **时点纪律**:0.1.1 的元数据已发布且**不可覆盖** ⇒ 该改动只对**下一个版本**生效;在此之前
-  `pip install "vllm-ascend-split-batch==0.1.1[test]"` 仍然失败,别把 README 的新写法套到 0.1.1 上。
-- **判据(发新版时验)**:干净 venv 里 `pip install "vllm-ascend-split-batch[test]"` 直接可解析,
-  不需要先装任何别的东西;随后按 README 补 git 安装再跑 `pytest -q`。
-- **判据的提前验证(2026-09-26,正/负对照,不是发布)**:在 `/tmp` 的仓库副本里只把版本号腾到
-  `0.1.2`,构建 wheel 后用**干净 venv** 解析(`--find-links` 指该产物 + 华为云索引):
-
-  | 组 | 构建的元数据 | 干净 venv 的 `pip install --dry-run '...[test]'` |
-  |---|---|---|
-  | 正向 | `test` extra 无该钉(本次改动) | ✅ `Would install … vllm-ascend-split-batch-0.1.2`,exit 0 |
-  | 反向 | 把 `vllm-hust-ext==0.2.0.dev0` 加回去 | ❌ `ERROR: No matching distribution found for vllm-hust-ext==0.2.0.dev0; extra == "test"`,exit 1 |
-
-  ⇒ 判据本身有判别力,且改动方向正确;**但 `0.1.2` 只是为了腾版本号做的本地实验,未构建进仓库、
-  未发布**。真正的判据确认仍需等下一次实际发版(那时 PyPI 上的元数据才变)。
-  ⚠️ 负面控制必须在**见不到 `vllm-hust-ext` 的环境**里跑:在开发环境(已 editable 装该包)里
-  反向组会因 `Requirement already satisfied` 而**假绿**(实测)。
-
-**发布附件的字节口径(2026-09-26 自纠)**:GitHub Release 的附件必须是**PyPI 上那一批字节**
-(由 `publish.yml` 在 runner 上构建,带 PEP 740 attestation),不能在本地用 `python -m hatchling build`
-重造的等价物 —— 两次构建的 sha256 不同(实测 `a7480733…` vs `e7c2dc4f…`),同时挂两份不同字节
-却都叫 `0.1.1` 会造成"到底哪个是发布件"的二义。本次做法:先把本地构建误传的三份附件删掉,
-改为**从 PyPI 下载权威字节再上传**(下载后逐件核对 sha256 = PyPI 报告值,一致),
-附件含 `dist.sha256` 供消费方自校验。当前状态:
-
-| Release | 附件 |
-|---|---|
-| `v0.1.0` | `vllm_ascend_split_batch-0.1.0-py3-none-any.whl`(`b45aff34…`)、`.tar.gz`(`4d309887…`)、`dist.sha256` |
-| `v0.1.1` | `vllm_ascend_split_batch-0.1.1-py3-none-any.whl`(`e7c2dc4f…`)、`.tar.gz`(`7e364f13…`)、`dist.sha256` |
-
-**一条未能在本机验证的路径(如实记录)**:消费方用
-`--find-links https://github.com/Raing5Days/vllm-hust-cascade-kernel/releases/expanded_assets/v2026.9.26`
-取算子轮这一步,本机**测不了** —— 容器到 `github.com:443` 的直连超时(实测;`api.github.com`
-与 `uploads.github.com` 可用,一直在用)。已验证的是等价能力:把**同一份**算子轮字节放在本地目录,
-`pip install "vllm-ascend-split-batch[kernels]==0.1.1" --find-links <该目录>` 解析得到
-`ascend-kernel-2026.9.26`(算子轮走 find-links、插件走 PyPI)。
-`expanded_assets` 是 HTML 页,pip 会解析其中的 `<a href>` 指到 `/releases/download/...`,
-机制上等价;边界是"本机网络不允许实测"。
+[发布原始记录、安装字节摘要与历史验证](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/release.md#L789).
+安装消费者入口：[PyPI](https://pypi.org/project/vllm-ascend-split-batch/0.1.1/)、[Release](https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/releases/tag/v0.1.1)。已发布安装包保持不可改写；历史结果不自动继承到新宿主。
 
 ### 11.8 0.1.2 已发布:让 `test` extra 摘钉生效(2026-09-26T16:31Z)
 
-0.1.1 及以前把 `vllm-hust-ext==0.2.0.dev0`(不在任何索引上)钉进 `test` extra ⇒ 第三方
-`pip install "vllm-ascend-split-batch[test]"` 必然失败。PyPI 文件不可覆盖 ⇒ 只能发新版把
-代码侧修复(`f9d6b15`)送出去;本版**只改版本号 + 该钉子**(外加本轮文档/测试改动),无行为变更。
-
-**回执**(全部可复核):
-
-| 项 | 值 |
-|---|---|
-| PyPI | `https://pypi.org/project/vllm-ascend-split-batch/0.1.2/` |
-| 发布 commit | `a703a181846795f2518122ef26c8980e86089cfb`(`main`) |
-| workflow run | `36255715877`(`workflow_dispatch`,`target=pypi`),16 步全 success;含 `twine check`、manifest 校验、**PEP 740 attestations** |
-| wheel | `vllm_ascend_split_batch-0.1.2-py3-none-any.whl` 130047 B<br>`70384d1464b4dfe737055be088577961f33066ceaaabf28f30226b12a37dacc2` |
-| sdist | `vllm_ascend_split_batch-0.1.2.tar.gz` 1303626 B<br>`418c84cc8419f6ea0261295b208fdbb350f06211c07724d7864f14cec735fd6e` |
-| GitHub Release | `v0.1.2`(annotated tag,tag object `a4235fda…` → commit `a703a181…`),附件 = 从 PyPI 下载的权威字节 + `dist.sha256`(`4de64309…`) |
-
-**判据验收(本次真的验到了,不再是"等发版时确认")**:
-
-| 项 | 命令 | 结果 |
-|---|---|---|
-| 正向 | 干净 venv:`pip install "vllm-ascend-split-batch[test]"`(`--index-url https://pypi.org/simple`) | ✅ `Would install … vllm-ascend-split-batch-0.1.2`;实装后 `version=0.1.2`、8 个 `vllm.general_plugins` + 4 个 `vllm_hust.extension_bundles`、`test` 无 requires |
-| 反向对照 | 同 venv,`…[test]==0.1.1` | ❌ `ERROR: No matching distribution found for vllm-hust-ext==0.2.0.dev0; extra == "test"` ⇒ 判据有判别力 |
-| 附件回环 | 从 Release 逐件下载再核 sha256(走 API 资产端点) | ✅ 三件全一致 |
-
-**过程中发现的两条环境事实(都已实测,不是推断)**:
-
-1. **华为云镜像滞后**:`mirrors.huaweicloud.com/repository/pypi/simple/vllm-ascend-split-batch/`
-   在本版发布后仍**只有 0.1.0/0.1.1**;用该索引装 `[test]` 会得 `ResolutionImpossible`
-   (两个旧版都带坏钉) ⇒ **不能**用镜像结果判断"新版有没有生效",判据必须打 `pypi.org/simple`。
-2. **`github.com:443` 直连在本容器超时**(与 §11.7 记录同根因):Release 附件的浏览器下载路径
-   **仍未实测**;本次回环走 API 资产端点(`/releases/assets/{id}` + `Accept: application/octet-stream`,
-   重定向到 `objects.githubusercontent.com`)完成,字节与 PyPI 一致。
+[发布原始记录、安装字节摘要与历史验证](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/release.md#L879).
+安装消费者入口：[PyPI](https://pypi.org/project/vllm-ascend-split-batch/0.1.2/)、[Release](https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/releases/tag/v0.1.2)。已发布安装包保持不可改写；历史结果不自动继承到新宿主。
 
 ### 11.9 0.1.3 已发布(2026-09-27):`host.version_range` 放开为有界兼容窗口 + UpdatableGraph 接缝修复
 
-**本版相对 0.1.2 的改动**(均为已合入 `main` 的提交,无行为默认值变更):
+[发布原始记录、安装字节摘要与历史验证](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/release.md#L913).
+安装消费者入口：[PyPI](https://pypi.org/project/vllm-ascend-split-batch/0.1.3/)、[Release](https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/releases/tag/v0.1.3)。已发布安装包保持不可改写；历史结果不自动继承到新宿主。
 
-| 提交 | 内容 |
-|---|---|
-| `a30c761` | 4 个 manifest 的 `host.version_range`:`==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`(点钉)→ **`>=0.25.1rc2.dev125,<0.25.2`**(有界窗口;裁定与理由见 §0.3) |
-| `aba09a2` | cascade 图孪生适配宿主新的 `UpdatableGraph` 重放机制(修"图开了但首步后卡死",机理见 `pitfalls.md` §2.4) |
-| `2176c95` | 该修复的单测跨测试污染修正(全套 465 passed) |
-| `7f68bbb` | `pitfalls.md` §2.5:正确性验收必须走离线固定批 harness(HTTP 并发路线会给假发散) |
-
-**发布前已完成的验证**(证据 `knowledge/handoffs/receipts/20260926-rebuild-verify/VERIFY-PROGRAM-20260927.md`):
-
-| 项 | 结果 |
-|---|---|
-| 放行效果(真管理器,同 manifest 两种宿主) | `dev125` → compatible(不变);**`dev605`(`fbe4911bb`) → incompatible ⇒ compatible**;两代宿主 `run --dry-run` 均 exit 0 且注入正确 |
-| 有界性 | `0.26.0`/`0.24.0`/`0.23.0rc1` 仍判 incompatible(`<0.25.2` 上界生效) |
-| 正确性门(目标栈,离线固定批,真模型,自然 EOS) | `p420_b64` **ON vs OFF = 6/64** ≤ 8/64;确定性 **0/64**;噪声底 **0/64**;参考帧(无 cascade)`OFF-eager vs OFF-graph` = **7/64** |
-| 顺序卫生 | gate bench 先于 twin 捕获(trace 行 665 < 720);分档 margin 判定正确 |
-| 单 cell / 形状矩阵 TPOT | 6 格:2 亏(`+15.1%`/`+5.2%`)、4 赢(`−2.3%`/`−19.7%`/`−25.9%`/`−44.4%`);符号与历史一致 |
-| CPU 门槛 | `pytest -q` 466 passed、`ruff check/format` 干净(见本次提交) |
-
-⚠️ **配对警告**:区间只覆盖 vllm-ascend,**不含 vllm core**。已验证配对 =
-core `0aee727ff6`;其它 core 会 import 期报错(§0.3 有逐条报错原文)。
-
-**发布状态:已发布(2026-09-27T06:44Z)**。发布路径 = **推 tag**(零凭据,见下方机制说明)。
-
-| 项 | 值 |
-|---|---|
-| PyPI | `https://pypi.org/project/vllm-ascend-split-batch/0.1.3/`(顶层 `info.version` 已为 `0.1.3`) |
-| 发布 commit | `c8a1891`(tag `v0.1.3` 首次指向;后移至 `9a9beb1` 以便同 tag 触发 Release 工作流,见机制说明) |
-| Publish run | `36301111078`(`event=push`,`v0.1.3`)16 步全 success,含 tag 守卫与 `Publish to PyPI` |
-| wheel | `vllm_ascend_split_batch-0.1.3-py3-none-any.whl` 131900 B<br>`26601452302c374a57b9da58ad26011b2936b17e7bd9127e51bc5dd6601af389` |
-| sdist | `vllm_ascend_split_batch-0.1.3.tar.gz` 1319978 B<br>`d3f3a55e69c84a25d62eb29ddd98ae4e616c54f4bd622a011e4641cad007ab90` |
-| GitHub Release | `v0.1.3`(Release run `36301712587` 自动创建;附件 = 从 PyPI 下载并**逐件核对 sha256** 的权威字节 + `dist.sha256`)|
-
-**发布后冒烟(判据在**发布字节**上,不是 editable 工作树)**:在目标栈 env 里装 PyPI 的 0.1.3
-(卸掉 editable),结果:
-
-| 判据 | 结果 |
-|---|---|
-| 字节来源 | `site-packages`,version `0.1.3`,4 个 manifest 的 `version_range` 均为新区间 |
-| `extension check` | `['installed','discovered','compatible','configured','enabled']`,evidence 逐字 "host version 0.25.1rc2.dev605+… satisfies the declared range" |
-| `run --dry-run` | exit 0,注入 2 个 cascade 开关 |
-| 真机 4 并发 ×2 轮 | **8/8 OK(0.2–0.3 s)**;`capture body SUCCESS` 96;`cascade update ran=True` 4;`twin missing` 0;`TypeError` 0 |
-
-**发布机制(2026-09-27 新增,零凭据)** —— 两个工作流,均只用 OIDC / run 自带 token:
-
-| 工作流 | 触发 | 作用 |
-|---|---|---|
-| `publish.yml` | `workflow_dispatch`(默认 testpypi)**或 `push` tag `v*`** | 发 PyPI;tag 推送 ⇒ target=pypi;含 tag/版本一致性守卫;上传前查 PyPI,已存在则**跳过上传**(幂等,重推 tag 不会变红) |
-| `release.yml` | `push` tag `v*` | 建/更新 GitHub Release;附件 = 从 PyPI 下载并核对 digest 的字节(遵 §11.7 附件字节纪律);用 annotated tag 正文作 notes |
-
-**为什么加 tag 触发**:dispatch 需要 GitHub API 凭据,而维护者可能只有 SSH key(本机即如此)
-⇒ tag 推送是等价且更常规的发布姿势。**代价(如实登记)**:tag 一旦推送即发正式版,
-因此"tag/版本一致性守卫"放在 build 之前;`v0.1.3` 曾因需补 Release 工作流而**移动过一次**
-(同一 tag 名,从 `c8a1891` 到 `9a9beb1`,内容仍是 0.1.3),这是移动已发布 tag 的先例,后续应避免。
-
-**发布后的判据(照 §11.8 的做法,机械可核)**:
-① 干净 venv 打 `pypi.org/simple` ⇒ `Would install … 0.1.3`,且 `importlib.metadata` 读出
-`Version: 0.1.3`;② 反向:`==0.1.2` 的元数据里 `host.version_range` 仍是点钉(证明"放宽只在新版生效");
-③ 两代宿主 `extension check` 均 `compatible`。
 # Distribution custody
 
 Source distributions include only runtime source, packaging metadata, README,

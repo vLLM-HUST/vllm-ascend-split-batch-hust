@@ -30,5 +30,10 @@
     "No automatic re-pin, evidence rewrite or archive exclusion.",
     "No NPU execution or numerical-acceptance changes."
   ],
-  "evidence_root": "/root/包体恢复/records/probes/20261019T042000Z_opt_repair"
+  "evidence_root": null,
+  "evidence_availability": {
+    "status": "Original local probe references unavailable unless a verified URL is present; null is not a passing result",
+    "audit": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/local-reference-audit.json",
+    "original_document": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/host-proposals/OPT-toolchain-repair/proposal_meta.json"
+  }
 }

@@ -41,9 +41,9 @@ pip install pytest-xdist
 - **2026-10-13（0.28 镜像）更新**:该镜像上默认捕获网格 / piecewise 档在 `capture_model` 阶段失败
   （`Resource_Error(EE1023) Alloc Stream resource failed: Too many streams are created`）。
   **正解不是退成 `cudagraph_mode=NONE`**——Ascend 上 `NONE ⇒ mode=NONE`（`vllm_ascend/platform.py:1195`）
-  会把 inductor 一起关掉（L1 TPOT 250ms vs 正常 ~14ms，17x 退化）。可用配置是**收小捕获网格 + FULL 档**：
+  会把 inductor 一起关掉（历史对照见 [原文](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/pitfalls.md#L44)）。可用配置是**收小捕获网格 + FULL 档**：
   `--compilation-config '{"mode":"VLLM_COMPILE","cudagraph_mode":"FULL","cudagraph_capture_sizes":[1,2,4,8,16,32]}'`
-  （实测 L1 TPOT 14.08ms / L2 3983 tok/s）。已固化进 `bench-ladder.sh` 的 serve 默认。
+  （量化结果见上述归档）。已固化进 `bench-ladder.sh` 的 serve 默认。
 
 - **副作用须知**:`triton` 包元数据不存在(`pip show triton` 查不到、`pip check`
   常驻告警),vllm 的 HAS_TRITON 检测基于 import 不受影响。裸调
@@ -155,11 +155,7 @@ cascade 两段式与任何 microbatching(`use_ubatching`: DBO 或 `ubatch_size>1
 ### 2.4 宿主换图重放机制 ⇒ cascade 孪生卡死(2026-09-27 定位并修)
 
 **症状**:目标栈(`vllm-ascend` `fbe4911bb`,自编 `0.25.1rc2.dev605+…`)上,图孪生开启时
-**第一个 decode step 之后请求再也不出 token**(4 并发实测 1/4 完成、其余 >90 s 零吞吐;
-引擎 CPU ~60% **自旋**,不是 I/O 等待)。`capture body SUCCESS` 照常 96 次、`cascade plugin
-loaded (gate=1, graph_gate=1, kernel_wheel=ok)` 照常、`twin missing` 0 次、0 TypeError
-⇒ **所有旧观测点都显示"正常",只有吞吐是 0**。关图孪生(`VLLM_ASCEND_ENABLE_CASCADE_GRAPH=0`)
-则 4/4 正常(0.5–0.7 s) ⇒ 问题专属图重放路径。
+**第一个 decode step 之后请求再也不出 token**，引擎自旋。启动与捕获日志看似正常，仍可能卡在重放；关图孪生后恢复。逐项观测与对照数字见 [原始故障记录](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/pitfalls.md#L157)。
 
 **机理**:新宿主给 FULL 图换了重放机制 —— 新增 `vllm_ascend/compilation/updatable_graph.py`
 的 `UpdatableGraph` 与 `use_updatable_graph`(`vllm_ascend/utils.py:1773`),`ACLGraphWrapper.__call__`
@@ -197,30 +193,16 @@ loaded (gate=1, graph_gate=1, kernel_wheel=ok)` 照常、`twin missing` 0 次、
 
 ### 2.5 正确性验收必须走离线固定批 harness；HTTP 并发路线会给出假发散(2026-09-27 实测)
 
-**症状**:用 `vllm serve` + 64 个并发 HTTP 请求做 cascade ON/OFF 的 token 序列比对,得到
-**21–23/64** 发散 —— 高于 C 口径判据(≤8/64)。看起来像"cascade 数值有问题",但**不是**。
+**症状**：HTTP 并发对拍曾出现高于验收门槛的发散，但 OFF 基线跨进程也不一致。
 
-**实测判据(同配置、不同进程各跑一轮)**:
-
-| 对照(HTTP 路线,64 并发) | 发散 |
-|---|---|
-| ON vs OFF | 21–23/64 |
-| ON 重复 | 1/64 |
-| **OFF 重复** | **22/64** |
-
-**OFF 基线自身跨进程就不一致** ⇒ 该路线的噪声底(22/64)本身远高于判据,数字不可用。
-
-**机理**:并发请求的**到达顺序**在两次运行间不同 ⇒ 引擎批组成/调度不同 ⇒ bf16 级归约路径不同。
-历史验收用的 `llm.generate` **固定批** harness 没有这个自由度(同一栈上离线复跑 OFF 两轮 = **0/64**,
-ON 两轮 = 0/64,ON-vs-OFF = **6/64**)。
+**机理**：到达顺序改变批组成与归约路径，不能用此噪声底替代固定批正确性判据。完整对照、负结果与固定批复核见 [原始记录](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/pitfalls.md#L198)。
 
 **纪律**:
 - **C 口径(逐 token 发散计数)验收只能用离线固定批 harness**(`docs/evidence/cascade/ev2_run.py`
   + `ev2_compare.py`,每腿独立 `VLLM_CACHE_ROOT` 与 `VLLM_DISABLE_COMPILE_CACHE=1`)。
 - HTTP 路线只适合**统计量**(服务可用性、TTFT/TPOT 分位),**其正确性数字不得用于判据**。
 - 判据必须带**参考帧对照**:同一栈上 `OFF-eager vs OFF-graph` 给出"纯图机制(与 cascade 无关)的
-  发散量级" —— 本机目标栈实测 **7/64**(与历史同值),而 cascade 的 ON-vs-OFF 是 **6/64**
-  ⇒ cascade 的发散**不高于**图机制自身的噪声底。
+  发散量级"；历史数值见上述原文，不自动成为当前运行的噪声界。
 
 ## 3. 打包与发布类
 
@@ -287,6 +269,4 @@ segment == 0 else K`)。栈顶均在
 形态,仅作诊断工具,默认路径不用)。根因未查(bisheng/MLIR 下游),升级
 triton-ascend 后需重验。
 
-**证据**:`/root/包体恢复/records/probes/20261018T164700Z_gdn_separate/
-separate-graph.log`、`separate-graph-r2.log`(两份 fault handler 栈);
-`multibuffer-graph.json`(2 指针 + multibuffer 正常)。
+**证据可用性**：该段原始 probe 尚未找回。原引用保存在 [可用性审计](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/local-reference-audit.json)；这里只保留历史故障描述，不声称已回验原始栈或重新验证根因。
