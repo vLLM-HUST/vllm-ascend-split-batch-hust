@@ -27,16 +27,14 @@ SPEC.loader.exec_module(rsp)
 
 #: 宿主源码候选位置（NPU 主机上才有）
 HOST_CANDIDATES = tuple(
-    pathlib.Path(base) / "vllm/model_executor/models/qwen3_next.py"
+    pathlib.Path(base) / "vllm/model_executor/models/utils.py"
     for base in (
         "/root/vllm-workspace/vllm-hust",
         "/vllm-workspace/vllm",
     )
 )
 
-_MOE_IMPORT = (
-    "from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP"
-)
+_MOE_IMPORT = "from vllm.logger import init_logger"
 
 SYNTHETIC = (
     _MOE_IMPORT
@@ -44,16 +42,11 @@ SYNTHETIC = (
 import torch
 
 
-class Model:
-    def load_weights(self, weights):
-        loader = AutoWeightsLoader(self)
-        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
-
-
-class ExpertModel:
-    def load_weights(self, weights):
-        loader = AutoWeightsLoader(self)
-        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
+class AutoWeightsLoader:
+    def load_weights(self, weights, *, mapper=None):
+        autoloaded_weights = set()
+        self._check_skipped_aliases(autoloaded_weights)
+        return autoloaded_weights
 """
 )
 
@@ -61,34 +54,32 @@ class ExpertModel:
 def test_table_is_registered_under_its_own_env():
     assert rsp.ENV_GATE_MERGE == "VLLM_HUST_MOE_GATE_MERGE"
     modules = [module for env, module, _ in rsp.TABLES if env == rsp.ENV_GATE_MERGE]
-    assert modules == [rsp.QWEN3NEXT]
-    assert rsp.QWEN3NEXT == "vllm.model_executor.models.qwen3_next"
+    assert modules == [rsp.MODELS_UTILS]
+    assert rsp.MODELS_UTILS == "vllm.model_executor.models.utils"
 
 
 def test_transforms_inject_import_and_installer_call():
     patched, log = rsp.apply_transforms(SYNTHETIC, rsp._GATE_MERGE_TRANSFORMS)
     assert len(log) == 2
     assert "install_gate_merge_all as _hust_install_gate_merge_all" in patched
-    # 每个 load_weights 各注入一次（合成源码里有两个实现）
-    assert patched.count("_hust_install_gate_merge_all(self)") == 2
-    # 安装必须在 load_weights 返回之前完成（权重就绪 + 不在 compile 区内）
-    assert "loaded = loader.load_weights(" in patched
-    assert "return loaded" in patched
-    assert "def forward(" not in patched.split("_hust_install_gate_merge_all")[0]
+    # 安装注入模型级 post-load 钩子之后、且只注入一次
+    assert patched.count("_hust_install_gate_merge_all(self.module)") == 1
     compile(patched, "qwen3_next_synthetic.py", "exec")
 
 
-def test_installer_never_lands_in_a_compiled_forward():
-    """forward 里不得出现安装调用（否则 Python 副作用会进图捕获: 已实测崩溃）。"""
+def test_installer_lands_in_the_post_load_hook_only():
+    """安装只能落在 post-load 钩子里（不得进 forward: 实测过 dynamo 崩溃）。"""
     patched, _ = rsp.apply_transforms(SYNTHETIC, rsp._GATE_MERGE_TRANSFORMS)
-    for chunk in patched.split("def forward(")[1:]:
-        assert "_hust_install_gate_merge" not in chunk.split("def ")[0]
+    hook = patched.index("def load_weights(")
+    call = patched.index("_hust_install_gate_merge_all(self.module)")
+    assert call > hook
+    assert "def forward(" not in patched
 
 
 def test_anchor_mismatch_raises_anchor_error():
     broken = SYNTHETIC.replace(
-        "return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)",
-        "return loader.load_weights(weights)",
+        "        self._check_skipped_aliases(autoloaded_weights)",
+        "        self._check_skipped_aliases_typo(autoloaded_weights)",
     )
     with pytest.raises(rsp.AnchorError):
         rsp.apply_transforms(broken, rsp._GATE_MERGE_TRANSFORMS)
@@ -109,9 +100,8 @@ def test_host_source_anchors_still_unique():  # noqa: D103
     patched, log = rsp.apply_transforms(source, rsp._GATE_MERGE_TRANSFORMS)
     assert len(log) == 2, log
     compile(patched, str(path), "exec")
-    # 幂等性: 再施一次必须失配（说明只注入一次）
-    with pytest.raises(rsp.AnchorError):
-        rsp.apply_transforms(patched, rsp._GATE_MERGE_TRANSFORMS)
+    # 只注入一次（锚点文本保留 → 二次施加会变 2 次, 故这里钉住计数）
+    assert patched.count("_hust_install_gate_merge_all(self.module)") == 1
 
 
 def test_install_is_default_off_and_env_armed(monkeypatch):
@@ -131,3 +121,22 @@ def test_install_is_default_off_and_env_armed(monkeypatch):
         ]
         monkeypatch.setattr(rsp, "_INSTALLED", False)
     assert os.environ.get(rsp.ENV_GATE_MERGE) == "1"
+
+
+def test_finder_does_not_pop_target_on_find_spec_only():
+    """上游惰性探测会先 find_spec 而不 import; 那次不得把目标卸钩（2026-10-22 实测漏挂）。"""
+    import types
+
+    finder = rsp._Finder({rsp.MODELS_UTILS: rsp._GATE_MERGE_TRANSFORMS})
+    parent = types.ModuleType("vllm.model_executor.models")
+    parent.__path__ = []  # 触发 PathFinder 失败分支, 只验证"不卸钩"
+    saved = rsp.sys.modules.get("vllm.model_executor.models")
+    rsp.sys.modules["vllm.model_executor.models"] = parent
+    try:
+        assert finder.find_spec(rsp.MODELS_UTILS) is None  # 找不到 spec 也不许丢目标
+        assert rsp.MODELS_UTILS in finder._targets
+    finally:
+        if saved is not None:
+            rsp.sys.modules["vllm.model_executor.models"] = saved
+        else:
+            rsp.sys.modules.pop("vllm.model_executor.models", None)

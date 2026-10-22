@@ -29,8 +29,9 @@ fail-closed 语义:
 * VLLM_HUST_GDN_UNPACK_VIEWS -> vllm_ascend.ops.gdn（decode T=1 零拷贝视图; 依赖上者）
 * VLLM_HUST_MOE_INIT_TRITON  -> vllm_ascend.ops.fused_moe.token_dispatcher（decode T=1 triton init）
 * VLLM_HUST_NZ_SKIP_GATE     -> vllm_ascend.ops.linear（NZ mode2 标量门豁免）
-* VLLM_HUST_MOE_GATE_MERGE   -> vllm.model_executor.models.qwen3_next（MoE router 与
-  shared_expert_gate 合并成一次 GEMM; default-off, 消费者不全即 fail-closed 不安装）
+* VLLM_HUST_MOE_GATE_MERGE   -> vllm.model_executor.models.utils（在
+  AutoWeightsLoader.load_weights 尾部给 model 的 MoE 块装 router+shared_expert_gate 合并载体;
+  default-off, 消费者不全即 fail-closed 不安装）
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ ENV_NZ_SKIP = "VLLM_HUST_NZ_SKIP_GATE"
 GDN = "vllm_ascend.ops.gdn"
 TD = "vllm_ascend.ops.fused_moe.token_dispatcher"
 LIN = "vllm_ascend.ops.linear"
-QWEN3NEXT = "vllm.model_executor.models.qwen3_next"
+MODELS_UTILS = "vllm.model_executor.models.utils"
 
 # ---------------------------------------------------------------- gdn: D4 pack
 _D4_TRANSFORMS = [
@@ -343,26 +344,27 @@ _DBO_NPU_WRAP_TRANSFORMS = [
 # ------------------------------------------------- MoE 双门合并 (router + shared gate)
 # 语义: MoE 输入 x 同时喂 self.gate(2048→256) 与 self.shared_expert_gate(2048→1),
 # 故 cat([W_router, W_shared], 0) = 257×2048 一次 GEMM + 两路 contiguous 切片成立。
-# 安装点在 load_weights 返回之后（control-plane, 不在被 torch.compile 的 forward 里）:
-# 此时权重已加载、代理在首次 forward 前就位, 且不会把 Python 副作用带进图捕获。
+# 安装点在 models/utils.py 的 AutoWeightsLoader.load_weights 尾部（control-plane）:
+# 所有模型类的 load_weights 最终都走这里, 与 arch 无关（本栈实际 arch 是 qwen3_5, 不是
+# qwen3_next; 也实测过 model_loader.utils.process_weights_after_loading 在本栈未被调用）。
+# 不在被 torch.compile 的 forward 里, 不会把 Python 副作用带进图捕获。
 # 载体实现见 vllm_ascend_split_batch.moe_gate_merge。
 _GATE_MERGE_TRANSFORMS = [
     (
-        "from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP",
-        "from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP\n"
+        "from vllm.logger import init_logger",
+        "from vllm.logger import init_logger\n"
         "from vllm_ascend_split_batch.moe_gate_merge import (\n"
         "    install_gate_merge_all as _hust_install_gate_merge_all,\n"
         ")",
         1,
     ),
     (
-        """        loader = AutoWeightsLoader(self)
-        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)""",
-        """        loader = AutoWeightsLoader(self)
-        loaded = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
-        _hust_install_gate_merge_all(self)
-        return loaded""",
-        2,
+        """        self._check_skipped_aliases(autoloaded_weights)
+        return autoloaded_weights""",
+        """        self._check_skipped_aliases(autoloaded_weights)
+        _hust_install_gate_merge_all(self.module)
+        return autoloaded_weights""",
+        1,
     ),
 ]
 
@@ -374,7 +376,7 @@ TABLES = [
     (ENV_DBO, PLATFORM, _DBO_PLATFORM_TRANSFORMS),
     (ENV_DBO, CORE_RUNNER, _DBO_CORE_TRIGGER_TRANSFORMS),
     (ENV_DBO, NPU_RUNNER, _DBO_NPU_WRAP_TRANSFORMS),
-    (ENV_GATE_MERGE, QWEN3NEXT, _GATE_MERGE_TRANSFORMS),
+    (ENV_GATE_MERGE, MODELS_UTILS, _GATE_MERGE_TRANSFORMS),
 ]
 
 
@@ -430,7 +432,9 @@ class _Finder:
         transforms = self._targets.get(fullname)
         if transforms is None:
             return None
-        self._targets.pop(fullname, None)  # 一次性: 命中后即卸钩
+        # 不在 find_spec 阶段卸钩: 上游（如 model registry 的惰性架构探测）会先做一次
+        # find_spec 而不真正 import; 卸钩后真正的 import 就退回 stock ——
+        # 2026-10-22 实测 `vllm.model_executor.models.utils` 正是这样被漏掉的。
         parent_name, _, sub_name = fullname.rpartition(".")
         parent = sys.modules.get(parent_name)
         parent_path = list(getattr(parent, "__path__", []) or [])

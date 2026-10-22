@@ -43,10 +43,12 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
 ENV = "VLLM_HUST_MOE_GATE_MERGE"
+TRACE_ENV = "VLLM_HUST_MOE_GATE_MERGE_TRACE"
 _FP32_HINT = "weight_fp32"
 
 
@@ -61,6 +63,26 @@ def split_contiguous(out, n_router: int):
     logits = out.narrow(1, 0, n_router).contiguous()
     shared = out.narrow(1, n_router, total - n_router).contiguous()
     return logits, shared
+
+
+def _trace(event: dict) -> None:
+    """把安装过程写成 JSON 行（`VLLM_HUST_MOE_GATE_MERGE_TRACE=<path>` 时启用）。
+
+    起服日志级别不保证可见，故用文件做**可核验**的集成证据。
+    """
+    path = os.environ.get(TRACE_ENV)
+    if not path:
+        return
+    import json as _json
+
+    event = dict(
+        event, ts=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), pid=os.getpid()
+    )
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(event, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 class TorchOps:
@@ -84,6 +106,9 @@ class TorchOps:
 
     def float32(self):
         return self.torch.float32
+
+
+_trace({"event": "import", "env_value": os.environ.get(ENV, "0")})
 
 
 class GateMergeState:
