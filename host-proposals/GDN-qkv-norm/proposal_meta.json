@@ -41,8 +41,8 @@
   "evidence": [
     "/root/包体恢复/records/ladder/1018-125822-l0-gdn-qkv-norm.json",
     "/root/包体恢复/records/probes/20261018T130700Z_gdn_norm_trace_analysis.json",
-    "host-proposals/GDN-qkv-norm/validation/multibuffer-determinism-20261018/receipt.json",
-    "host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019/receipt.json"
+    "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/multibuffer-determinism-20261018/receipt.json",
+    "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019/receipt.json"
   ],
   "deployment_gate": [
     "Exact source hash, forward and reverse patch checks",

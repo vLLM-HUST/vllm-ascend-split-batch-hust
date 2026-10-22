@@ -44,7 +44,7 @@ wheel,单向依赖;算子库对 vllm-hust-ext 与插件机制零感知。日常�
 > 图中的版本号只是层级示意,**现行验证域以 [release.md](release.md) §0.1 为准**:
 > vllm `0.28.1.post1.dev143+gf18cf803c`(vllm-hust release v1)/ vllm-ascend
 > `0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`。旧基线 `vllm 0.23.0` /
-> `vllm-ascend 0.23.0rc1` 仅在 `docs/evidence/cascade/EVIDENCE.md` §8 留档,
+> `vllm-ascend 0.23.0rc1` 仅在 [docs/evidence/cascade/EVIDENCE.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/EVIDENCE.md) §8 留档,
 > 其参考源码树已删,只作历史数字对照,不继承。
 
 依赖方向铁律:**本壳 → kernel 包**单向;kernel 包禁止 import 本壳或任何

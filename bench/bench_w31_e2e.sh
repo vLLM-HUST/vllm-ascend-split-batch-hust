@@ -9,6 +9,7 @@
 # disabling is symmetric across arms and happens outside the timed region).
 #
 # Usage:
+#   export SPLIT_BATCH_RESULTS_DIR=/tmp/split-batch-new-run
 #   nohup bash bench/bench_w31_e2e.sh > /tmp/w31_e2e/run.log 2>&1 &
 # (equivalent to the plain `python3 bench_w31_e2e.py` invocation from /tmp)
 set -u

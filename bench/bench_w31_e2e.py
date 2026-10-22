@@ -47,7 +47,7 @@ listener on this stack (single-process V1 uses a ZMQ IPC path), so the port
 slot is a host-level guard / bookkeeping slot, not a vllm bind; the
 pre-registered fixture is offline, so there is no serve port to release.
 
-Outputs (all under ``bench/results/``)
+Outputs (all under the required external ``SPLIT_BATCH_RESULTS_DIR``)
 --------------------------------------
 ``bench_w31_e2e.json``         per-leg rows (line-oriented, appended as legs
                                complete) + the mechanical summary;
@@ -72,6 +72,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+from evidence_paths import archived_url, output_directory
 
 # --------------------------------------------------------------------------
 # Pre-registered constants (EXPECTATIONS-w31-e2e.md) -- do not tune.
@@ -100,7 +102,7 @@ LEG_SLEEP_S = 10
 LEG_TIMEOUT_S = 3600
 
 REPO = Path(__file__).resolve().parents[1]
-RESULTS = REPO / "bench" / "results"
+RESULTS = output_directory()
 LOG_DIR = RESULTS / "logs_w31_e2e"
 OUT_JSON = RESULTS / "bench_w31_e2e.json"
 OUT_TXT = RESULTS / "bench_w31_e2e_summary.txt"
@@ -341,7 +343,7 @@ def run_leg(mode: str, leg_tag: str, port: int) -> int:
 def write_results(rows: list[dict], summary: dict | None) -> None:
     payload = {
         "experiment": "W3.1 fi_gelu e2e A/B",
-        "preregistration": str((RESULTS / "EXPECTATIONS-w31-e2e.md").relative_to(REPO)),
+        "preregistration": archived_url("bench/results/EXPECTATIONS-w31-e2e.md"),
         "fixture": {
             "kind": "offline LLM.generate, one process per leg",
             "n_prompts": N_PROMPTS,
@@ -473,7 +475,9 @@ def print_summary(rows: list[dict], summary: dict) -> None:
 def write_summary_txt(rows: list[dict], summary: dict) -> None:
     lines = []
     lines.append("W3.1 fi_gelu e2e A/B -- mechanical summary")
-    lines.append("preregistration: bench/results/EXPECTATIONS-w31-e2e.md")
+    lines.append(
+        "preregistration: " + archived_url("bench/results/EXPECTATIONS-w31-e2e.md")
+    )
     lines.append("")
     lines.append("per-leg")
     hdr = (

@@ -70,7 +70,7 @@ Existing tier-2 activation requires the reviewed host patch plus
 unsupported inputs retain native fallback. No automatic patching is provided.
 Rollback requires disabling the env and restarting/recapturing; reverse the
 host patch only through its separately reviewed procedure.
-Acceptance evidence: `host-proposals/GDN-qkv-norm/validation/`.
+Acceptance evidence: [host-proposals/GDN-qkv-norm/validation/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/).
 Registration decision: `host-proposals/GDN-qkv-norm/registration-closure.json`.
 Delivery gates: [docs/release.md](docs/release.md#算子-bundle-最短交付路径).
 
@@ -155,8 +155,9 @@ Verified evidence — **historical (Qwen2.5 / 0.25 domain)**, Qwen2.5-Coder-14B-
 - no fail-open events during the verified runs;
 - `pytest -q` + `ruff check .` green.
 
-The full evidence set travels with this repository: see
-[docs/evidence/cascade/README.md](docs/evidence/cascade/README.md) for the
+The full evidence set is archived in benchmark; retrieval and custody rules are
+in [EVIDENCE.md](EVIDENCE.md). See
+[docs/evidence/cascade/README.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/README.md) for the
 per-section reports (`section2-correctness.md`, `section3-performance.md`,
 `section4-active-enablement.md`), the reproduction scripts, the raw result
 JSONs and the sha256 manifest (including the list of large sweep logs left in
@@ -190,7 +191,7 @@ all five mandatory fallbacks: per-request generators, processed
 logits/logprobs modes, batch-invariant, reduce-sample, async-exponential)
 stays on the fork chain with no device sync.
 
-Evidence (`docs/evidence/w2b-fi-sampling/REPORT.md`, Qwen2.5-Coder-14B, 910B2 —
+Evidence ([docs/evidence/w2b-fi-sampling/REPORT.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/w2b-fi-sampling/REPORT.md), Qwen2.5-Coder-14B, 910B2 —
 **historical Qwen2.5/0.25 domain**, see the cohort scope above):
 
 - default-off is zero-diff (no host/kernel import, no patch) and NPU smoke is

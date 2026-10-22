@@ -65,8 +65,8 @@
     "not_retried": true
   },
   "next_action": "Optimization accepted; no further operator work. Release-gate material (activation decision, host proposal refresh for upstream tree versions) is owned outside this candidate.",
-  "model_validation_evidence": "validation/model-validation/manifest.json",
-  "evidence": "validation/manifest.json",
+  "model_validation_evidence": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/model-validation/manifest.json",
+  "evidence": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/manifest.json",
   "evidence_limits": "Compact original JSON/log/CSV snapshots are bundled. Raw full profiler timelines and larger L2 archive remain at source paths in manifest; receipt commit_push field describes pre-publication state.",
   "resolution": {
     "root_cause": "fused unpack_norm_kernel without multibuffer produced a stable but different trajectory from native; launching the same kernel with multibuffer=True removes it",
@@ -96,7 +96,7 @@
       },
       "limits": "540 vs 570 captured calls (32-iteration truncation); per-call comparison only; totals not compared"
     },
-    "evidence": "validation/l4-multibuffer-20261019/receipt.json"
+    "evidence": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019/receipt.json"
   },
   "toolchain_note": "Triton kernel signatures with extra pointer parameters (optional K=None/V=None or a separate 4-pointer kernel) segfault triton-ascend ttir_to_linalg; see docs/pitfalls.md"
 }
