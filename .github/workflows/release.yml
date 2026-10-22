@@ -92,6 +92,8 @@ jobs:
           (out / "dist.sha256").write_text("\n".join(lines) + "\n")
           print("\n".join(lines))
           PY
+      - name: Reject evidence-bearing release distributions
+        run: python tools/check_distribution.py release-assets
       - name: Assemble the release body from the annotated tag
         run: |
           {
