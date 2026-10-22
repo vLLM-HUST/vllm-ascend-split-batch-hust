@@ -64,6 +64,15 @@ test = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/vllm_ascend_split_batch"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/vllm_ascend_split_batch",
+    "/pyproject.toml",
+    "/README.md",
+    "/LICENSE",
+    "/PROVENANCE.md",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

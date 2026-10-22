@@ -972,3 +972,16 @@ core `0aee727ff6`;其它 core 会 import 期报错(§0.3 有逐条报错原文)�
 ① 干净 venv 打 `pypi.org/simple` ⇒ `Would install … 0.1.3`,且 `importlib.metadata` 读出
 `Version: 0.1.3`;② 反向:`==0.1.2` 的元数据里 `host.version_range` 仍是点钉(证明"放宽只在新版生效");
 ③ 两代宿主 `extension check` 均 `compatible`。
+# Distribution custody
+
+Source distributions include only runtime source, packaging metadata, README,
+license and provenance. Benchmark results, logs and evidence directories are not
+installation inputs. CI, index publishing and GitHub Release upload must run
+`python tools/check_distribution.py <artifact-directory>` after building or
+downloading both distributions. The gate checks runtime inventory parity,
+extension manifests and entry points as well as evidence exclusion.
+
+Published versions are immutable: do not rebuild or overwrite their assets to
+remove historical evidence. Historical result members belong in benchmark custody;
+retire an installation artifact only after its installation consumers are resolved.
+
