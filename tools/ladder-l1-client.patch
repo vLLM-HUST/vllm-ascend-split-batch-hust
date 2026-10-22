@@ -1,0 +1,115 @@
+# ladder-l1.py A+B 落地 (2026-10-22): 单次失败记 error 行并继续 + JSON 照写 + L1 FAIL 非零退出
+#   + HTTPError 读 body + SSE "data:" 无空格兼容 + usage(prompt_tokens)/截断标注
+# 运行树真身: /root/包体恢复/scripts/ladder-l1.py (bench-ladder.sh SCRIPTS 指向)
+# 应用:   patch /root/包体恢复/scripts/ladder-l1.py < tools/ladder-l1-client.patch
+# 回滚:   patch -R /root/包体恢复/scripts/ladder-l1.py < tools/ladder-l1-client.patch
+# 原始版 sha256: 0ab821ce7e98888649460cada558f08d164c87897669283e1e838e3bdaffa0fe
+--- /root/包体恢复/scripts/ladder-l1.py.orig
++++ /root/包体恢复/scripts/ladder-l1.py
+@@ -1,14 +1,17 @@
+ #!/usr/bin/env python3
+ """L1 单请求延迟 —— 固定 prompt(~2K tok) + 贪心 256 tok, 流式取 TTFT/TPOT/e2e, N 次取中位。
+ 
+-用法: ladder-l1.py [--port 8000] [--iters 10] [--out <json>]
++用法: ladder-l1.py [--port 8000] [--iters 10] [--max-tokens 256] [--out <json>]
+ 纯 stdlib（urllib SSE 流式解析），无 openai 客户端依赖。
++失败语义: 单次失败记为 error 行并继续; 仍有失败时打 FAIL 并以非零退出, JSON 照写。
+ """
+ import argparse
+ import json
+ import os
+ import statistics
++import sys
+ import time
++import urllib.error
+ import urllib.request
+ 
+ # 服务模型名 = 启动 serve 时给的路径（约定: 路径即模型 id）。与 bench-ladder.sh 的 MODEL
+@@ -46,25 +49,31 @@
+     t0 = time.perf_counter()
+     ttft = None
+     out_tokens = 0
++    prompt_tokens = None
+     with urllib.request.urlopen(req, timeout=600) as resp:
+         for raw in resp:
+             line = raw.decode("utf-8", "replace").strip()
+-            if not line.startswith("data: "):
++            if not line.startswith("data:"):
+                 continue
+-            payload = line[6:]
++            payload = line[5:].strip()
+             if payload == "[DONE]":
+                 break
+             obj = json.loads(payload)
+-            if obj.get("usage"):
+-                out_tokens = obj["usage"].get("completion_tokens", out_tokens)
++            usage = obj.get("usage")
++            if usage:
++                out_tokens = usage.get("completion_tokens", out_tokens)
++                prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
+             choices = obj.get("choices") or []
+             if choices and (choices[0].get("delta") or {}).get("content") and ttft is None:
+                 ttft = time.perf_counter() - t0
+     e2e = time.perf_counter() - t0
+-    return {"ttft_ms": round(ttft * 1000, 2) if ttft else None,
+-            "e2e_ms": round(e2e * 1000, 2),
+-            "out_tokens": out_tokens,
+-            "tpot_ms": round((e2e - ttft) / max(out_tokens - 1, 1) * 1000, 3) if ttft and out_tokens > 1 else None}
++    row = {"ttft_ms": round(ttft * 1000, 2) if ttft else None,
++           "e2e_ms": round(e2e * 1000, 2),
++           "out_tokens": out_tokens,
++           "tpot_ms": round((e2e - ttft) / max(out_tokens - 1, 1) * 1000, 3) if ttft and out_tokens > 1 else None}
++    if prompt_tokens is not None:
++        row["prompt_tokens"] = prompt_tokens
++    return row
+ 
+ 
+ def median(rows, key):
+@@ -81,19 +90,43 @@
+     args = ap.parse_args()
+ 
+     rows = []
++    failures = []
+     for i in range(args.iters):
+-        r = chat_once(args.port, args.max_tokens)
++        try:
++            r = chat_once(args.port, args.max_tokens)
++        except urllib.error.HTTPError as e:
++            detail = e.read(512).decode("utf-8", "replace").strip()
++            r = {"error": f"HTTP {e.code}: {detail}"}
++        except Exception as e:
++            r = {"error": f"{type(e).__name__}: {e}"}
++        if "error" in r:
++            failures.append({"iter": i + 1, "error": r["error"]})
++            print(f"  iter{i + 1:02d} FAIL {r['error']}")
++        else:
++            print(f"  iter{i + 1:02d} ttft={r['ttft_ms']}ms e2e={r['e2e_ms']}ms "
++                  f"tokens={r['out_tokens']} tpot={r['tpot_ms']}ms")
+         rows.append(r)
+-        print(f"  iter{i + 1:02d} ttft={r['ttft_ms']}ms e2e={r['e2e_ms']}ms "
+-              f"tokens={r['out_tokens']} tpot={r['tpot_ms']}ms")
+-    summary = {"prompt_chars": len(PROMPT), "iters": args.iters,
++
++    toks = [r["out_tokens"] for r in rows if r.get("out_tokens")]
++    summary = {"prompt_chars": len(PROMPT),
++               "prompt_tokens": median(rows, "prompt_tokens"),
++               "iters": args.iters,
++               "max_tokens": args.max_tokens,
++               "out_tokens_min": min(toks) if toks else None,
++               "out_tokens_max": max(toks) if toks else None,
++               "truncated": any(t < args.max_tokens for t in toks),
++               "failures": failures,
+                "median": {k: median(rows, k) for k in ("ttft_ms", "e2e_ms", "tpot_ms")},
+                "rows": rows}
+     print(f"L1 median: {summary['median']}")
++    if failures:
++        print(f"L1 FAIL: {len(failures)}/{args.iters} 次失败")
+     if args.out:
+         with open(args.out, "w") as f:
+             json.dump(summary, f, indent=1)
+         print(f"saved -> {args.out}")
++    if failures:
++        sys.exit(1)
+ 
+ 
+ if __name__ == "__main__":
