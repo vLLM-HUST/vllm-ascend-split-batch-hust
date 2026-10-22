@@ -88,6 +88,9 @@ def test_live_tree_is_anchor_matchable_for_husk():
             rsp, "CORE_RUNNER", ""
         ): "/vllm-workspace/vllm/vllm/v1/worker/gpu_model_runner.py",
         getattr(rsp, "NPU_RUNNER", ""): ascend + "worker/model_runner_v1.py",
+        getattr(rsp, "QWEN3NEXT", ""): (
+            "/vllm-workspace/vllm/vllm/model_executor/models/qwen3_next.py"
+        ),
     }
     for tok in (
         "VLLM_HUST_D4_CONV_PACK",
