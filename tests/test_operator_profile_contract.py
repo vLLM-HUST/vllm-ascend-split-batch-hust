@@ -181,3 +181,15 @@ def test_legacy_screen_unchanged_for_graph(gate, tmp_path):
     cand["checks"] = {"l3": {"status": "FAIL"}}
     assert mod.profile_gate(args() + ["--screen-report", str(report)]) == 3
     assert report.read_bytes() == before
+
+
+@pytest.mark.parametrize("code", [1, 3, 4])
+def test_profile_dispatch_preserves_failure_code(gate, monkeypatch, code):
+    mod, _, _, _, _ = gate
+
+    def run(argv, **kwargs):
+        result = code if argv[0] == mod.TOOLS["bench"] else 0
+        return SimpleNamespace(returncode=result, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr(mod, "run", run)
+    assert mod.main(["bench", "profile", *args()]) == code

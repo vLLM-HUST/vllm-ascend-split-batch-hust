@@ -1,5 +1,6 @@
 """档② 原件守卫: W3F2/W3F3 patch 必须仍可作用于其 orig 快照基线（CPU-only）。"""
 
+import hashlib
 import pathlib
 import shutil
 import subprocess
@@ -38,3 +39,18 @@ def test_patch_applies_onto_its_orig_snapshot(tmp_path):
             timeout=60,
         )
         assert proc.returncode == 0, f"{patch}: {proc.stdout}{proc.stderr}"
+
+
+def test_repo_copies_match_l2_originals():
+    l2 = pathlib.Path("/root/包体恢复/records/tree-patches")
+    if not l2.is_dir():
+        for pair in PAIRS:
+            for name in pair:
+                assert (PATCHES / name).stat().st_size > 0
+        return
+    for pair in PAIRS:
+        for name in pair:
+            repo = hashlib.sha256((PATCHES / name).read_bytes()).hexdigest()
+            src = l2 / name
+            if src.is_file():
+                assert repo == hashlib.sha256(src.read_bytes()).hexdigest(), name

@@ -5,6 +5,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+from _deployment import deployed_file
 
 PATH = (
     Path(__file__).resolve().parents[1] / "tools/probe_d5_independent_microbatches.py"
@@ -64,3 +65,19 @@ def test_existing_evidence_is_preserved(tmp_path, monkeypatch):
         probe.main()
     assert error.value.code == 2
     assert output.read_text() == "preserved"
+
+
+def test_full_host_probe_when_checkout_is_available():
+    root = Path("/root/vllm-workspace")
+    runner = root / "vllm-ascend-hust/vllm_ascend/worker/model_runner_v1.py"
+    if not deployed_file(runner):
+        pytest.skip("read-only Ascend checkout not present")
+    pytest.importorskip("numpy", reason="the host probe reads host sources via numpy")
+    result = probe.probe(root / "vllm-hust", root / "vllm-ascend-hust")
+    assert result["verdict"] == "BLOCKED_CURRENT_HOST_PATH"
+    assert len(result["v1_forced_gdn_metadata"]) == 2
+    assert all(not row["should_ubatch"] for row in result["v1_selection"])
+    assert result["workspace"]["two_lane_manager_can_select_lane_1"]
+    cases = result["splitter_interface_cases"]
+    assert cases[0]["shared_request_indices"] == []
+    assert cases[1]["shared_request_indices"] == [0]
