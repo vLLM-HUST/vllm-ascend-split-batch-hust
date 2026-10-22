@@ -34,7 +34,7 @@ ruff check .                                       # lint 门槛:零告警
 
 设备验证仍需按原审批及实验协议执行。结果先写到仓库外，审核后发布到
 `vllm-hust-benchmark`；本仓只保留固定版本链接、解析工具和测试。
-失败记录与适用边界不得丢弃。历史原件与下载方式见 [EVIDENCE.md](../EVIDENCE.md)。
+失败记录与适用边界不得丢弃。历史原件见 [benchmark 归档](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git)。
 
 ## 3. 代码规范
 
