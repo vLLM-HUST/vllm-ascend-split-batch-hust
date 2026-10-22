@@ -270,11 +270,80 @@ _NZ_SKIP_TRANSFORMS = [
 ]
 
 # env 门 -> (模块名, 变换表); 顺序表: views 依赖 d4 的注入行
+ENV_DBO = "VLLM_HUST_DBO_ENABLE"
+PLATFORM = "vllm_ascend.platform"
+CORE_RUNNER = "vllm.v1.worker.gpu_model_runner"
+NPU_RUNNER = "vllm_ascend.worker.model_runner_v1"
+
+# DBO 解锁(2026-10-22 调研窗立项, 见 docs/comm-overlap-dbo-feasibility.md):
+# 平台重置放行 + TP2/DP1 decode 触发 + NPU load_model 的 UBatchWrapper 包装。
+# 核心侧无 os import, 用 __import__("os") 内联。
+_DBO_PLATFORM_TRANSFORMS = [
+    (
+        '''        if getattr(vllm_config.parallel_config, "enable_dbo", False):
+            logger.warning(
+                "Parameter is currently ignored on Ascend. parameter=enable_dbo, action: resetting to False. "
+            )
+            vllm_config.parallel_config.enable_dbo = False''',
+        '''        if getattr(vllm_config.parallel_config, "enable_dbo", False) and os.environ.get("VLLM_HUST_DBO_ENABLE") != "1":
+            logger.warning(
+                "Parameter is currently ignored on Ascend. parameter=enable_dbo, action: resetting to False. "
+            )
+            vllm_config.parallel_config.enable_dbo = False''',
+        1,
+    ),
+]
+_DBO_CORE_TRIGGER_TRANSFORMS = [
+    (
+        '''        should_ubatch, num_tokens_across_dp = False, None
+        if self.vllm_config.parallel_config.data_parallel_size > 1:''',
+        '''        should_ubatch, num_tokens_across_dp = False, None
+        if (self.vllm_config.parallel_config.enable_dbo and uniform_decode
+                and __import__("os").environ.get("VLLM_HUST_DBO_ENABLE") == "1"):
+            should_ubatch = True
+        elif self.vllm_config.parallel_config.data_parallel_size > 1:''',
+        1,
+    ),
+]
+_DBO_NPU_WRAP_TRANSFORMS = [
+    (
+        '''            elif cudagraph_mode.has_full_cudagraphs():
+                self.model = ACLGraphWrapper(
+                    self.model,
+                    self.vllm_config,
+                    runtime_mode=CUDAGraphMode.FULL,
+                    use_eagle=self.use_eagle,
+                    enable_enpu=self.enable_enpu,
+                )''',
+        '''            elif cudagraph_mode.has_full_cudagraphs():
+                if __import__("os").environ.get("VLLM_HUST_DBO_ENABLE") == "1":
+                    from vllm.v1.worker.gpu_ubatch_wrapper import UBatchWrapper
+                    self.model = UBatchWrapper(
+                        self.model,
+                        self.vllm_config,
+                        CUDAGraphMode.FULL,
+                        self.device,
+                    )
+                else:
+                    self.model = ACLGraphWrapper(
+                        self.model,
+                        self.vllm_config,
+                        runtime_mode=CUDAGraphMode.FULL,
+                        use_eagle=self.use_eagle,
+                        enable_enpu=self.enable_enpu,
+                    )''',
+        1,
+    ),
+]
+
 TABLES = [
     (ENV_D4, GDN, _D4_TRANSFORMS),
     (ENV_VIEWS, GDN, _VIEWS_TRANSFORMS),
     (ENV_INIT_TRITON, TD, _INIT_TRITON_TRANSFORMS),
     (ENV_NZ_SKIP, LIN, _NZ_SKIP_TRANSFORMS),
+    (ENV_DBO, PLATFORM, _DBO_PLATFORM_TRANSFORMS),
+    (ENV_DBO, CORE_RUNNER, _DBO_CORE_TRIGGER_TRANSFORMS),
+    (ENV_DBO, NPU_RUNNER, _DBO_NPU_WRAP_TRANSFORMS),
 ]
 
 

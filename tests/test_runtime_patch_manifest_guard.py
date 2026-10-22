@@ -23,10 +23,13 @@ NEW_LAYERS = [
 
 
 
-def test_manifest_contains_new_layers():
+def test_manifest_retired_layers_absent():
+    """2026-10-22 退役: 三层不得再进自动重放(并发重放曾反复还原危险 vintage)。
+    载波唯一通道 = husk; 手动回滚件在 tree-patches/。"""
     text = (RT / "apply-runtime-patches.sh").read_text()
-    for name, rel, orig, patch in NEW_LAYERS:
-        assert f"{name}|{rel}|{orig}|{patch}" in text, name
+    entries = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    for retired in ("d4site2-views-combined|", "moe-init-triton|", "nz-skip-gate|"):
+        assert not any(retired in ln for ln in entries), f"退役层仍在 MANIFEST: {retired}"
 
 
 def test_seam_table_contains_husk_fingerprints():
@@ -56,6 +59,9 @@ def test_live_tree_is_anchor_matchable_for_husk():
         rsp.GDN: "ops/gdn.py",
         rsp.TD: "ops/fused_moe/token_dispatcher.py",
         rsp.LIN: "ops/linear.py",
+        getattr(rsp, "PLATFORM", ""): "/vllm-workspace/vllm-ascend/vllm_ascend/platform.py",
+        getattr(rsp, "CORE_RUNNER", ""): "/vllm-workspace/vllm/vllm/v1/worker/gpu_model_runner.py",
+        getattr(rsp, "NPU_RUNNER", ""): "/vllm-workspace/vllm-ascend/vllm_ascend/worker/model_runner_v1.py",
     }
     for tok in ("VLLM_HUST_D4_CONV_PACK", "VLLM_HUST_GDN_UNPACK_VIEWS",
                 "VLLM_HUST_MOE_INIT_TRITON", "VLLM_HUST_NZ_SKIP_GATE"):

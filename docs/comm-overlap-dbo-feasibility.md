@@ -30,10 +30,25 @@
 
 ## 裁决与立项
 
-立 probing 候选 `dbo-ascend-tp2-feasibility`：最小解锁实验序列
-① platform 重置点 env 门控放行（default-off）→ ② TP2/DP1 decode 的
-should_ubatch 触发补丁 → ③ boot + FULL graph + L3 8/8 + L1 实证（1 起服/步）。
-预算形态：2-3 个标准窗；收益天花板 = 12.4ms/step 的重叠份额；
-死刑条件 = torch_npu 双流在 FULL graph capture 不成立（③ 步即判）。
+立 probing 候选 `dbo-ascend-tp2-feasibility`。调研窗后静态深挖修正了解锁序列——
+**实为 4 步，且②③已实现**（husk 变换，default-off `VLLM_HUST_DBO_ENABLE`）：
 
-不是"开 flag 就行"——是三层闸门的最小解锁工程，属结构面/upstream 范畴。
+1. 平台重置放行（`_DBO_PLATFORM_TRANSFORMS`，platform.py reset 块加 env 门）
+2. TP2/DP1 decode 触发（`_DBO_CORE_TRIGGER_TRANSFORMS`，core should_ubatch
+   的 enable_dbo+uniform_decode 分支；core 无 os import 用 `__import__("os")`）
+3. **NPU load_model 包装缺口**（深挖发现）：core 的 UBatchWrapper 包装分支
+   （gpu_model_runner.py:5560，use_ubatching 独占分支，FULL 模式由 wrapper
+   自管内层图）对 NPU 不可达——NPUModelRunner.load_model 全程自持无 super 调用。
+   `_DBO_NPU_WRAP_TRANSFORMS` 在 ACLGraphWrapper 分支植入独占替代
+   （env 门控时 UBatchWrapper 取代 ACLGraphWrapper，镜像 core 语义）。
+4. 实证：boot + FULL graph + L3 8/8 + L1（对照 1022-023x standing 基线）。
+   死刑条件不变：torch_npu 双流/HCCL 在该路径不成立。
+
+补充约束（深挖新事实）：
+- DBO 钩子消费者（dbo_enabled/dbo_register_recv_hook/make_ubatch_contexts）
+  仅存在于 DeepEP 系 EP-MoE 内核（deepep_ht/ll/nixl/modular_kernel）——
+  TP allReduce 无钩子层，重叠编排完全依赖 UBatchWrapper 自身双流循环，
+  该假设是第 4 步的裁决点之一。
+- 预算形态：2-3 个标准窗；收益天花板 = 12.4ms/step 的重叠份额。
+- 载波环境互斥注意：DBO 探针不开 D4/views 载波（单变量；两者树内惰性补丁
+  与 husk 通道并存无害）。
