@@ -66,7 +66,13 @@ L192 `ReplicatedLinear(2048, 1)`；`qwen2_moe.py` L121
 = **257×2048** 一次 GEMM，语义成立，省一次 kernel 发车。
 
 - 授权：2026-10-22 用户明确授权进入 **vllm-core `qwen3_next.py` 补丁领地**（仅限该合并对）。
-- 候选：`router-shared-gate-merge`（stage=proposed，见工作台台账）。
+- 候选：`router-shared-gate-merge`（见工作台台账）。
+- **CPU 侧契约已实现并验证**（2026-10-22）：`tools/moe_gate_merge.py` +
+  `tests/test_moe_gate_merge.py`（12 用例，纯 Python、不依赖 torch）：行序契约
+  （前 256 行 router / 最后 1 行 shared gate）、两路切片**返回拷贝**（对应 device 侧
+  `contiguous` 要求）、以及「一次 257 行 matvec」与「两次 256+1 matvec」在真实维度
+  （M=1、K=2048）与稠密小维度上**逐元素精确相等**。设备侧（bf16 GEMM 重结合、实测收益）
+  仍未验证。
 - 收益上限估算：两桶窗内合计 15.78ms/32 iters，按省一次 ~4.77µs/call 级发车估
   **~0.5–0.7% stage**，属估算，**未测**；实现风险见下。
 - 实现风险（L3 前必须交代）：合并后 `hidden` 维不变、行数 257，切片
@@ -109,6 +115,8 @@ L192 `ReplicatedLinear(2048, 1)`；`qwen2_moe.py` L121
 | 布局 A/B 工具 | `tools/bench_matmul_m1_layout.py` |
 | 合并 L0 工具（旧前提） | `tools/bench_router_merge.py` |
 | 桶级归因工具 | `tools/analysis/matmulv2_shape_attribution.py` |
+| 双门合并 CPU 参考实现 | `tools/moe_gate_merge.py` |
+| 双门合并契约测试 | `tests/test_moe_gate_merge.py` |
 
 工作台侧（本仓外）：候选 `matmulv2-decode-m1-l0-ruler` / `matmulv2-decode-shape-attribution` /
 `router-merge-into-inproj-qkv`（rejected）/ `router-shared-gate-merge`（proposed），
