@@ -343,32 +343,26 @@ _DBO_NPU_WRAP_TRANSFORMS = [
 # ------------------------------------------------- MoE 双门合并 (router + shared gate)
 # 语义: MoE 输入 x 同时喂 self.gate(2048→256) 与 self.shared_expert_gate(2048→1),
 # 故 cat([W_router, W_shared], 0) = 257×2048 一次 GEMM + 两路 contiguous 切片成立。
-# 安装点在 block.forward 开头（幂等）: 必须在 self.shared_expert(hidden_states) 之前,
-# 否则 FULL 图捕获到的仍是 stock 两路。载体实现见 vllm_ascend_split_batch.moe_gate_merge。
+# 安装点在 load_weights 返回之后（control-plane, 不在被 torch.compile 的 forward 里）:
+# 此时权重已加载、代理在首次 forward 前就位, 且不会把 Python 副作用带进图捕获。
+# 载体实现见 vllm_ascend_split_batch.moe_gate_merge。
 _GATE_MERGE_TRANSFORMS = [
     (
         "from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP",
         "from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP\n"
         "from vllm_ascend_split_batch.moe_gate_merge import (\n"
-        "    install_gate_merge as _hust_install_gate_merge,\n"
+        "    install_gate_merge_all as _hust_install_gate_merge_all,\n"
         ")",
         1,
     ),
     (
-        """    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        already_sequence_parallel: bool = False,
-    ) -> torch.Tensor:
-        # NOTE: hidden_states can have either 1D or 2D shape.""",
-        """    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        already_sequence_parallel: bool = False,
-    ) -> torch.Tensor:
-        _hust_install_gate_merge(self)
-        # NOTE: hidden_states can have either 1D or 2D shape.""",
-        1,
+        """        loader = AutoWeightsLoader(self)
+        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)""",
+        """        loader = AutoWeightsLoader(self)
+        loaded = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
+        _hust_install_gate_merge_all(self)
+        return loaded""",
+        2,
     ),
 ]
 

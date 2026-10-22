@@ -40,6 +40,7 @@ MoE 输入（`qwen2_moe.py` L121 ``out = F.sigmoid(self.expert_gate(x)[0]) * out
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 
@@ -169,7 +170,58 @@ def _collect_consumers(block):
     return router_slots, shared_slots
 
 
+def _weight_for(owner, fp32_weight, fp32: bool, ops):
+    """取该 owner 的参与合并的权重；fp32 模式下缺失预铸权重时按 .float() 兜底。"""
+    if not fp32:
+        return _slot(owner, "weight")
+    if fp32_weight is not None:
+        return fp32_weight
+    weight = _slot(owner, "weight")
+    return None if weight is None else ops.to_dtype(weight, ops.float32())
+
+
+def _guarded_install(block, environ, ops) -> bool:
+    """载体安装必须永不打断起服: 任何异常都 fail-closed 回 stock。"""
+    try:
+        return _install_gate_merge(block, environ=environ, ops=ops)
+    except Exception:  # noqa: BLE001
+        logger.exception("moe_gate_merge: 安装失败 -> 保持 stock（fail-closed）")
+        with contextlib.suppress(Exception):
+            block._hust_gate_merge = False
+        return False
+
+
 def install_gate_merge(block, *, environ=None, ops=None) -> bool:
+    """对外入口（带 fail-closed 护栏）。"""
+    return _guarded_install(block, environ, ops)
+
+
+def install_gate_merge_all(model, *, environ=None, ops=None) -> int:
+    """加载后一次性安装（control-plane 调用, 不落在被 compile 的 forward 里）。
+
+    遍历模块，凡同时具备 ``experts`` 与 ``shared_expert_gate`` 的 MoE 块各装一次。
+    返回安装成功数；env 关闭时返回 0（零开销）。
+    """
+    if not enabled(environ):
+        return 0
+    installed = 0
+    shared_ops = ops or TorchOps()
+    for module in model.modules():
+        if (
+            _slot(module, "experts") is None
+            or _slot(module, "shared_expert_gate") is None
+        ):
+            continue
+        if _guarded_install(module, environ, shared_ops):
+            installed += 1
+    if installed:
+        logger.info("moe_gate_merge: installed on %d MoE blocks", installed)
+    else:
+        logger.warning("moe_gate_merge: 未找到可安装的 MoE 块（保持 stock）")
+    return installed
+
+
+def _install_gate_merge(block, *, environ=None, ops=None) -> bool:
     """幂等安装；env 关闭 / 消费者不全 → 不安装并返回 False（回滚即关闭 env）。"""
     if not enabled(environ):
         return False
@@ -189,16 +241,19 @@ def install_gate_merge(block, *, environ=None, ops=None) -> bool:
         block._hust_gate_merge = False
         return False
 
-    fp32 = hasattr(router_weight_owner, _FP32_HINT) or hasattr(
-        shared_weight_owner, _FP32_HINT
-    )
-    router_weight = (
-        router_weight_owner.weight_fp32 if fp32 else router_weight_owner.weight
-    )
-    shared_weight = (
-        shared_weight_owner.weight_fp32 if fp32 else shared_weight_owner.weight
-    )
-    state = GateMergeState(router_weight, shared_weight, ops or TorchOps(), fp32=fp32)
+    ops = ops or TorchOps()
+    # fp32 判定**逐 owner**解析: 宿主可能只给 GateLinear 预铸 weight_fp32,
+    # 而 AscendReplicatedLinear 没有该属性（直接访问会 AttributeError）。
+    router_fp32 = _slot(router_weight_owner, _FP32_HINT)
+    shared_fp32 = _slot(shared_weight_owner, _FP32_HINT)
+    fp32 = router_fp32 is not None or shared_fp32 is not None
+    router_weight = _weight_for(router_weight_owner, router_fp32, fp32, ops)
+    shared_weight = _weight_for(shared_weight_owner, shared_fp32, fp32, ops)
+    if router_weight is None or shared_weight is None:
+        logger.warning("moe_gate_merge: 缺权重张量, 不安装")
+        block._hust_gate_merge = False
+        return False
+    state = GateMergeState(router_weight, shared_weight, ops, fp32=fp32)
     router_proxy = RouterGateProxy(state)
     shared_proxy = SharedGateProxy(state)
 

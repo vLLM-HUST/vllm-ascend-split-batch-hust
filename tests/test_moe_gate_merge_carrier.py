@@ -70,7 +70,8 @@ class FakeOps:
 
     def concat(self, tensors):
         self.concat_calls += 1
-        return FakeTensor([r for t in tensors for r in t.rows])
+        rows = [r for t in tensors for r in t.rows]
+        return FakeTensor(rows, tensors[0].dtype)  # dtype 跟随输入（同 torch.cat）
 
     def to_dtype(self, tensor, dtype):
         return tensor.to(dtype)
@@ -79,8 +80,8 @@ class FakeOps:
         return "fp32"
 
 
-def _weights(n_rows, cols, value=1.0):
-    return FakeTensor([[value] * cols for _ in range(n_rows)])
+def _weights(n_rows, cols, value=1.0, dtype="bf16"):
+    return FakeTensor([[value] * cols for _ in range(n_rows)], dtype)
 
 
 def _make_block(*, with_shared=True, fp32_hint=False):
@@ -211,3 +212,62 @@ def test_describe_pins_env_and_rollback():
 @pytest.mark.parametrize("bad", ["", "yes", "ON"])
 def test_env_values_other_than_one_are_off(bad):
     assert carrier.enabled({carrier.ENV: bad}) is False
+
+
+def test_fp32_hint_on_router_only_does_not_raise():
+    """宿主只给 GateLinear 预铸 weight_fp32（AscendReplicatedLinear 没有）时的回归。"""
+    block = _make_block()
+    block.gate.weight_fp32 = _weights(N_ROUTER, K, dtype="fp32")  # 只有 router 有
+    ops = FakeOps()
+    assert (
+        carrier.install_gate_merge(block, environ={carrier.ENV: "1"}, ops=ops) is True
+    )
+    state = block._hust_gate_merge
+    assert state.fp32 is True
+    assert state.weight.dtype == "fp32"  # 合并权重统一到 fp32
+    logits = block.experts.gate(FakeTensor([[1.0] * K], "bf16"))
+    gate = block.shared_expert.expert_gate(FakeTensor([[1.0] * K], "bf16"))[0]
+    assert logits.dtype == "fp32"
+    assert gate.dtype == "bf16"
+
+
+def test_install_all_walks_moe_blocks_only():
+    class Model:
+        def __init__(self, mods):
+            self._mods = mods
+
+        def modules(self):
+            return self._mods
+
+    b1, b2 = _make_block(), _make_block()
+
+    class NotMoe:
+        pass
+
+    model = Model([b1, NotMoe(), b2])
+    ops = FakeOps()
+    assert carrier.install_gate_merge_all(model, environ={}, ops=ops) == 0  # env 关
+    n = carrier.install_gate_merge_all(model, environ={carrier.ENV: "1"}, ops=ops)
+    assert n == 2
+    assert isinstance(b1.experts.gate, carrier.RouterGateProxy)
+    assert isinstance(b2.shared_expert.expert_gate, carrier.SharedGateProxy)
+
+
+def test_install_fails_closed_when_weight_missing():
+    block = _make_block()
+    block.shared_expert_gate.weight = None  # 权重缺失
+    ops = FakeOps()
+    assert (
+        carrier.install_gate_merge(block, environ={carrier.ENV: "1"}, ops=ops) is False
+    )
+    assert block._hust_gate_merge is False
+    assert not isinstance(block.experts.gate, carrier.RouterGateProxy)
+
+
+def test_install_never_raises_out_of_broken_block():
+    class Broken:
+        @property
+        def experts(self):
+            raise RuntimeError("boom")
+
+    assert carrier.install_gate_merge(Broken(), environ={carrier.ENV: "1"}) is False

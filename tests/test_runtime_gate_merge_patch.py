@@ -44,14 +44,16 @@ SYNTHETIC = (
 import torch
 
 
-class Block:
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        already_sequence_parallel: bool = False,
-    ) -> torch.Tensor:
-        # NOTE: hidden_states can have either 1D or 2D shape.
-        return hidden_states
+class Model:
+    def load_weights(self, weights):
+        loader = AutoWeightsLoader(self)
+        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
+
+
+class ExpertModel:
+    def load_weights(self, weights):
+        loader = AutoWeightsLoader(self)
+        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
 """
 )
 
@@ -66,16 +68,28 @@ def test_table_is_registered_under_its_own_env():
 def test_transforms_inject_import_and_installer_call():
     patched, log = rsp.apply_transforms(SYNTHETIC, rsp._GATE_MERGE_TRANSFORMS)
     assert len(log) == 2
-    assert "install_gate_merge as _hust_install_gate_merge" in patched
-    assert patched.count("_hust_install_gate_merge(self)") == 1
-    # 安装调用必须在 shared expert 被调用之前（在 forward 开头）
-    body = patched.split("hust_install_gate_merge(self)")[1]
-    assert body.lstrip().startswith("# NOTE: hidden_states")
+    assert "install_gate_merge_all as _hust_install_gate_merge_all" in patched
+    # 每个 load_weights 各注入一次（合成源码里有两个实现）
+    assert patched.count("_hust_install_gate_merge_all(self)") == 2
+    # 安装必须在 load_weights 返回之前完成（权重就绪 + 不在 compile 区内）
+    assert "loaded = loader.load_weights(" in patched
+    assert "return loaded" in patched
+    assert "def forward(" not in patched.split("_hust_install_gate_merge_all")[0]
     compile(patched, "qwen3_next_synthetic.py", "exec")
 
 
+def test_installer_never_lands_in_a_compiled_forward():
+    """forward 里不得出现安装调用（否则 Python 副作用会进图捕获: 已实测崩溃）。"""
+    patched, _ = rsp.apply_transforms(SYNTHETIC, rsp._GATE_MERGE_TRANSFORMS)
+    for chunk in patched.split("def forward(")[1:]:
+        assert "_hust_install_gate_merge" not in chunk.split("def ")[0]
+
+
 def test_anchor_mismatch_raises_anchor_error():
-    broken = SYNTHETIC.replace("already_sequence_parallel: bool = False", "x: int = 0")
+    broken = SYNTHETIC.replace(
+        "return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)",
+        "return loader.load_weights(weights)",
+    )
     with pytest.raises(rsp.AnchorError):
         rsp.apply_transforms(broken, rsp._GATE_MERGE_TRANSFORMS)
 
@@ -87,7 +101,7 @@ def _host_source():
     return None
 
 
-def test_host_source_anchors_still_unique():
+def test_host_source_anchors_still_unique():  # noqa: D103
     path = _host_source()
     if path is None:
         pytest.skip("host qwen3_next.py not deployed")
