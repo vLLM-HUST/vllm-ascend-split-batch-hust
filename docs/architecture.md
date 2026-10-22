@@ -1,44 +1,20 @@
 # 架构与契约
 
-## 1. 一句话定位
+## 1. 插件边界
 
-本仓库是 **vllm-ascend 宿主的插件壳**:以 default-off 方式为 vLLM 注入
-cascade 两段式 decode(调度 + 图模式)能力,并承载 split-batch 规划契约的
-提案描述符。**编译型算子(CCE/Ascend C)实现在仓库外的 `ascend_kernel`
-wheel 里**;**Triton / 纯 Python kernel 载体则在本仓内**(见 §6),本壳统一
-只做适配、门控与调度决策。
-
-## 1.1 仓库命名约定(团队沟通用语)
-
-| 简称 | 仓库 | 远端 |
-|---|---|---|
-| **插件库**(本仓库) | `vllm-ascend-split-batch-hust`,唯一对外交付面 | `vLLM-HUST/vllm-ascend-split-batch-hust` |
-| **算子库** | `cascade-merge-op`(ascend-kernel 工程 + S1 锚点数据,wheel 工厂) | `Raing5Days/vllm-hust-cascade-kernel` |
-
-**插件库 ⊃ 算子库**(逻辑包含):本库经 `kernels` extra 钉版消费算子库
-wheel,单向依赖;算子库对 vllm-hust-ext 与插件机制零感知。日常工作流见
-算子库 `docs/workflow.md` Loop B。
-
-## 2. 三层关系
+本仓是 vllm-ascend 的插件壳与算子载体，不是宿主 fork。
+宿主源码只读；接入仅使用 `vllm.general_plugins`、`--additional-config`、
+`--worker-cls`、官方 CLI/env。不注册 `vllm.platform_plugins`，不向上游提 PR；
+版本同步跟随 vllm-hust release。
 
 ```text
-┌─ 宿主(只读,禁止修改)────────────────────────────────────────────┐
-│  vllm 0.28.1.post1.dev143+gf18cf803c (VLLM_TARGET_DEVICE=empty) │
-│  vllm-ascend 0.25.1rc2.dev125+hust.20260903.4                   │
-└──────────────┬──────────────────────────────────────────────────┘
-               │ 唯一官方入口: vllm.general_plugins
-               │ entry `cascade-attention` → cascade_plugin:load()
-┌──────────────▼──────────────────────────────────────────────────┐
-│  本壳 vllm-ascend-split-batch(纯 Python)                        │
-│  · bundle manifest(0.2-experimental, cascade active)            │
-│  · env 门控 + monkeypatch(见 HOST_CONTRACT.md)                  │
-│  · 纯逻辑 planner / gate(CPU 可测)                              │
-└──────────────┬──────────────────────────────────────────────────┘
-               │ 单向依赖: torch.ops.npu.*
-┌──────────────▼──────────────────────────────────────────────────┐
-│  ascend_kernel wheel(CCE 算子, 仓库外)                          │
-│  fa_fp32_stage1 / lse_merge;对本壳零感知                        │
-└─────────────────────────────────────────────────────────────────┘
+vLLM / vllm-ascend（只读）
+    ↓ general_plugins / 已审查的宿主接缝
+插件 Adapter：门控、元数据转换、能力检查、回退
+    ↓ 明确的 Tensor / shape / dtype / layout / state 语义
+算子 API 与实现选择
+    ↓
+本仓 Python / Triton 实现，或独立交付的编译型算子
 ```
 
 > 图中的版本号只是层级示意,**现行验证域以 [release.md](release.md) §0.1 为准**:
@@ -47,81 +23,57 @@ wheel,单向依赖;算子库对 vllm-hust-ext 与插件机制零感知。日常�
 > `vllm-ascend 0.23.0rc1` 仅在 [docs/evidence/cascade/EVIDENCE.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/EVIDENCE.md) §8 留档,
 > 其参考源码树已删,只作历史数字对照,不继承。
 
-依赖方向铁律:**本壳 → kernel 包**单向;kernel 包禁止 import 本壳或任何
-vllm 模块;宿主源码不可修改,宿主能力只走公开面(entry point、
-`--additional-config`、`--worker-cls`、官方 CLI/env)。
+加载入口不等于稳定执行接口。对私有方法的运行时包装仍是宿主耦合，
+不得称为宿主主动调用的公开 Backend 契约。新增替换必须证明真实 callsite 可达，
+不能以注册成功或复制整个 forward 代替。
 
-## 3. Extension Bundle 语义(vllm-hust-ext 0.2-experimental)
 
-| 概念 | 本仓库的取值与含义 |
+## 2. Cascade 接入边界
+
+- 不发布 `cascade-attention` general plugin，不注入 cascade 环境变量。
+- 不声明 `[kernels]` extra，不依赖或自动安装外部 cascade kernel wheel。
+- `cascade-merge-op` / `Raing5Days/vllm-hust-cascade-kernel` 不属于当前安装依赖。
+- cascade 实现模块、Runner 包装、图孪生、gate 子进程与专属测试不保留在源码树或包中。
+  历史证据、版权和只读溯源保留；它们不属于可导入的插件实现。
+- 已运行的进程和已捕获的图不能靠移除入口热撤销；升级必须重新安装并重启、重捕获。
+- 回滚本轮仅恢复源码，上轮已停用的入口和依赖不自动恢复；重新安装后重启并重捕获。
+  重新启用须恢复对应注册并独立验证。
+
+## 3. Extension Bundle 语义
+
+| 对象 | 契约 |
 |---|---|
-| Bundle ID | `org.vllm-hust.split-batch-full-graph`,注册于 `vllm_hust.extension_bundles` entry point,value 指向包目录(含 manifest JSON) |
-| `implementation[].status` | `active` 才可 `enable`。当前 cascade 两个 carrier(`cascade_plugin:load` / `cascade_graph_plugin:install`)为 `active`;`planner:plan_dual_pad` 仍是 `import_only`(无验收证据,review F7) |
-| `activation.environment` | **enable 时注入的值**,不是文档。当前声明 `ENABLE_CASCADE_DECODE=1` + `ENABLE_CASCADE_GRAPH=1`;不 enable 则什么都不注入 |
-| `protocols[].version_range` | 四个协议均 `null`(**不独立版本化**):宿主不存在 `vllm.plugins.contracts`,manager 探测不到版本;声明具体区间只会让 `run` 以"version is unavailable"拒启。约束由 `host.version_range` + 验收证据承担,理由详见 [release.md](release.md) §0 |
-| `host.version_range` | 声明**有界的已验证域**(2026-09-27 起 `>=0.25.1rc2.dev125,<0.25.2`,见 release.md §0.1/§0.3);两端点均已真机验证,窗口内 build 声明兼容 ⇒ 窗口内失败归因宿主;禁止 `>=0` 与任何无上界写法(由 `tests/test_manifest.py` 机械守住),且 packaging 不允许有序比较符内出现 `+local` 标签 |
-| `components[].contracts` / `execution_planes` | `dual-pad-planner` 与 `cascade-two-stage-decode` 声明在 worker/device plane,permissions 含 `device_access` |
-| 发现 vs 导入 | `extension list/inspect/check` 只读元数据不 import 实现;import 实现的只有 vllm 的 `general_plugins` 加载(`load()` 内部再按 env 门控) |
+| `vllm_hust.extension_bundles` | 保留 6 个 bundle 的发现入口；发现只读元数据，不导入执行实现 |
+| `org.vllm-hust.split-batch-full-graph` | 仅保留 `dual-pad-planner`，`import_only`，activation environment 为空，管理器不得激活 |
+| 其他 bundle | 各自的状态、环境变量与 host 范围不受 cascade 停用影响 |
+| `implementation[].status` | 未具备三项验收证据的载体保持 `import_only` |
+| `activation.environment` | enable 时注入的真实值，不是说明文本 |
+| `host.version_range` | 保持有界的宿主声明，不得写 `>=0`；范围与验证域见 release.md |
+| `protocols[].version_range` | 四项 split-batch 提案协议为 `null`，不是宿主已实现的独立版本化接口 |
 
-manifest 与 entry point 打包完整性由构建检查保证,流程见 [release.md](release.md)。
+planner 是纯规划与预检，不执行 split-batch，不改变宿主行为。
+运行时接入仍依赖 `HOST_CONTRACT.md` 中的 runtime-key、split-context、graph-pool、
+split-executor 提案，不得通过翻转 manifest 状态绕过。
 
-## 4. default-off 的双层保证
+## 4. 门控与执行适配
 
-1. **门控层**:所有 env 开关默认缺省,`load()` 与被 patch 方法首行检查
-   gate,未开启时逐字委托原实现——宿主行为 bit-identical(README 有验证证据)。
-2. **bundle 层**:bundle 的 cascade carrier 虽为 `active`,但 `enable` 只是
-   允许 manager 注入 `activation.environment`;不 enable 则什么都不注入,
-   即使用户手工装了 wheel,不改 env 也零差异。
+- 各现有插件保留自己的环境门控与回退语义，不新增全局开关。
+- `aot-cache-guard` 保持既有默认开、可显式关闭的前置修复语义；其他开关
+  以支持矩阵为准，不把整个包笼统描述为所有能力默认关闭。
+- 算子选择只能在已验证的 shape、dtype、layout、phase 和 state 语义范围内执行。
+- 不支持的输入优先在执行前回原生路径；有状态算子不得在部分修改状态后无恢复地重试。
+- 现有 monkeypatch 面以 `HOST_CONTRACT.md` 为准；宿主升级须核对参数与调用约定，
+  不以符号存在替代兼容性验证。
+- GDN opaque core 内部子图不可见时，不注册不可达的外部融合；tier-2 接缝独立交付。
 
-附加互斥:任何 microbatching(`use_ubatching`: DBO 或 `ubatch_size>1`)下
-强制回落标准路径,与官方 core gate 对齐。
+## 5. 算子实现与证据
 
-## 5. monkeypatch 面(弱契约,重点维护区)
-
-本壳对宿主的实际控制面 = 以下方法/对象的运行时包装(权威清单与约束见
-[HOST_CONTRACT.md](../HOST_CONTRACT.md)):
-
-- `vllm.v1.cudagraph_dispatcher.add_cudagraph_key` / `dispatch`
-- Runner 私有方法:`_capture_cudagraphs`、`_warmup_and_capture`、
-  `_determine_batch_execution_and_padding`、`_model_forward`、
-  `_update_full_graph_params_if_needed`
-- vllm-ascend:`update_full_graph_params` / `get_graph_params` / `GraphParams`
-- `ACLGraphWrapper` variant-entry 侧表(按标准 `BatchDescriptor` 键)
-- `ACLGraphWrapper._updatable_graph_replay`(**只在新图重放机制的宿主上存在**;插件在宿主
-  重放**之前**做 cascade 重参数化,旧宿主自动 no-op —— 机理见 [pitfalls.md](pitfalls.md) §2.4)
-- active runner 的 `load_model`(D4 `gate-fp32` 与 F2 迁移载体 `gdn-merge-inproj`
-  都只包这一个方法,各自幂等标记 + 各自 `uninstall()`;后者当前是 **fail-closed**,
-  见 HOST_CONTRACT.md 的 GDN 段)
-- **提案补丁**（非插件入口）：`W1R-GMM` 的 `tuning_config` / counts dump
-  只改宿主 `routed_experts.apply_gmm1/apply_gmm2` 两处调用，承载目录
-  `host-proposals/W1R-gmm-tuning-config/`，见 HOST_CONTRACT.md 末节
-
-`gdn-merge-inproj`(`gdn_merge_inproj_plugin.py`)是已验收 F2(加载期
-`in_proj_ba`→`in_proj_qkvz` 权重拼接)从运行树补丁**迁移**到插件库的载体:加载期权重转换
-已实现且有 CPU 单测,但宿主 forward 没有可安全消费合并权重的 seam,故载体 default-off 且
-**拒绝改写任何权重**(fail-closed,一条 warning;blocker 见 HOST_CONTRACT.md)。其性能数字
-**必须**在当前口径 `mmlu-pro-eval-traffic` 上重新 L4 验收,已验收的 F2 数字属于运行树补丁,
-不随迁移继承。
-
-这是与 bidkv 类"宿主主动调插件"的 typed contract 最大的不同:**宿主没有
-给我们的 seam,契约靠我们单方面遵守 + `host.version_range` 钉死**。宿主
-升级时必须按 [release.md](release.md) 第 4 节逐项核对签名。
-
-## 6. 与 kernel 库的边界
-
-- **形态边界(2026-10-13 明确)**:CCE / Ascend C / CATLASS(编译成 `.so`)→
-  仓库外 `ascend_kernel` wheel;**Triton / 纯 Python kernel → 本仓 default-off
-  载体**(先例 W3.1 `fi_gelu`、`fi_sampling/kernels.py`),`triton` lazy import、
-  关闭时零 import。不得把 Triton 塞进 kernel 库,也不得改宿主只读的
-  `vllm_ascend/ops/triton/`。
-- 调用面只有 `torch.ops.npu.fa_fp32_stage1` / `torch.ops.npu.lse_merge`
-  (`import ascend_kernel` 即注册);wheel 是软依赖,仅在 `[kernels]` extra
-  声明,基础依赖不含。
-- wheel 缺失/注册失败 → cascade 功能**整体自动禁用**(fail-open 到标准
-  full-KV 路径,单条 warning,`load()` 不抛错)。守卫点:`load()` 探针
-  (`_probe_kernel_wheel`)、eager gate(`_use_cascade_attention`)、graph
-  twin capture(`cascade_runner_patch._cascade_wheel_ready`)、gate bench
-  子进程(`cascade_gate_self` 导入守卫,exit 3 → gate neutral)。
-- kernel 侧的兼容四元组(平台 tag / PyABI / torch_npu / CANN)、链接纪律、
-  已知危害,见 kernel 仓库 README §4-§5(工作区
-  `ops/kernels/ascend-kernel/`),本仓库不重复维护。
+- Python / Triton 载体在本仓；Triton lazy import，关闭时不引入设备实现。
+- CCE / Ascend C / CATLASS 等编译型实现独立交付，不在本仓增加 C/C++ 构建。
+  独立实现不得反向依赖插件壳或 vLLM 内部对象。
+- `op_selector.py` 是 CPU 可测的选择骨架，尚未接线真实算子路径；不能将其存在
+  当作 Backend 已集成。接口见 `design/operator-dispatch.md`。
+- 正确性与性能声明必须绑定形状事实、权重标签、宿主版本及 cohort，
+  不继承归档 cascade 或其他接入方式的验收结论。
+- 自动注册隔离探针为 `tools/probe_cascade_retirement.py`；只验证已安装 wheel 的
+  元数据与关闭态导入边界，不替代 NPU 起服、L3 数值、graph replay 或性能验收。

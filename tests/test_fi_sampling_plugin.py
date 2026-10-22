@@ -38,6 +38,9 @@ from _device_stack import torch  # noqa: F401  -- torch present, or skip
 from vllm_ascend_split_batch import fi_sampling_plugin as plugin
 from vllm_ascend_split_batch import fi_sampling_route as route
 
+# 探针链到 /vllm-workspace 运行树(子进程 import 链), CPU CI 收敛 deselect。
+pytestmark = pytest.mark.host_tree
+
 ENV_KEYS = (
     plugin.ENV_ENABLE,
     plugin.ENV_SEED,

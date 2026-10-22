@@ -339,7 +339,7 @@ def test_enabled_reads_the_master_gate(monkeypatch, selector):
 
 
 def test_select_does_not_consult_the_master_gate(monkeypatch, selector):
-    """The runtime wiring owns the gate, exactly like cascade_gate."""
+    """The runtime wiring owns the gate."""
     monkeypatch.setenv(os_mod.ENV_ENABLE, "0")
     selector.register(_cand("kernel", cost=1.0))
     assert selector.select(CTX) == "kernel"

@@ -11,25 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Import guard for the tests that need the Ascend device stack.
-
-The suite targets the NPU host, where ``torch`` / ``torch_npu`` / ``vllm-ascend``
-are importable.  On a plain CPU runner (the org CI job installs only
-``.[test]``) they are not -- and pytest >= 8.2 **re-raises** an ``ImportError``
-raised *inside* an importable module instead of skipping it, so importing a
-carrier module there is a collection ERROR, not a skip:
-
-    ERROR tests/test_cascade_plugin.py - ImportError: ... torch ...
-
-Importing this module first turns that into a clean, visible skip:
-
-    import _device_stack  # noqa: F401  -- device stack present, or skip
-    from vllm_ascend_split_batch import cascade_plugin
-
-Objects needed by the importing test can be bound directly
-(``from _device_stack import torch, torch_npu``).  On the NPU host all three
-imports succeed, so this module changes nothing there.
-"""
+"""Skip device-stack tests when required packages are unavailable."""
 
 import importlib
 

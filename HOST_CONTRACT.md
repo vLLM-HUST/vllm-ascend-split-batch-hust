@@ -1,5 +1,16 @@
 # Split-batch host contract proposal
 
+## Cascade 接入边界
+
+- 不发布 `cascade-attention` general plugin，不注入 cascade 环境变量。
+- `org.vllm-hust.split-batch-full-graph` 仅保留 `import_only` planner，管理器不得激活。
+- 不声明 `[kernels]` extra，不依赖或自动安装外部 cascade kernel wheel。
+- cascade 实现模块、Runner 包装、图孪生、gate 子进程和专属测试已删除；历史证据与只读溯源不属于可执行插件源码。
+- 其余插件的入口、门控、host 版本范围、宿主只读及禁止 platform plugin 的约束不变。
+- 升级须重新安装本轮构建产物并重启 worker/重新捕获图；不支持卸载入口后热撤销既有包装。
+- 回滚本轮仅恢复源码；上轮已停用的注册入口和外部依赖不自动恢复。安装回滚产物后须重启并重新捕获图，重新启用另行验证。
+
+
 The extracted planner is pure and default-off. Runtime activation requires:
 
 1. `vllm.graph.runtime-key.v1`: validated, bounded opaque graph metadata;
@@ -27,75 +38,53 @@ core cannot be matched internally by an outer FX rule. Layer-level replacement
 must not disguise a copied whole-forward implementation as operator registration.
 Registration and release gates are defined in `docs/release.md`.
 
-## Cascade attention components (implemented, default-off)
+## fi_gelu component (default-off, registered OOT provider)
 
-The cascade plugin (`cascade_plugin.py`, `cascade_graph_plugin.py`,
-`cascade_runner_patch.py`) rides ONLY the official public surface:
+- Loader: existing `vllm.general_plugins` entry `fi-gelu`; exact enable token
+  `VLLM_HUST_FI_GELU=1`. Disabled loading/installing imports no host/device stack.
+- Execution: `CustomOp.register_oot(name="GeluAndMul")`; `CustomOp.__new__` reads
+  the class-name key when the host constructs `GeluAndMul`. Only the plugin
+  subclass defines the adapter `forward_oot`; the host class is unchanged.
+- `register_oot` sets the provider's `name` to the class-name registry key.
+  The provider must restore its own `name` to the host's `gelu_and_mul` so that
+  `custom_ops` all/none and `+gelu_and_mul` / `-gelu_and_mul` retain their semantics.
+- Register before the first activation lookup/model construction; host factories
+  (`LazyDict`, Gemma's cached activation helper) can retain earlier instances.
+  The inspected model callsite is `GemmaMLP.__init__` → `_get_gemma_act_fn`
+  → `GeluAndMul`; its forward calls `self.act_fn(gate_up)`.
+  Missing host/API/registration or an occupied key leaves the existing provider
+  untouched. Kernel/input fallback delegates to the original host `forward_oot`.
+- `uninstall()` deletes only the still-owned registry entry; no public unregister
+  method exists in the inspected host. Future construction returns to the host;
+  existing instances remain bound. Production rollback requires restart/recapture.
+- Upgrade gate: verify the constructor lookup, registration duplicate guard,
+  dispatch, configuration name and Ascend registration list. A future Ascend
+  `GeluAndMul` provider requires re-audit, not overwrite or loader monkeypatch.
+- `tools/probe_gelu_device.py` is the on-device gate runner (real host import,
+  real registration/construction dispatch, numeric gate, ACL graph replay,
+  fallback delegation, directional L0 pair). It requires a working NPU stack.
+- `tools/probe_gelu_registration.py` executes the unmodified host class
+  definitions with real CPU PyTorch, controlled config/OOT platform and a stub
+  kernel. It proves the constructor → host forward → adapter path in this
+  harness, not normal host import, worker startup or device execution.
+  NPU gates remain in `tests/test_npu_w31_gelu_plugin.py`.
 
-- `vllm.general_plugins` entry point (`load()`).
-- `vllm.v1.cudagraph_dispatcher.add_cudagraph_key` / `dispatch` for graph keys.
-- Runner methods `_capture_cudagraphs`, `_warmup_and_capture`,
-  `_determine_batch_execution_and_padding`, `_model_forward`,
-  `_update_full_graph_params_if_needed` (monkeypatched, env-gated).
-- vllm-ascend `update_full_graph_params` / `get_graph_params` /
-  `GraphParams` for capture/replay parameter plumbing.
-- `ACLGraphWrapper` variant-entry table: the cascade twin graph is stored in a
-  per-instance side table keyed by the SAME standard `BatchDescriptor`
-  (the official frozen descriptor has no cascade field; the table is swapped
-  in for the duration of a cascade capture/replay call).
+### Remaining-plugin registration migration boundaries
 
-Default-off semantics: with `VLLM_ASCEND_ENABLE_CASCADE_DECODE` unset the
-patched callables delegate to the originals unchanged. `BatchDescriptor` and
-all other host dataclasses are never modified.
+| Plugin | Existing coupling | Existing-interface assessment |
+|---|---|---|
+| fi-gelu | activation class method | OOT constructor lookup is reachable; use `register_oot` on an unoccupied key |
+| fi-sampling | sampler module class binding | `TopKTopPSampler` inherits `nn.Module`, not `CustomOp`; its constructor does not consume the OOT registry |
+| rope-fix | occupied OOT entries plus registration wrapper/rebinding | Missing Llama3 key may use registration independently; replacing existing Ascend providers cannot use duplicate-rejecting `register_oot` directly |
+| fia-demask | global torch_npu operation proxies | Attention Backend is a broader boundary; metadata/workspace/graph parity must be demonstrated before replacing the proxy |
+| mlp-chunk | model-specific MLP forward | Not a narrow registered CustomOp; whole-model registration is not an equivalent adapter |
+| gate-fp32 | Runner load_model wrapper and weight cache | Load lifecycle, not operator dispatch; a worker subclass needs explicit deployment/composition and callsite validation |
+| gdn-merge-inproj | Runner load_model wrapper | No proven merged-weight forward consumer; retain fail-closed behavior, registration alone cannot repair reachability |
+| aot-cache-guard | compiler method wrapper | Compiler-cache repair, not a compute backend; retain its existing default-on semantics |
+| zerocost-wiring | AST-rewritten forward, FIA adaptor and RoPE cache helpers | Multiple callsites and side effects; no one-to-one narrow registry migration demonstrated |
 
-### Anchor map on the current baseline (parameter-level, corrected 2026-09-09)
-
-Host = vllm-hust v1 (`0.28.1.post1.dev143+gf18cf803c`) + vllm-ascend-hust
-main (`0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`), CANN 9.1.0.
-
-> **Correction (2026-09-09, post-review).** The first version of this table
-> checked symbol *existence* only and asserted "wrappers forward via `*args`".
-> That assertion was **false**, and it hid four blocking signature drifts
-> (D1–D4 below) — exactly the failure mode `docs/pitfalls.md` §2.1 warns about.
-> Existence is not compatibility: a monkeypatched method must match the host's
-> *parameter list and call convention*. Use the AST audit
-> (`knowledge/evidence/cascade/logs/sig-audit/sig_audit2.py` semantics) before
-> any `host.version_range` change.
-
-| Anchor | Host signature (current) | Plugin wrapper | Status |
-| --- | --- | --- | --- |
-| `_capture_cudagraphs` | `(self, batch_descriptors, cudagraph_runtime_mode, profiler=None)` | was `(self, batch_descriptors, cudagraph_runtime_mode)` | **D1 drift → fixed** |
-| `_update_full_graph_params_if_needed` | `(self, forward_context, num_tokens_padded)` | was called with 3 positional (`+positions`) | **D2 drift → fixed** |
-| `impl_cls.update_graph_params` | `(update_stream, forward_context, num_tokens, vllm_config, speculative_config=None, draft_attn_metadatas=None)` | had extra `num_dcp_pcp_tokens` and forwarded 7 positional | **D3 drift → fixed** |
-| `_model_forward` | `(self, input_ids=None, positions=None, intermediate_tensors=None, inputs_embeds=None, **model_kwargs)`; host calls **keyword-only** | had required leading `num_tokens_padded` | **D4 drift → fixed** |
-| `_determine_batch_execution_and_padding` | 12 params (see host `gpu_model_runner.py:4040`) | identical | OK |
-| `_warmup_and_capture` | `(self, desc, cudagraph_runtime_mode, profile_seq_lens=None, allow_microbatching=False, num_warmups=None, profiler=None)` | not wrapped (called via `orig`) | OK |
-| `AscendTopKTopPSampler` / `AscendSampler` | `vllm_ascend/sample/sampler.py` | subclass replacement | OK |
-| `update_full_graph_params` / `GraphParams` / `get_graph_params` / `ACLGraphWrapper` | `vllm_ascend/compilation/acl_graph.py` (:279/:306/:334/:60) | read-only use | OK |
-| `ACLGraphWrapper._updatable_graph_replay` (**只在有新机制的被测宿主上存在**;基线 `74f0c0a27` 无此方法) | `vllm_ascend/compilation/acl_graph.py:304` 起;触发条件 `runtime_mode == FULL and use_updatable_graph(self.attn_backend)`(`:297`)。配套:`vllm_ascend/compilation/updatable_graph.py` 的 `UpdatableGraph` 与 `vllm_ascend/utils.py:1773` 的 `use_updatable_graph` —— **旧基线三者在树里都不存在** | 包装该方法,在**宿主重放之前**做 cascade 重参数化(见 `cascade_graph_plugin._wrap_updatable_graph_replay`);特征探测,旧宿主自动 no-op | **新增接缝(2026-09-27)**,机制与顺序约束见 `docs/pitfalls.md` §2.4 |
-| `BatchDescriptor` | `vllm/forward_context.py` | unchanged | OK |
-| `spec_decode` / `spec_decode.ngram_proposer` / `eplb.core.policy.policy_factory` | present (needs `scipy` + `decorator`) | shims | OK |
-
-**Design rule this establishes**: a wrapper that raises out of a patched host
-method kills the engine, which violates the documented fail-open contract. All
-cascade wrappers must (a) match the host call convention and (b) delegate to the
-original on any internal failure with a single warning.
-
-**Carrier status (2026-09-11)**: the two cascade carriers
-(`cascade_plugin:load` / `cascade_graph_plugin:install`) are `active`; the
-planner keeps `import_only` (no acceptance evidence, review F7). The D1–D4
-signature drifts were fixed and the three acceptance evidences were re-run on
-this pinned baseline: default-off smoke PASS
-(`EVIDENCE.md` §1), real-model correctness 6/64 like-for-like
-(`section2-correctness.md`), performance/gate margin closed
-(`section3-performance.md`). release.md §3 enablement verification then
-passed on the real model (`knowledge/evidence/cascade/section4-active-enablement.md`):
-`extension check` compatible+configured, `run` gate proof
-`gate=1, graph_gate=1, kernel_wheel=ok`, cascade twin capture 144/144 with 0
-TypeError, `/health` + functional smoke 200. `host.version_range` stays at the
-exact verified build (`==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`);
-packaging rejects local-version labels in ordered comparators, hence the
-point-`==` form.
+This inventory does not authorize new host patches, platform registration,
+whole-forward copying or changes to other plugins' gates/manifests.
 
 ## fi_sampling component (implemented, default-off)
 
@@ -126,9 +115,11 @@ plugin-side (design note `docs/design/rope-variant-defects.md`). It rides ONLY:
 
 - `vllm.model_executor.custom_op.op_registry_oot` — the out-of-tree registry read
   by `CustomOp.__new__` (:109-128) / `PluggableLayer.__new__` (:47-66) at
-  **instantiation** time. The carrier **replaces the three rope entries**; it never
-  calls `CustomOp.register_oot` itself, because that method asserts
-  `reg_name not in op_registry_oot` (duplicate-name guard).
+  **instantiation** time. The two occupied rope entries are **replaced directly**;
+  the missing defect-① key (`Llama3RotaryEmbedding`) is **created through**
+  `CustomOp.register_oot` (duplicate-name assert = collision guard against a
+  future upstream fix), and the registry key it stamps onto the class is undone
+  so `custom_ops` keeps addressing the base `rotary_embedding` op.
 - `vllm_ascend.utils.register_ascend_customop` — **wrapped** (original first, then
   the overrides), and the wrapper is rebound in every already-imported module
   holding a direct reference, `vllm_ascend.worker.worker` included
@@ -157,7 +148,7 @@ plugin-side (design note `docs/design/rope-variant-defects.md`). It rides ONLY:
 | `AscendYaRNRotaryEmbedding.__init__` (:281-298) | `truncate: bool = False` (vLLM/HF default is `True`) | subclass changing only that default to `True` | defect ③ |
 | `register_ascend_customop` (:688) | early-returns on `_ASCEND_CUSTOMOP_IS_REIGISTERED`; registers every key at :813-814 | wrapped; overrides applied **after** the original returns; rolled back if that eager pass fails | ordering contract |
 | `worker.py:95/150` | `from vllm_ascend.utils import register_ascend_customop` + a call inside `NPUWorker.__init__` | the wrapper is rebound in this module too (an attribute patch alone would miss the live call site) | call-site rebinding |
-| `CustomOp.register_oot` (:339-351) | `assert reg_name not in op_registry_oot` | never called by the carrier (why the entries are replaced instead) | lever justification |
+| `CustomOp.register_oot` (:339-351) | `assert reg_name not in op_registry_oot` | called ONLY for the defect-① key creation (key is absent by defect); occupied keys are replaced directly because the assert refuses re-registration | lever justification |
 
 Host-upgrade checklist item: `tests/test_rope_fix_drift.py` (see
 `docs/release.md` §4). Its reverse assertions fail *by design* when upstream fixes

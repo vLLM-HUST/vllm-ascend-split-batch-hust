@@ -1,5 +1,16 @@
 # 发布流程与检查表
 
+## Cascade 接入边界
+
+- 不发布 `cascade-attention` general plugin，不注入 cascade 环境变量。
+- `org.vllm-hust.split-batch-full-graph` 仅保留 `import_only` planner，管理器不得激活。
+- 不声明 `[kernels]` extra，不依赖或自动安装外部 cascade kernel wheel。
+- cascade 实现模块、Runner 包装、图孪生、gate 子进程和专属测试已删除；历史证据与只读溯源不属于可执行插件源码。
+- 其余插件的入口、门控、host 版本范围、宿主只读及禁止 platform plugin 的约束不变。
+- 升级须重新安装本轮构建产物并重启 worker/重新捕获图；不支持卸载入口后热撤销既有包装。
+- 回滚本轮仅恢复源码；上轮已停用的注册入口和外部依赖不自动恢复。安装回滚产物后须重启并重新捕获图，重新启用另行验证。
+
+
 基于 [bidkv 打包发布指南](https://github.com/vLLM-HUST/vllm-hust-docs/blob/main/operations/bidkv-packaging-and-release-guide.md)
 裁剪,补充本插件特有事项。Bundle ID: `org.vllm-hust.split-batch-full-graph`。
 
@@ -247,6 +258,16 @@ HOST_CONTRACT.md),差异收敛在 `cascade_runner_patch.py`:
       且 `cascade key hit` = 0;旧宿主上出现 `updatable-replay seam absent on this host`
       且 `cascade key hit` > 0。机理与顺序约束见 [pitfalls.md](pitfalls.md) §2.4
 - [ ] `vllm.general_plugins` 加载时机未变
+- [ ] fi_gelu 注册面：`CustomOp.register_oot` 以 `GeluAndMul` 类名建键，
+      `CustomOp.__new__` 实际消费此键；Ascend 注册列表不得新增同名 provider。
+      原宿主类不变，provider 自身保留 `name="gelu_and_mul"`，验证 all/none
+      与 `+gelu_and_mul` / `-gelu_and_mul`；关闭态无重型导入、冲突不覆盖、
+      卸载仅删除自有注册。先跑 `tests/test_fi_gelu_plugin.py`，再跑
+      `tools/probe_gelu_registration.py --core <实际 core 树> --ascend <实际 ascend 树>
+      --output <新证据.json>`（设置 `VLLM_HUST_FI_GELU=1`）。后者是受控依赖下的
+      宿主类源码执行，不是正常宿主 import 或起服验收；还须在 NPU 跑
+      `tests/test_npu_w31_gelu_plugin.py`、L3 + compare 与 light L4。
+      回滚：移除 enable 环境变量并重启 worker/重捕获图；不得承诺实例热切换。
 - [ ] fi_sampling 面:`vllm_ascend.sample.sampler.AscendTopKTopPSampler` 名称与
       `forward_native(logits, generators, k, p)` 签名、`AscendSampler.__init__`
       的构造点、`vllm.envs.VLLM_BATCH_INVARIANT` 与

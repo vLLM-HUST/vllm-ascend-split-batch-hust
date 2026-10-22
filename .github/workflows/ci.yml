@@ -12,7 +12,18 @@ name: Extension CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/evidence/**/*.json'
+      - 'docs/evidence/**/*.txt'
+      - 'docs/evidence/**/*.log'
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/evidence/**/*.json'
+      - 'docs/evidence/**/*.txt'
+      - 'docs/evidence/**/*.log'
+  workflow_dispatch:
 
 # The red-leg diagnostic step force-pushes `ci-diag-<python>` branches.  The
 # default token is read-only, so that push failed (exit 128) on every red leg of

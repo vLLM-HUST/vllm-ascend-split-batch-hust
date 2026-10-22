@@ -2,14 +2,9 @@
 
 Owner-led research carrier for split-batch planning, dual-stream replay, and full-graph parallel execution. Core owns graph lifecycle seams; this repository owns policy, runners, validation, and evidence.
 
-**Status: default-off.** Two independently gated capabilities are installed:
-
-1. **Split-batch dual-pad planner** — pure planning + prechecks (`import_only`,
-   no vLLM behavior change without the host contract).
-2. **Cascade two-stage decode** (`vllm.general_plugins` entry
-   `cascade-attention`) — eager + graph-mode two-stage cascade attention for
-   vllm-ascend, patched entirely from the plugin; official vllm /
-   vllm-ascend sources are NOT modified.
+**Status: cascade retired from automatic integration.** The split-batch planner
+is an inert `import_only` descriptor. The remaining general plugins retain their
+existing host bounds, activation gates and registration contracts.
 
 Technical ownership belongs to @Raing5Days, @ilnnfover. Source extraction must
 preserve exact authorship, license, tests, constraints, and evidence before
@@ -23,24 +18,27 @@ See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
 pip install vllm-ascend-split-batch
 ```
 
-Published on PyPI (`0.1.3`; wheel + sdist, sha256 and PEP 740 attestations on the
-project page). Release receipt: [docs/release.md](docs/release.md) §11.9. This version widens
-`host.version_range` from a point pin to the bounded window
-`>=0.25.1rc2.dev125,<0.25.2` (rationale §0.3) and carries the UpdatableGraph replay fix;
-it was verified on the published bytes, not only on the work tree.
+The published PyPI `0.1.3` release predates cascade source removal. Installing
+that published release does not apply this checkout's deletion. Build and install
+this checkout's wheel for the current code; publication requires separate authorization.
+Historical release receipt: [docs/release.md](docs/release.md) §11.9.
 
-**What you get:** 8 `vllm.general_plugins` carriers and 4 extension bundles,
-all **default-off** — installing changes nothing until you enable a capability
-via its env var (see the table below). Cascade attention additionally needs the
-`ascend_kernel` CCE op wheel, which is **not on any package index** (the
-`kernels` extra pins a version that only exists in the kernel repository, so the
-extra resolves only with `--find-links`):
+**What you get:** 9 `vllm.general_plugins` carriers and 6 extension bundles.
+The root split-batch bundle is planner-only and cannot be activated. There is
+no `cascade-attention` entry point, no cascade environment injection, and no
+`[kernels]` extra or dependency on the external cascade kernel repository.
+Other plugin gates are unchanged; see [docs/support-matrix.md](docs/support-matrix.md).
 
-```bash
-# cascade-only soft dependency; skip it if you do not need the cascade path
-pip install "vllm-ascend-split-batch[kernels]" \
-  --find-links https://github.com/Raing5Days/vllm-hust-cascade-kernel/releases/expanded_assets/v2026.9.26
-```
+Upgrade using a wheel built from this checkout, then restart all engine/worker
+processes and recapture graphs. Removing registration cannot undo wrappers in an
+already running process. Do not reuse an older installed wheel's entry-point
+metadata. External kernel packages are not automatically uninstalled.
+
+Cascade implementation modules and their dedicated tests are removed. Historical
+evidence and provenance remain; no cascade installer can be imported from the package.
+Rollback: revert the source-removal commit, rebuild/reinstall, and restart/recapture.
+This restores source only; the earlier entry-point/dependency retirement remains.
+Re-enabling cascade requires restoring those registrations and separate validation.
 
 ⚠️ **Host pin.** The manifest pins one verified `vllm-ascend` build
 (`host.version_range`; see [docs/release.md](docs/release.md) §0.1). On any other
@@ -74,35 +72,45 @@ Acceptance evidence: [host-proposals/GDN-qkv-norm/validation/](https://github.co
 Registration decision: `host-proposals/GDN-qkv-norm/registration-closure.json`.
 Delivery gates: [docs/release.md](docs/release.md#算子-bundle-最短交付路径).
 
-## Cascade attention plugin (default-off)
+## Removed cascade capability
 
-Entry point: `vllm.general_plugins` ->
-`cascade-attention = vllm_ascend_split_batch.cascade_plugin:load`.
+Cascade eager/graph integration, Runner wrappers and adaptive-gate subprocess
+are absent from the package. Neither manual imports nor old cascade environment
+variables can restore them. Historical material remains under `docs/evidence/`
+and `provenance/`, not as an executable plugin implementation.
 
-Environment gates (all default off):
+Claim boundaries remain in [docs/cohort-and-ownership.md](docs/cohort-and-ownership.md).
+The inert planner's speculative-decoding guards are unchanged.
 
-| Variable | Meaning |
-|---|---|
-| `VLLM_ASCEND_ENABLE_CASCADE_DECODE=1` | enable the two-stage cascade decode |
-| `VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1` | additionally enable the graph-mode (aclgraph) cascade twin |
-| `VLLM_ASCEND_CASCADE_MIN_PREFIX` (8192) | min shared prefix tokens to trigger |
-| `VLLM_ASCEND_CASCADE_MIN_REQS` (32) | min batch size to trigger |
-| `VLLM_ASCEND_CASCADE_PRECISION` | `bf16` (Tier-0, default) or `fp32` (Tier-1, eager-only) |
-| `VLLM_ASCEND_CASCADE_STRICT=1` | force the standard full-KV path (bit-exact reference) |
-| `VLLM_ASCEND_CASCADE_TRACE=1` | per-step plugin trace to stdout |
-| `VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE` (1) | skip the stage-1 graph re-bind when its inputs are step-invariant (0 restores always-rebind) |
+## fi_gelu plugin (default-off, OOT registration)
 
-With every gate unset the patched methods are no-ops and the serving path is
-bit-identical to stock vllm-ascend. On load the plugin emits one INFO line,
-`cascade plugin loaded (gate=0, graph_gate=0, kernel_wheel=not-probed)`, so a
-default-off serve log proves `load()` actually ran (vLLM otherwise swallows
-general-plugin load errors). **Disabled discovery touches nothing else**: with
-`VLLM_ASCEND_ENABLE_CASCADE_DECODE` unset the plugin injects no env entries,
-imports no host module, installs no fail-open shim, imports no kernel wheel and
-replaces no attention/graph entry (contract: `docs/release.md` §6).
+`fi-gelu` uses `vllm.general_plugins` for loading and
+`CustomOp.register_oot(name="GeluAndMul")` for execution selection. Enable with
+`VLLM_HUST_FI_GELU=1` before the first activation lookup/model construction;
+host factories may cache instances. The original host class is not
+modified; its constructor selects the provider subclass for new instances.
+The provider retains the host's `gelu_and_mul` compilation configuration name.
 
-## Speculative decoding boundary
+Only NPU bf16 inputs with at least two dimensions, positive even last dimension
+and `approximate="none"` use the existing exact-erf kernel API. Other inputs and
+kernel failures delegate to the host. An occupied OOT key is never overwritten;
+unavailable registration or kernel dependencies leave the host path in place.
+Unset the environment variable and restart workers/recapture graphs to disable.
+`fi_gelu_plugin.uninstall()` removes only its own registration for future
+instances; it does not change existing instances or captured graphs.
 
+
+Registration checks and remaining-plugin migration boundaries are in
+[HOST_CONTRACT.md](HOST_CONTRACT.md). Device gates (real host import, real
+constructor dispatch, kernel numeric gate, ACL graph replay bit-exactness,
+fallback delegation) are closed by `tools/probe_gelu_device.py` and
+`tests/test_npu_w31_gelu_plugin.py`; results:
+[gelu-device-gate-20261020.json](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/411e14c5a67dac52b3bba51ac3f25e4c593fcc28/archive/dev-hub-20261022/split-batch-direction/manifest.json)
+(frozen custody original; see docs/evidence/README.md). The op-level microbench in that
+evidence is directional only (the fused kernel measured slower than the host
+native chain at the probed standalone shapes), so default-off remains correct.
+Serving-level L3 + compare and light L4 remain pending; historical kernel
+evidence does not validate this integration.
 Cascade admits **one query row per request**. The two-stage path flattens the
 shared prefix once and re-derives the per-request suffix from the query-row
 count, so MTP verification and chunked prefill (which feed `k + 1` rows) are
@@ -162,6 +170,7 @@ model is a **performance stand-in** and must not be compared with the real
 `Qwen2.5-14B-Instruct` on behavior. This whole set is **historical (Qwen2.5 /
 0.25)** and must not be crossed with the current 0.28/Qwen3.5 baseline.
 
+
 ## fi_sampling plugin (default-off, evidence-only)
 
 Entry point: `vllm.general_plugins` ->
@@ -199,20 +208,16 @@ qualification; routing guards and the historical cohort boundary above remain.
 
 Extension ID: `org.vllm-hust.split-batch-full-graph`
 
-The Manifest 0.2 descriptor marks the two cascade carriers `active` (the
-planner stays `import_only`): `vllm-hust-ext extension enable` injects the
-`activation.environment` flags, and installation alone changes no vLLM
-behavior because the cascade capability is env-gated at runtime. Declared
-host range: **`vllm-ascend >=0.25.1rc2.dev125,<0.25.2`** — a bounded
-*compatibility window*, not a point pin: both endpoints were verified on
-910B2 hardware (`dev125` historically; `dev605` = `fbe4911bb` on 2026-09-27),
-and a failure inside the window is a host-side finding by design (rationale
-and the core-pairing caveat: `docs/release.md` §0.1/§0.3).
+The root descriptor contains only the `import_only` planner and no activation
+environment. Other bundles retain their own activation status and host bounds.
+The bounded host range remains `>=0.25.1rc2.dev125,<0.25.2`; see
+[docs/release.md](docs/release.md) for its verified scope.
 
 ```bash
 python -m pip install -e ".[test]"
 vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
-pytest -q && ruff check .
+pytest -q tests/test_planner.py
+ruff check src/vllm_ascend_split_batch/planner.py tests/test_planner.py
 ```
 
 ⚠️ **`vllm-hust-ext` is not on PyPI** (see the org's own note on
@@ -236,62 +241,48 @@ this repository only consumes it.
 python -m pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extension-manager.git@main"
 ```
 
-The `kernels` extra is the one end users need, and it is
-resolvable (`--find-links` to the kernel release, see "Install" above).
-
-## Kernel wheel dependency (soft, fail-open)
-
-Both cascade tiers consume the `ascend_kernel` CCE op wheel
-(`fa_fp32_stage1` / `lse_merge`) as a SOFT dependency: it is declared only in
-the `kernels` extra — base dependencies stay empty. When the wheel is absent
-or its ops fail to register, the whole cascade feature is disabled
-(fail-open to the standard full-KV path) with a single warning; the
-default-off semantics are unchanged. Validated pairing:
-
-| plugin | kernel wheel | torch_npu | CANN |
-|---|---|---|---|
-| `0.1.3` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
-| `0.1.2` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
-| `0.1.1` | `ascend-kernel==2026.9.26` | `2.13.0rc1` | `9.1.0` |
-
-The kernel wheel is not on any package index (it is platform-tagged and must be
-rebuilt whenever the CANN / torch_npu / soc tuple changes), so it ships as a
-**GitHub Release asset**:
-
-```bash
-pip install "vllm-ascend-split-batch[kernels]" \
-  --find-links https://github.com/Raing5Days/vllm-hust-cascade-kernel/releases/expanded_assets/v2026.9.26
-python -c "import ascend_kernel, torch; assert hasattr(torch.ops.npu, 'fa_fp32_stage1')"
-```
-
-Verify the installed kernel build by its library fingerprint (the kernel repo's
-rule is "read the md5, not the file name"): `libascend_kernel.so` must hash to
-`ca8de2d70fe0504d` for `2026.9.26`. Building it from source is documented in the
-kernel repo README (`./build.sh`, ~2 min).
-
-Compat tuple & red lines for the kernel side live in the kernel repo README
-§4-§5. After bumping the kernel wheel: reinstall, then rerun the plugin
-smoke (see [docs/release.md](docs/release.md) §2).
-
 ## Operator validation workflow
 
 The repository owns the executable ladder at `tools/bench-ladder.sh`; `opt bench`
 dispatches to this checked-in source rather than mutating archived evidence scripts.
-The enforced cadence is:
+Select checks by change type using [the development contract](docs/agent-guide.md#2-开发工作流).
+Documentation/results/pointers require format, reference, hash and Git-scope checks,
+not model smoke or full pytest. Development runs affected CPU tests and static
+checks; full pytest needs an explicit shared-impact, dependency/packaging,
+release/merge or insufficient-targeted-coverage reason. Share full-suite results
+for the same relevant source snapshot and environment across parallel sessions;
+evidence, pointer, commit-hash or wording updates alone do not invalidate them.
+Release admission remains unchanged.
 
-1. static checks and CPU tests;
-2. `opt bench serve`, then `opt bench screen <unique-tag>` on a **plain** server
-   (`L1×3 + L2×3 + L3×1`), producing `screen.json`;
-3. after recording the candidate as `ready`/`validating`, run a bounded light L4
-   with `--trace-tier light --screen-report <screen.json>`;
-4. use `--trace-tier deep` only with `--collection-reason mechanism-gap`;
-5. parse offline and slim immediately after delivery.
+For operator/weight/execution-order changes:
+
+1. affected static checks and CPU tests, then necessary L0;
+2. plain L3 + `opt bench compare`; numerical failure blocks promotion independently;
+3. once `ready`/`validating`, bounded light L4 through the registered operator gate
+   (`--candidate <ID> --trace-tier light --collection-reason candidate-ab
+   --gap <question> --reuse-evidence <path>`); see `/root/opt-ops/AGENTS.md`;
+4. deep only with `--collection-reason mechanism-gap` for an explicit mechanism gap;
+5. parse offline and slim after delivery; never recollect historical data for cadence.
+
+L1/L2 screen is explicit for an independent end-to-end question, not an operator
+prerequisite. Graph/system collection retains the complete plain screen gate
+(`L1×3 + L2×3 + L3×1`, then `--screen-report <screen.json>`); never relabel a route
+to bypass it. Service smoke and package-loading smoke each need an independent
+question; without packaging/registration/loading changes, do not repeat loading
+smoke. Flow-only repairs do not rerun model L3 unless loading, execution branches,
+input/output protocol or comparison semantics change. `opt bench run` is an
+explicit end-to-end convenience command, not a per-commit gate.
 
 `light` defaults to the host's `max_iterations=32` bounded window, disables stack/memory/shape collection,
 stamps the capture scope into the opstat, and removes profiler databases after the
 CSV/all-kernel result is delivered. `deep` defaults to a full window and retains
 the shape database. Plain and profiler-enabled servers cannot be reused across
 modes; stop the active server before switching.
+
+`opt bench serve` requires its captured startup PID to remain live and match the
+PID file before accepting `/health` and publishing the serve mode. A dead or
+replaced PID fails immediately, even if another server is healthy. Standalone
+`opt bench wait [timeout_s]` remains an endpoint-only readiness check.
 
 ### Carrier status is recorded, not gated
 
@@ -339,6 +330,23 @@ it shows up whether or not the carrier is installed, so it is recorded separatel
 fail-closed (absence, an entry-point enumeration error, missing log, or a missing env snapshot
 records `unknown`/`null`/`false`) and never changes `screen`/`serve` exit codes; only
 cross-window absolute comparisons require two windows to share a carrier state.
+
+## CommTrace stop safety
+
+`tools/collect_comm_mechanism.sh` requires an isolated CPU-only native profiler
+stop/finalize preflight before starting vLLM. A crash, timeout, or incomplete
+preflight exits with code 3 and retains its evidence; shapes, stack, modules,
+FULL graph, and `LADDER_SLIM=0` must not be disabled to pass it.
+
+The optional point-pinned torch_npu source repair and apply/rollback commands are
+in [`host-proposals/comm-trace-stop-gil/proposal_meta.json`](host-proposals/comm-trace-stop-gil/proposal_meta.json).
+Source patching and the isolated native clear regression are not proof that the
+installed library is repaired. Preflight must use the same Python interpreter
+as `tools/bench-ladder.sh` serve, not the offline parsing environment. The selected
+runtime library must pass
+`/usr/local/python3.12.13/bin/python tools/check_comm_profiler_stop.py --output <new-evidence-directory>`;
+a CPU preflight pass does not accept dual-rank pairing, callsites, graph device
+boundaries, numerical correctness, or performance.
 
 ## Canonical MOD metadata
 

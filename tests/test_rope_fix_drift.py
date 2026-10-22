@@ -367,7 +367,15 @@ def test_yarn_truncate_default_is_still_false() -> None:
 
 # ------------------------------------------------- host-interface assertions
 def _host_rope():
-    importlib.import_module("vllm_ascend.ops")
+    try:
+        importlib.import_module("vllm_ascend.ops")
+    except Exception as error:
+        # 无卡宿主上 vllm_ascend.ops 的导入链会在 triton 取 arch 时炸（SystemError），
+        # 与 tests/_device_stack.py 同口径：转成显式 skip，不冒充"漂移"。
+        pytest.skip(
+            reason="the live host signatures need the Ascend device stack: "
+            f"{type(error).__name__}: {error}",
+        )
     return pytest.importorskip(
         "vllm_ascend.ops.rotary_embedding",
         reason="the live host signatures need the full vllm-ascend stack",

@@ -1,12 +1,10 @@
 # AGENTS.md — vllm-ascend-split-batch-hust
 
-vllm-ascend 宿主的 default-off 插件壳:cascade 两段式 decode(eager+图模式)
-与 split-batch 规划契约。
+vllm-ascend 宿主的插件壳与 split-batch 规划契约；cascade 实现源码已删除，仅保留历史证据与只读溯源。
 
 **算子落点按形态分(2026-10-13 明确)**:
-- **CCE / Ascend C / CATLASS(编译成 `.so`)**:在**仓库外** `ascend_kernel`
-  wheel(`vllm-hust-cascade-kernel`),本壳经 `[kernels]` extra 单向软依赖,
-  不在本仓引入 C/C++ kernel 构建。
+- **CCE / Ascend C / CATLASS(编译成 `.so`)**:在**仓库外**独立 wheel；本仓不引入 C/C++ kernel 构建，
+  不声明 cascade 的 `[kernels]` extra 或外部 kernel wheel 依赖。
 - **Triton / 纯 Python kernel 载体**:**在仓内**。形态=default-off 插件,
   靠 `vllm.general_plugins` 入口点注入;`triton` 必须 lazy import(关闭时零
   import)。先例:W3.1 `fi_gelu`(gelu_and_mul triton 融合)、
@@ -50,6 +48,7 @@ vllm-ascend 宿主的 default-off 插件壳:cascade 两段式 decode(eager+图�
 - 最小实现可测后、完整验证或明确阻塞后，各检查一次是否应提交。实现、测试、接入与回滚材料留本仓；结果原件、报告和 trace 统一归档 benchmark，本仓保留固定引用、解析入口和哈希，见 [EVIDENCE.md](EVIDENCE.md)。
 - 数值失败保持 default-off，失败复现和证据同样归档 benchmark；不得将失败项从报告删除，或将局部收益写成已验收。Git 提交与优化验收是两个状态。
 - 先跑测试，再审查 `git diff` 与 staged diff，仅 `git add <本轮明确路径>`。不提交无关 dirty 文件，不改正在执行的脚本。
+
 - commit 后用 `opt delivery --base <起点HEAD> --path <本轮路径> ... --check` 核验；工作台未部署时可用 `python3 tools/operator_delivery.py` 的相同参数。无范围不算通过，push 另需授权及远端 hash 核验。
 - `/root/opt-ops` 的流程修改必须有本仓可校验补丁及测试；运行树仅为部署副本。
 
@@ -57,7 +56,8 @@ vllm-ascend 宿主的 default-off 插件壳:cascade 两段式 decode(eager+图�
 
 ```bash
 cd /vllm-workspace/vllm-ascend-split-batch-hust
-pytest -q && ruff check .        # CPU 层门槛,提交前必过
+pytest -q tests/test_planner.py  # 示例：仅 planner 改动
+ruff check src/vllm_ascend_split_batch/planner.py tests/test_planner.py
 python -m pip install -e ".[test]"
 vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
 ```

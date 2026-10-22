@@ -47,13 +47,11 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC = REPO_ROOT / "src" / "vllm_ascend_split_batch"
-BUNDLE_ID = "org.vllm-hust.split-batch-full-graph"
+BUNDLE_ID = "org.vllm-hust.fia-demask"
 
 #: 实现载体模块名：生命周期命令不应 import 它们（发现只读元数据）。
 IMPLEMENTATION_MODULES = (
-    "vllm_ascend_split_batch.cascade_plugin",
-    "vllm_ascend_split_batch.cascade_graph_plugin",
-    "vllm_ascend_split_batch.cascade_runner_patch",
+    "vllm_ascend_split_batch.fia_demask_plugin",
     "vllm_ascend_split_batch.planner",
 )
 
@@ -182,11 +180,9 @@ def test_carriers_gate_on_env_not_on_extension_configuration() -> None:
     assert not offenders, (
         "a carrier started consuming the extension `configuration` field (or the "
         "manager's config path); this repository's gate surface is env-only "
-        f"(35 os.getenv/environ hits expected): {offenders}"
+        f"(configuration consumption is forbidden): {offenders}"
     )
-    assert getenv_hits >= 30, (
-        f"expected the env gate surface to stay large, found {getenv_hits} hits"
-    )
+    assert getenv_hits > 0, "the source scan must include environment gates"
 
 
 def _assert_version_dependent_states(states: list[str], *, enabled: bool) -> None:

@@ -528,24 +528,7 @@ def _unwrap_callable(obj):
 
 
 def _host_func(func, host_file: str):
-    """Resolve the *host-defined* function behind any number of plugins.
-
-    Other plugins in this bundle wrap the very same host methods: the eager
-    ``cascade_plugin._make_forward_wrapper`` puts a pass-through around the host
-    method, and with ``VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1``
-    ``cascade_graph_plugin.install`` stacks a *second* wrapper on top of it, so
-    the class attribute sits two plugin wrappers deep (the outer wrapper's
-    closure points at the inner wrapper, not at the host file).
-    ``inspect.getsource`` on the class attribute would return the outermost
-    wrapper's source.
-
-    The criterion is therefore "the code object's file is the host file", not
-    "one hop": walk the whole ``__closure__`` graph and require **exactly one**
-    reachable function defined in the host file.  Zero candidates (a moved
-    anchor / a broken chain) and several candidates (an ambiguous chain) both
-    raise, which the caller turns into the documented fail-open rollback -- the
-    host body is never patched on a guess.
-    """
+    """Require exactly one host-defined function in the wrapper closure graph."""
     seen: set = set()
     stack = [_unwrap_callable(func)]
     matches: list = []

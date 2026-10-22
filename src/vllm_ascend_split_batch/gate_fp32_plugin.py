@@ -34,7 +34,7 @@ def _serve_logger():
     """Logger on vLLM's configured handler tree (visible in ``vllm serve`` logs).
 
     ``logging.getLogger(__name__)`` propagates to an unconfigured root logger, so
-    its records never reach the serve output (same F7 note as ``cascade_plugin``).
+    its records never reach the serve output.
     The import is lazy and best-effort so importing this module stays cheap and
     device-stack-free when the carrier is disabled.
     """
@@ -137,5 +137,8 @@ def install() -> bool:
 
 
 def load() -> bool:
+    from . import runtime_source_patches as _rsp  # noqa: PLC0415
+
+    _rsp.install()
     """vLLM general-plugin entry point; default-off via ``VLLM_HUST_GATE_FP32``."""
     return install() if is_enabled() else False

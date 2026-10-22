@@ -158,9 +158,8 @@ def _serve_logger():
     """Logger on vLLM's configured handler tree (visible in ``vllm serve`` logs).
 
     ``logging.getLogger(__name__)`` propagates to an unconfigured root logger, so
-    its records never reach the serve output (same F7 note as ``gate_fp32_plugin``
-    / ``cascade_plugin``).  The import is lazy and best-effort so importing this
-    module stays cheap and device-stack-free when the carrier is disabled.
+    its records never reach the serve output. The import is lazy and best-effort
+    so importing this module stays cheap and device-stack-free when disabled.
     """
     global _SERVE_LOGGER
     if _SERVE_LOGGER is None:

@@ -1,0 +1,71 @@
+{
+ "schema": "opt-ops-tree-seam-assertions.v1",
+ "updated_at": "2026-10-16",
+ "note": "运行树接口面断言表（纯静态：定义点符号 / 调用点文案 两类）。用途: 起服前秒级发现「调用点在新、定义点在旧」或「载体依赖的宿主契约被上游改掉（静默失效）」。tree 默认 /vllm-workspace/vllm-ascend/vllm_ascend。本表在 scripts/（非归档根）→ 可改；改动须同步 L2 证据。",
+ "seams": [
+  {
+   "id": "d5-shared-experts-sp-input",
+   "kind": "symbol",
+   "definer": "ops/fused_moe/shared_experts.py",
+   "symbol": "AscendSharedExperts.prepare_input_before_routed_experts",
+   "consumer": "ops/fused_moe/fused_moe.py",
+   "call_token": ".prepare_input_before_routed_experts(",
+   "why": "2026-10-16 11:53 实际事故: 调用点(fused_moe.py:237, 手工 D5 多流改动)在, 定义点在旧 → Worker AttributeError, 连续 5 次 serve 未就绪约 40min。此条是该事故的回归用例。"
+  },
+  {
+   "id": "w3f2-gdn-inproj-merge",
+   "kind": "symbol",
+   "definer": "ops/gdn.py",
+   "symbol": "AscendGatedDeltaNetAttention.process_weights_after_loading",
+   "consumer": "worker/model_runner_v1.py",
+   "call_token": ".process_weights_after_loading(",
+   "why": "W3F2 GDN in_proj 合并: 运行树补丁在 ops/gdn.py 加类, worker hook 在 model_runner_v1.py 里调它; 两侧任一缺失即起服失败。"
+  },
+  {
+   "id": "husk-plugin-load-model-seam",
+   "kind": "symbol",
+   "definer": "worker/model_runner_v1.py",
+   "symbol": "NPUModelRunner.load_model",
+   "consumer": "/root/vllm-workspace/vllm-ascend-split-batch-hust/src/vllm_ascend_split_batch/gate_fp32_plugin.py",
+   "call_token": "load_model",
+   "why": "husk gate-fp32 载体 wrap 的宿主接缝; 宿主改名即载体 fail-open 静默失效(不报错、收益归零)。"
+  },
+  {
+   "id": "gate-fp32-consumer-contract",
+   "kind": "text",
+   "definer": null,
+   "symbol": null,
+   "consumer": "ops/fused_moe/fused_moe.py",
+   "call_token": "weight_fp32",
+   "why": "静默失效防线: gate-fp32 载体的全部收益依赖宿主消费者仍读 gate.weight_fp32; 上游去掉该读取 → 载体装了但没人读, fail-open 无感知。"
+  },
+  {
+   "id": "husk-rsp-VLLM_HUST_D4_CONV_PACK",
+   "kind": "text",
+   "consumer": "/root/vllm-workspace/vllm-ascend-split-batch-hust/src/vllm_ascend_split_batch/runtime_source_patches.py",
+   "call_token": "VLLM_HUST_D4_CONV_PACK",
+   "note": "C 轮: 变换表在 husk(重灌免疫); 运行树应 stock"
+  },
+  {
+   "id": "husk-rsp-VLLM_HUST_GDN_UNPACK_VIEWS",
+   "kind": "text",
+   "consumer": "/root/vllm-workspace/vllm-ascend-split-batch-hust/src/vllm_ascend_split_batch/runtime_source_patches.py",
+   "call_token": "VLLM_HUST_GDN_UNPACK_VIEWS",
+   "note": "C 轮: 变换表在 husk(重灌免疫); 运行树应 stock"
+  },
+  {
+   "id": "husk-rsp-VLLM_HUST_MOE_INIT_TRITON",
+   "kind": "text",
+   "consumer": "/root/vllm-workspace/vllm-ascend-split-batch-hust/src/vllm_ascend_split_batch/runtime_source_patches.py",
+   "call_token": "VLLM_HUST_MOE_INIT_TRITON",
+   "note": "C 轮: 变换表在 husk(重灌免疫); 运行树应 stock"
+  },
+  {
+   "id": "husk-rsp-VLLM_HUST_NZ_SKIP_GATE",
+   "kind": "text",
+   "consumer": "/root/vllm-workspace/vllm-ascend-split-batch-hust/src/vllm_ascend_split_batch/runtime_source_patches.py",
+   "call_token": "VLLM_HUST_NZ_SKIP_GATE",
+   "note": "C 轮: 变换表在 husk(重灌免疫); 运行树应 stock"
+  }
+ ]
+}

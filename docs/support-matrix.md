@@ -1,5 +1,16 @@
 # 支持矩阵（能力 × 准入条件 × 代码位置）
 
+## Cascade 接入边界
+
+- 不发布 `cascade-attention` general plugin，不注入 cascade 环境变量。
+- `org.vllm-hust.split-batch-full-graph` 仅保留 `import_only` planner，管理器不得激活。
+- 不声明 `[kernels]` extra，不依赖或自动安装外部 cascade kernel wheel。
+- cascade 实现模块、Runner 包装、图孪生、gate 子进程和专属测试已删除；历史证据与只读溯源不属于可执行插件源码。
+- 其余插件的入口、门控、host 版本范围、宿主只读及禁止 platform plugin 的约束不变。
+- 升级须重新安装本轮构建产物并重启 worker/重新捕获图；不支持卸载入口后热撤销既有包装。
+- 回滚本轮仅恢复源码；上轮已停用的注册入口和外部依赖不自动恢复。安装回滚产物后须重启并重新捕获图，重新启用另行验证。
+
+
 > 用途：回答「某个能力在我的配置下到底会不会生效、不生效是因为哪一条」。
 > 每行都给出**判定代码位置**，可直接对照。状态口径：
 > **`active`** = manifest 允许启用且已过启用验证；**`import_only`** = 描述符在、但无验收证据或缺少宿主 seam，
@@ -13,8 +24,8 @@
 | 能力 | bundle / entry point | manifest 状态 | 运行时开关 | 一句话结论 |
 |---|---|---|---|---|
 | dual-pad planner（split-batch 规划） | `org.vllm-hust.split-batch-full-graph` / 无 entry（纯函数 `plan_dual_pad`） | **import_only** | `SplitBatchConfig.enabled` | **不可用**：宿主未提供 `vllm.graph.runtime-key.v1` 等 seam，只有纯逻辑 + 预检 |
-| cascade 两段式 decode（eager） | 同上 / `vllm.general_plugins: cascade-attention` | **active** | `VLLM_ASCEND_ENABLE_CASCADE_DECODE=1` | 可用，受 §2 全部条件约束 |
-| cascade 图孪生（aclgraph） | 同上 / 同一 `load()` 内的 `cascade_graph_plugin.install()` | **active** | 再加 `VLLM_ASCEND_ENABLE_CASCADE_GRAPH=1` | 可用，另需 §3 的图条件 |
+| cascade 两段式 decode（eager） | 无注册入口 | **源码已删除** | 不注入 | 不可导入、不可执行 |
+| cascade 图孪生（aclgraph） | 无注册入口 | **源码已删除** | 不注入 | 不可导入、不可执行 |
 | fia-demask（decode FIA 去冗余掩码） | `org.vllm-hust.fia-demask` / `fia-demask` | **active** | `VLLM_HUST_FIA_DEMASK=1` | 可用；只对"纯 decode + Q_S==1/请求"形态生效 |
 | rope-fix（fork RoPE 三缺陷覆写） | `org.vllm-hust.rope-fix` / `rope-fix` | **import_only** | `VLLM_HUST_ROPE_FIX=1` | 三证据未齐，管理器拒 enable |
 | zerocost-wiring（prefill `.out` + 跳过 cos/sin） | `org.vllm-hust.zerocost-wiring` / `zerocost-wiring` | **active** | `VLLM_HUST_FI_PREFILL_OUT=1`、`VLLM_HUST_SKIP_COS_SIN=1` | 可用 |
@@ -24,8 +35,9 @@
 | aot-cache-guard（AOTAutograd 缓存 guard） | 无 bundle manifest / `aot-cache-guard` | — | **默认开**（`VLLM_HUST_AOT_CACHE_GUARD=0` 关） | 验收前置修复；宿主自修后变 no-op |
 | W1R GMM `tuning_config`（**提案补丁**，非插件 entry） | 无 bundle manifest | **未发布（tier-2 proposal，未提交上游）** | `VLLM_HUST_GMM_TUNING_CONFIG`（默认关） | 只改 `apply_gmm1`/`apply_gmm2` 两处 GMM 的 `tuning_config`；承载目录 `host-proposals/W1R-gmm-tuning-config/`；**单值**（列表被拒）；未设时无设备差异、零 shape/IO/import，但每次 GMM 仍有两次早退 Python 调用（非字节等价） |
 | W1R GMM counts dump（**提案补丁**，非插件 entry） | 无 bundle manifest | **未发布（tier-2 proposal）** | `VLLM_HUST_GMM_COUNTS_DUMP=<path>`（默认关） | 只记录 group_list counts/形状/provenance，不改变输出；capture 内按 `sample_source` 跳过；**dump 产物不是计时产物**；active FULL graph 下 M=128 真实 decode counts **取不到** |
-| fi-gelu / fi-sampling | 无 bundle manifest / `fi-gelu`、`fi-sampling` | — | `VLLM_HUST_FI_GELU`、`VLLM_HUST_FI_SAMPLING` | 能力在、证据显示 e2e 收益在噪声带内，保持默认关 |
 
+| fi-gelu | 无 bundle manifest / `fi-gelu` | — | `VLLM_HUST_FI_GELU=1`（默认关） | 通过 `CustomOp.register_oot` 接入；CPU 注册合同可测，NPU 数值/图/性能须独立验证，不继承旧 class-patch 证据 |
+| fi-sampling | 无 bundle manifest / `fi-sampling` | — | `VLLM_HUST_FI_SAMPLING`（默认关） | 保留模块 class 替换；历史 e2e 收益在噪声带内 |
 ## 2. cascade 准入条件（任意一条不满足 → 回原生 FIA）
 
 判定函数：`cascade_plugin._use_cascade_attention`（`src/vllm_ascend_split_batch/cascade_plugin.py`）。
@@ -59,6 +71,7 @@
 | 3 | 非 sparse / 非 compress / 无 ubatching / 无投机解码 | `_capture_cudagraphs` 包装器（`_spec_decode_active()` 新增） |
 | 4 | capture sizes 建议收到 `[32,64,128]`（`--gpu-memory-utilization 0.85` 时） | 默认网格会在 twin 捕获期 NPU OOM → capture 级 fail-open（[evidence/cascade/section4-active-enablement.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/section4-active-enablement.md)） |
 
+
 ## 4. dual-pad planner 为什么不可用（不是配置问题）
 
 `planner.plan_dual_pad` 是纯函数，预检在 `planner.precheck_reason`（`src/vllm_ascend_split_batch/planner.py`）：
@@ -86,12 +99,12 @@ contract（见 [release.md](release.md) §0）。这是"能力预览"而非可�
 
 ## 5. 兼容禁区（两侧一致 fail-closed 的部分）
 
-| 形态 | dual-pad planner | cascade |
-|---|---|---|
-| 投机解码 / MTP | 拒（`speculative_decode_conflict`） | 拒（条件 7/8） |
-| MLA / M-RoPE / LoRA | 拒 | 未显式判（cascade 只判 alibi/滑窗/local/dcp）→ **未验证域**，不要据本表推断可用 |
-| 多 query row（MTP 校验、prefill） | 拒（非 uniform decode） | 拒（条件 7） |
-| microbatching（DBO / ubatch>1） | 未判 | 拒（条件 4） |
+| 形态 | dual-pad planner |
+|---|---|
+| 投机解码 / MTP | 拒（`speculative_decode_conflict`） |
+| MLA / M-RoPE / LoRA | 拒 |
+| 多 query row（MTP 校验、prefill） | 拒（非 uniform decode） |
+| microbatching（DBO / ubatch>1） | 未判 |
 
 ## 5.1 证据的 cohort 边界（2026-10-13 基准切换；勿跨域外推）
 

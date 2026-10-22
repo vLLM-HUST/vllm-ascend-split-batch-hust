@@ -1,0 +1,115 @@
+{
+  "task": "测试调度与约束 → 按改动选门及纯证据 CI 路径过滤 → CPU 定向回归 → 本仓",
+  "base": "dc7ae611a39ffca79d89cda62b96613bc4190655",
+  "branch": "0.28/comm-overlap-free-attribution",
+  "startup_dirty": [],
+  "scope": [
+    ".github/workflows/ci.yml",
+    "AGENTS.md",
+    "README.md",
+    "docs/agent-guide.md",
+    "tests/test_operator_profile_contract.py",
+    "tests/test_validation_selection.py",
+    "tools/validation-policy/external-constraints.patch",
+    "tools/validation-policy/external-constraints.json",
+    "tools/validation-policy/receipt.json"
+  ],
+  "decision": "implemented; policy/tooling only; no operator candidate or priority change",
+  "removed_redundancy": [
+    "Extension CI push(main)/pull_request: Markdown-only or docs/evidence JSON/TXT/LOG-only updates no longer run three Python full-pytest/build/inspect legs.",
+    "Repository AGENTS and agent-guide: unconditional full pytest/full ruff per commit replaced with affected tests and static checks.",
+    "README operator cadence: unconditional plain screen prerequisite removed; graph/system screen collection gate retained.",
+    "opt-ops AGENTS: unconditional model L3 after every edit replaced by numerical/loading/execution/protocol/comparison impact selection."
+  ],
+  "not_modified": [
+    "Shared tools/bench-ladder.sh: no coordinated idle window; explicit end-to-end run/screen/smoke remain available, not required in operator loop.",
+    "No test cases removed; no numeric criteria changed; no model/host/manifest/D5 implementation changes.",
+    "PURPOSE numerical criteria and release/publish workflows unchanged."
+  ],
+  "retained_gates": [
+    "necessary L0 + L3/compare for operator/weight/execution-order changes",
+    "L3 FAIL independently blocks promotion",
+    "graph/system complete plain screen collection gate",
+    "startup /health and captured PID ownership (99255c0)",
+    "release/merge admission; no skipped workflow may be called green"
+  ],
+  "verification": {
+    "python": "3.12.13",
+    "targeted": {
+      "command": "python -m pytest -q tests/test_validation_selection.py tests/test_operator_profile_contract.py tests/test_bench_ladder_process_guard.py",
+      "exit": 0,
+      "result": "67 passed in 1.28s",
+      "log": "/root/包体恢复/records/probes/20261021-validation-selection/targeted-tests.log",
+      "log_sha256": "031230c9b579fa5ad3f01cdcabb093e75e39194d5b76932df94825f77b44b320"
+    },
+    "static": {
+      "commands": [
+        "ruff check tests/test_validation_selection.py tests/test_operator_profile_contract.py",
+        "ruff format --check tests/test_validation_selection.py tests/test_operator_profile_contract.py"
+      ],
+      "exit": 0
+    },
+    "numerical_report_negative_fixture": {
+      "command": "python /root/audit/evidence_semantics_regression.py --item 1",
+      "exit": 0,
+      "result": "1/1 PASS; human mismatch, JSON mismatch and empty captures each return 3; CPU fixture only, no model L3"
+    },
+    "yaml_references_git": {
+      "result": "YAML parsed with BaseLoader; changed local reference paths exist; git diff --check clean",
+      "exit": 0
+    },
+    "external_rollback": {
+      "result": "Included in targeted tests: reverse patch in isolated temporary tree matches before_sha256; forward patch matches after_sha256. After removing blank diff-context whitespace, reran only test_external_policy_patch_roundtrip: 1 passed in 0.06s (exit 0).",
+      "exit": 0
+    },
+    "coverage": {
+      "command": "opt coverage",
+      "runs": 1,
+      "exit": 0,
+      "result": "FAIL 0 / WARN 55; metric PASS, layer WARN(11), caliber WARN(36)",
+      "log": "/root/包体恢复/records/probes/20261021-validation-selection/coverage.log",
+      "log_sha256": "f8584f7ebe1e9374919ad0519c05383f45c7317fb85738d61fcd18b452ee74f0"
+    },
+    "startup_status_boundary": "opt status reported pre-existing historical evidence drift FAIL; this task did not alter/repair those files. Coverage result is not proof of drift repair.",
+    "full_pytest": "NOT_RUN: only validation selection, documentation and CPU regression additions; no broad shared implementation/API/dependency/packaging impact. Three-version workflow itself remains intact.",
+    "model_npu_serve_profile": "NOT_RUN: no model loading/execution/protocol/comparison changes; session 2 owns NPU"
+  },
+  "validated_source_sha256": {
+    ".github/workflows/ci.yml": "6273ea5f9405b5284e5e3083e2986437b5cb5cfe644b659b0a4a39d9b7b901f0",
+    "AGENTS.md": "d521dd8a75380631571fdea82705f9475cd1173826d08b1c893d8e2c8bce918a",
+    "README.md": "162a751649382159b019367fbb9f81801cfdc27b297799668cf3f61da6ef5ba5",
+    "docs/agent-guide.md": "2d68d1304bc8bc8b919e76807df0da8eaf882582e6bcf9069971a09875652493",
+    "tests/test_operator_profile_contract.py": "4a857ac2ad2a776222afc077efa2ff0ef464e36fa2b12d6e2578d10f1f88fe67",
+    "tests/test_validation_selection.py": "7c7a12f2a95586cc5972ca2a1514fbdf9b5e99d1924519a0d8dcb557d4cdf0eb",
+    "tools/validation-policy/external-constraints.patch": "df4b2cd0f1495bfd70a4e99bfed9fb09834653a564dee53a3f35046d590ca870",
+    "tools/validation-policy/external-constraints.json": "c3689497c18c7734e8b37568db50a0263e570b8c72b7278a9631a620d55c48a6"
+  },
+  "preserved_sha256": {
+    ".github/workflows/publish.yml": "787410cbb425b89ad1fd390e130ba403fa3ac8ba5caaa8389f99653775666f40",
+    ".github/workflows/release.yml": "4e63e51e85be39b1d784210b878a30e2ab398ce5ee12153fa5d4b13b6178bbde",
+    "tools/bench-ladder.sh": "93d6a0a2c53151c8a551e9e9b79268241d5dccfaa775e36a3516979931b80eed",
+    "tests/test_bench_ladder_process_guard.py": "1f9d3e764bfc9da6b54dad3791288edc6cd947b0786ec7e4abeed22c8f67ac8d"
+  },
+  "purpose_sha256": "4331f9ff51965e039733aa032bc9dd11536a8edb105cd51044495a2bd16d9ebd",
+  "reuse": "Reuse only the named checks for unchanged relevant source/environment; this targeted result is not a full-suite or release certificate. Pure evidence/pointer/wording commits do not invalidate unrelated results.",
+  "external_patch": {
+    "manifest": "tools/validation-policy/external-constraints.json",
+    "apply_precondition": "Verify deployed files equal before_sha256; stop on mismatch and preserve intervening user changes.",
+    "apply_dry_run": "patch --batch --dry-run -d /root -p1 < tools/validation-policy/external-constraints.patch",
+    "apply": "patch --batch -d /root -p1 < tools/validation-policy/external-constraints.patch",
+    "rollback_precondition": "Verify deployed files equal after_sha256; stop on mismatch and preserve intervening user changes.",
+    "rollback_dry_run": "patch --batch --dry-run -R -d /root -p1 < tools/validation-policy/external-constraints.patch",
+    "rollback": "patch --batch -R -d /root -p1 < tools/validation-policy/external-constraints.patch"
+  },
+  "workflow_limitations": [
+    "Path filters are deliberately narrow; evidence scripts and mixed source updates still run CI.",
+    "GitHub path filtering can leave required checks pending; reuse only valid source-snapshot results under existing merge rules, or use workflow_dispatch to supply required checks; never treat skipped as PASS.",
+    "No scheduler, dashboard or new dependency introduced."
+  ],
+  "states": {
+    "experiment": "CPU directed verification completed",
+    "operator_acceptance": "NOT_APPLICABLE; no optimization claim",
+    "code_commit": "recorded by Git/delivery after this immutable precommit receipt",
+    "remote_publish": "NOT_AUTHORIZED; no push"
+  }
+}

@@ -56,7 +56,8 @@
 #     gate_fp32_full_graph_ab_1014: L2 +2.58% 3/3 对, 设备 Cast[256,2048]->0 -148ms/窗, L3 8/8。
 #     关: 显式 VLLM_HUST_GATE_FP32=0。载体(husk 插件)缺失时 fail-open, 不影响起服）
 #   - L0/评测单变量: greedy + 固定 seed; 慢命令 setsid 后台落日志
-#   - 离线 trace 解析: rv1 venv + ascend_pt 父目录口径 + ulimit -v 45G（cgroup 64G, 与 serve 错峰;
+#   - 离线 trace 解析: LADDER_PARSE_PYTHON（默认 serving python, torch_npu 自带 analyse）
+#     + ascend_pt 父目录口径 + ulimit -v 45G（cgroup 64G, 与 serve 错峰;
 #     要解析前停 serve 设 LADDER_STOP_SERVE_FOR_PARSE=1, 默认 0）
 set -uo pipefail
 
@@ -65,8 +66,15 @@ RECORDS=/root/包体恢复/records/ladder
 LOGS=/root/包体恢复/logs
 PY=/usr/local/python3.12.13/bin/python
 VLLM=/usr/local/python3.12.13/bin/vllm
+# 解释器兜底（LADDER_PYTHON > 本机 0.28 栈路径 > PATH）: 该路径不在本机时
+# （CPU CI / 无栈主机）若不回退, serve_env_preflight 会把「python 不存在」误判成 dlopen 失败。
+if [ -n "${LADDER_PYTHON:-}" ]; then PY=$LADDER_PYTHON; fi
+if [ ! -x "$PY" ]; then
+  PY=$(command -v python3 || command -v python || printf '%s' "$PY")
+fi
+[ -x "$VLLM" ] || VLLM=$(dirname "$PY")/vllm
 HARNESS_LM_EVAL=/root/venvs/harness/bin/lm_eval
-RV1_PYTHON=/root/venvs/rv1/bin/python
+PARSE_PYTHON=${LADDER_PARSE_PYTHON:-$PY}
 MODEL=${LADDER_MODEL:-/models/Qwen3.5-35B-A3B}
 # 路径兜底: 2026-10-13 实测 /models/Qwen3.5-35B-A3B 已不存在（模型在 modelscope 缓存里）,
 # 少了这条会让 serve/L1/L2/L3/L4 全部起不来, 却只报"模型找不到"。
@@ -600,6 +608,25 @@ get_prof_ptr() {
   fi
 }
 
+serve_env_preflight() {
+  # nnal/atb 在位时要求 LD_LIBRARY_PATH 已含其条目, 否则 worker dlopen libatb.so 必败。
+  [ "${LADDER_SKIP_ENV_CHECK:-0}" != "1" ] || return 0
+  [ -d "${LADDER_ATB_HOME:-/usr/local/Ascend/nnal/atb}" ] || return 0
+  case ":${LD_LIBRARY_PATH:-}:" in
+    *:"${LADDER_ATB_HOME:-/usr/local/Ascend/nnal/atb}"/*) ;;
+    *)
+      echo "bench-ladder: LD_LIBRARY_PATH 缺 nnal/atb 路径 → worker dlopen libatb.so 将失败 → 拒绝起服" >&2
+      echo "  修复: 起服 shell 依次 source ascend-toolkit / cann ascendnpu-ir / nnal-atb 三个 set_env.sh" >&2
+      echo "  （持久修复: tools/repair-ascend-login-env.sh; LADDER_SKIP_ENV_CHECK=1 自担）" >&2
+      return 1 ;;
+  esac
+  if "$PY" -c 'import ctypes; ctypes.CDLL("libatb.so")' 2>/dev/null; then return 0; fi
+  echo "bench-ladder: LD_LIBRARY_PATH 含 nnal/atb 条目但 dlopen libatb.so 失败 → 拒绝起服" >&2
+  echo "  修复: 起服 shell 依次 source ascend-toolkit / cann ascendnpu-ir / nnal-atb 三个 set_env.sh" >&2
+  echo "  （持久修复: tools/repair-ascend-login-env.sh; LADDER_SKIP_ENV_CHECK=1 自担）" >&2
+  return 1
+}
+
 cmd_serve() {
   local profile=0 tier=plain max_iters=0 require_shapes=0
   if [ "${1:-}" = "--profile" ]; then
@@ -631,6 +658,8 @@ cmd_serve() {
     echo "serve 已运行但 mode=$running，请先 opt bench stop 再切换到 mode=$tier（plain/profile 不混测）" >&2
     return 3
   fi
+  # 起服前置: ATB 动态库路径自检（fail-fast; 回执 records/probes/20261021T024500Z_serve_env_clobber_diagnosis）
+  if serve_env_preflight; then :; else return 1; fi
   # 起服前置: 运行树接口面校验（2026-10-16 加；纯静态、不 import、不占卡、秒级）
   #   拦两类错误: ①「调用点已改、定义点未改」——2026-10-16 11:53 就是这样漏过去的
   #   （fused_moe.py 调 AscendSharedExperts.prepare_input_before_routed_experts 而定义点无此方法），
@@ -751,7 +780,7 @@ PYEOF
     prof_args=(--profiler-config.profiler=torch
                --profiler-config.torch_profiler_dir="$prof_dir"
                --profiler-config.torch_profiler_record_shapes="$rs"
-               --profiler-config.torch_profiler_with_stack=false
+               --profiler-config.torch_profiler_with_stack="${LADDER_PROFILE_WITH_STACK:-false}"
                --profiler-config.torch_profiler_with_memory=false
                --profiler-config.ignore_frontend=true)
     [ "$max_iters" -gt 0 ] && prof_args+=(--profiler-config.max_iterations="$max_iters")
@@ -775,18 +804,20 @@ PYEOF
   nohup setsid "$VLLM" serve "$MODEL" \
     --tensor-parallel-size 2 --max-model-len 8192 --port "$PORT" \
     --no-enable-prefix-caching "${prof_args[@]}" "${extra[@]}" > "$log" 2>&1 < /dev/null &
-  echo $! > "$LADDER_PIDFILE"
+  local started_pid=$!
+  printf '%s\n' "$started_pid" > "$LADDER_PIDFILE"
   # 2026-10-17(F1): 落 serve 侧 env 快照（与 serve log 同 stem 的 <log>.env.json）。
   # 这里**按 stem 硬推导**（不认 LADDER_SERVE_ENV 覆盖），保证"一个 serve ⇔ 一份快照"的关联；
   # 该覆盖项只给探针/排障用。这是 carriers.env 的**唯一**来源：screen/L1/L2 的调用 shell
   # 未必继承这里的 export，读调用 shell 会写出"键为空 + marker effective"的自证冲突。
   # 失败只告警, 不阻断起服。
   local serve_env="${log%.log}.env.json"
-  carrier_write_serve_env "$serve_env" "$log" "$(serve_pid)"
-  cmd_wait 1800 || return $?
+  carrier_write_serve_env "$serve_env" "$log" "$started_pid"
+  cmd_wait 1800 "$started_pid" || return $?
   # 2026-10-17: 就绪后打载体 marker 摘要（人工核验: 包/入口点/env 来源/日志逐载体归因）。
   # 只记录不阻断 —— 载体状态是记录轴（/root/opt-ops/AGENTS.md），起服失败另有其它门。
   carrier_summary "$(carrier_probe_json "$log")"
+  startup_pid_ok "$started_pid" || return $?
   "$PY" - "$SERVE_MODE_FILE" "$tier" <<'PYEOF'
 import json, sys
 json.dump({"mode": sys.argv[2]}, open(sys.argv[1], "w"))
@@ -805,9 +836,30 @@ cmd_stop() {
   echo "serve 已停止"
 }
 
+startup_pid_ok() {
+  local expected=${1:-} state=""
+  case "$expected" in
+    ''|0|*[!0-9]*) echo "无效的 serve 启动 PID: $expected" >&2; return 1 ;;
+  esac
+  if [ "$(serve_pid)" = "$expected" ] && kill -0 "$expected" 2>/dev/null; then
+    state=$(ps -p "$expected" -o stat= 2>/dev/null) || state=""
+    case "$state" in
+      ''|*Z*|*X*) ;;
+      *) return 0 ;;
+    esac
+  fi
+  echo "serve 启动 PID 已退出或替换(expected=$expected, actual=$(serve_pid)); 查 $(cat /tmp/ladder-serve-log 2>/dev/null || echo "$LOGS/ladder-serve.log")" >&2
+  return 1
+}
+
 cmd_wait() {
-  local timeout=${1:-1800} i=0
-  until health_ok; do
+  local timeout=${1:-1800} expected_pid=${2:-} i=0
+  while :; do
+    if [ -n "$expected_pid" ]; then startup_pid_ok "$expected_pid" || return 1; fi
+    if health_ok; then
+      if [ -n "$expected_pid" ]; then startup_pid_ok "$expected_pid" || return 1; fi
+      break
+    fi
     sleep 5; i=$((i + 5))
     if [ "$i" -ge "$timeout" ]; then echo "等待 /health 超时(${timeout}s), 查 $(cat /tmp/ladder-serve-log 2>/dev/null || echo "$LOGS/ladder-serve.log")"; return 1; fi
   done
@@ -1244,7 +1296,7 @@ PYEOF
     echo "   目录: $asc_dir"
     return 1
   fi
-  echo "ascend_pt: $asc_dir （离线解析走 rv1 venv, ascend_pt 父目录口径, ulimit -v ${LADDER_PARSE_ULIMIT_MB:-45000}M）"
+  echo "ascend_pt: $asc_dir （离线解析走 LADDER_PARSE_PYTHON（默认 serving python）, ascend_pt 父目录口径, ulimit -v ${LADDER_PARSE_ULIMIT_MB:-45000}M）"
   # 改动 6｜解析与 serve 错峰（开关默认关, 不改变既有默认行为）。
   # 开启后 stop_profile 与 analyse 之间停一次 serve, 释放 ~20G 常驻内存, 把 cgroup 64G 留给解析。
   # 归因判据与结论见交付报告; 默认关是因为「停 serve」会打断主会话的在线观测, 需人工裁决。
@@ -1259,7 +1311,7 @@ PYEOF
     # （trace 体量翻 2~4 倍）→ 提到 45G; cgroup 64G, 必须与 serve 错峰跑。
     ulimit -v $(( ${LADDER_PARSE_ULIMIT_MB:-45000} * 1000 ))
     # 路径走 argv（不插值进 Python 源码, 避免引号/空格注入）
-    "$RV1_PYTHON" - "$asc_dir" > "$parse_log" 2>&1 <<'PYEOF'
+    "$PARSE_PYTHON" - "$asc_dir" > "$parse_log" 2>&1 <<'PYEOF'
 import sys
 from torch_npu.profiler.profiler import analyse
 analyse(sys.argv[1], max_process_number=1)

@@ -45,6 +45,9 @@ from _device_stack import vllm_ascend  # noqa: F401  -- host stack, or skip
 
 from vllm_ascend_split_batch import rope_fix_plugin as plugin
 
+# 探针链到 /vllm-workspace 运行树(子进程 import 链), CPU CI 收敛 deselect。
+pytestmark = pytest.mark.host_tree
+
 ENV = plugin.ENV_ENABLE
 
 
@@ -169,6 +172,19 @@ class _HostTree:
         self.AscendYaRNRotaryEmbedding = AscendYaRNRotaryEmbedding
         self.Llama3RotaryEmbedding = Llama3RotaryEmbedding
 
+        class CustomOp:
+            # Mirrors the real ``CustomOp.register_oot`` contract: duplicate-name
+            # assert, registry write, and the registry key stamped onto the class.
+            @classmethod
+            def register_oot(cls, _decorated_op_cls=None, name=None):
+                def register(provider):
+                    assert name not in tree.registry, f"Duplicate op name: {name}"
+                    provider.name = name
+                    tree.registry[name] = provider
+                    return provider
+
+                return register
+
         def register_ascend_customop(vllm_config=None):
             tree.registration_calls.append(vllm_config)
             if tree.registered:
@@ -209,7 +225,10 @@ class _HostTree:
             "vllm": {},
             "vllm.config": {"get_current_vllm_config": get_current_vllm_config},
             "vllm.model_executor": {},
-            "vllm.model_executor.custom_op": {"op_registry_oot": self.registry},
+            "vllm.model_executor.custom_op": {
+                "op_registry_oot": self.registry,
+                "CustomOp": CustomOp,
+            },
             "vllm.model_executor.layers": {},
             "vllm.model_executor.layers.rotary_embedding": {
                 "Llama3RotaryEmbedding": Llama3RotaryEmbedding
@@ -339,6 +358,31 @@ def test_wrapper_registers_first_and_overrides_afterwards(monkeypatch) -> None:
     assert applied[plugin.KEY_MROPE] == "replaced AscendMRotaryEmbedding"
     assert applied[plugin.KEY_YARN] == "replaced AscendYaRNRotaryEmbedding"
     assert plugin.stats()["skipped"] == {}
+    # register_oot stamps its registry key onto the class; the carrier must undo
+    # that so the class keeps addressing the base rope op through custom_ops.
+    override = plugin._OVERRIDE_CLASSES[plugin.KEY_LLAMA3]
+    assert getattr(override, "name", None) != plugin.KEY_LLAMA3
+    assert "name" not in vars(override)
+
+
+def test_llama3_registration_failure_is_fail_open(monkeypatch, caplog) -> None:
+    """A raced duplicate (or any register_oot failure) skips only defect ①."""
+
+    def _boom(op_registry_oot, cls):
+        raise AssertionError("Duplicate op name: Llama3RotaryEmbedding")
+
+    tree = _HostTree(monkeypatch)
+    monkeypatch.setattr(plugin, "_register_llama3_override", _boom)
+    monkeypatch.setenv(ENV, "1")
+    with caplog.at_level(logging.WARNING):
+        assert plugin.load() is True
+        tree.call_registration()
+    registry = tree.registry
+    assert plugin.KEY_LLAMA3 not in registry
+    assert registry[plugin.KEY_MROPE] is plugin._OVERRIDE_CLASSES[plugin.KEY_MROPE]
+    skipped = plugin.stats()["skipped"]
+    assert "registration failed" in skipped[plugin.KEY_LLAMA3]
+    assert plugin.KEY_LLAMA3 not in plugin.stats()["applied"]
 
 
 def test_repeated_load_and_registration_stay_idempotent(monkeypatch, caplog) -> None:

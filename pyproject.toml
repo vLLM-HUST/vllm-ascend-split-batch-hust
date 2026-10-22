@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "vllm-ascend-split-batch"
 version = "0.1.3"
-description = "vLLM-HUST plugin carriers for vllm-ascend: cascade two-stage decode, decode FIA de-mask, RoPE variant fixes, zero-cost wiring, MLP chunking (all default-off)"
+description = "vLLM-HUST plugin carriers for vllm-ascend: decode FIA de-mask, RoPE variant fixes, zero-cost wiring, MLP chunking and inert split-batch planning"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -21,9 +21,6 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# CCE op wheel (fa_fp32_stage1 / lse_merge), Tier-1 fp32 tier; not on PyPI --
-# install with --find-links pointing at the kernel repo output/ (see README).
-kernels = ["ascend-kernel==2026.9.26"]
 test = [
     "pytest>=8",
     "ruff>=0.12",
@@ -50,7 +47,6 @@ test = [
 "org.vllm-hust.gdn-merge-inproj" = "vllm_ascend_split_batch.gdn_merge_inproj"
 
 [project.entry-points."vllm.general_plugins"]
-"cascade-attention" = "vllm_ascend_split_batch.cascade_plugin:load"
 "fi-sampling" = "vllm_ascend_split_batch.fi_sampling_plugin:load"
 "fi-gelu" = "vllm_ascend_split_batch.fi_gelu_plugin:load"
 "fia-demask" = "vllm_ascend_split_batch.fia_demask_plugin:load"
@@ -81,14 +77,7 @@ markers = [
     # deselects them: `pytest -q -m "not host_tree"`.  The full local run keeps
     # them, which is what makes the guard loud.
     "host_tree: needs the vllm-ascend source checkout (deselected on the CPU CI job)",
-    # The archived 0.25-line cascade bundle.  Its native kernel wheel cannot load
-    # on the 0.28 base (built against glibc >= 2.38; the image is Ubuntu 22.04.5 /
-    # glibc 2.35 -- see tests/_cascade_kernel.py).  The wheel-dependent tests skip
-    # by themselves; this marker is the coarse escape hatch for a run that wants
-    # the whole legacy family out: `pytest -q -m "not legacy_kernel"`.  Re-enable
-    # only after rebuilding the wheel on the 22.04 base (ops/kernels/AGENTS.md 6,
-    # ruling 2026-10-11: keep cascade archived on the 0.28 stack).
-    "legacy_kernel: archived 0.25-line cascade bundle (wheel unusable on the 0.28 base)",
+
 ]
 
 [tool.ruff]
@@ -107,7 +96,24 @@ line-length = 88
 extend-exclude = [
     "src/vllm_ascend_split_batch/fi_sampling",
     "docs/evidence",
+    "tools/runtime-tree",
+    # 方向分支的离线探针/归因脚本(与 runtime-tree 同类: URL/长 CLI 串, 行内 noqa
+    # 会淹没可读性; 行为经 L0/L3 门验证, 不作格式手术 — 见 028/D1/D7 方向记录)
+    "tools/analysis/matmulv2_shape_attribution.py",
+    "tools/bench_router_merge.py",
+    "tools/bench_moe_init_m1.py",
+    "tools/bench_matmul_m1_layout.py",
+    "tools/bench_matmul_m1_ruler.py",
+    "tools/probe_unpack_views_l0.py",
+    "tools/moe_router_fused_proto.py",
+    "tools/bench_moe_init_triton_only.py",
 ]
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# 锚点/载荷为逐字节精确变换数据: 行长不可手术(改写即破坏锚点),
+# noqa 亦不可入(会污染字符串值)。禁用 E501, 其他规则仍生效。
+"src/vllm_ascend_split_batch/runtime_source_patches.py" = ["E501"]
+"src/vllm_ascend_split_batch/moe_init_triton.py" = ["E501"]

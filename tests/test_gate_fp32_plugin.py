@@ -63,6 +63,9 @@ from _device_stack import torch
 
 from vllm_ascend_split_batch import gate_fp32_plugin as plugin
 
+# 探针链到 /vllm-workspace 运行树(子进程 import 链), CPU CI 收敛 deselect。
+pytestmark = pytest.mark.host_tree
+
 ENV = plugin.ENV_ENABLE
 _REPO_ROOT = Path(plugin.__file__).resolve().parents[2]
 

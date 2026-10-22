@@ -25,24 +25,47 @@
 
 ## 2. 开发工作流
 
-```bash
-cd /vllm-workspace/vllm-ascend-split-batch-hust   # 不要在 /vllm-workspace 根目录跑 python(见 pitfalls)
-pytest -q                                          # CPU 层门槛:全绿
-ruff check .                                       # lint 门槛:零告警
-# 涉及行为/门控/patch 面的改动,追加 NPU 冒烟:单卡、小 batch、default-off 对比
-```
+| 改动类型 | 必要检查 | 不应自动运行 |
+|---|---|---|
+| 纯文档、结果、证据指针 | 相关格式、引用、哈希、Git 范围 | 全仓 pytest、模型 smoke、起服、L3、screen |
+| 流程/工具，不改模型数值路径 | 受影响 CPU 回归、相关静态检查、有效失败码传播 | 模型 L3、模型/包加载 smoke、完整 screen |
+| 实际加载、执行分支、输入输出协议或比较语义 | 定向回归及对应正确性检查；加载变化才补对应加载 smoke | 无关模型测试、重复 smoke |
+| 算子、权重处理、调度执行顺序 | 定向测试、必要 L0、plain L3 + compare；成熟后必要 light L4 | 无端到端问题的 L1/L2 screen、反复 trace |
+| 广泛公共接口/共享基础设施、依赖/打包、发布/合入要求、定向覆盖不足 | 写明触发原因，在稳定源码快照集中全量验证；发布门见 release.md | 每个实验/JSON/提交重跑全套 |
 
+
+开发只跑受影响的定向测试与静态检查，失败后定位子集，不从头重放全套。
+不得删除有效用例、降低数值判据或吞掉失败来省时。L3 失败不能被 pytest、
+coverage、吞吐或其他通过项抵消；失败证据保留，能力保持 default-off。
+
+必要全量结果记录源码范围/哈希、环境、命令与结果，三个并行会话共享。
+相关源码和环境不变时，不因证据、候选指针、提交哈希或文案更新重跑；
+改变相关源码/环境后按影响判断失效。既有发布/合入准入不变，不能以路径过滤
+或结果复用将未验证源码声明为三腿全绿。缺有效快照时补齐准入要求。
+
+L1/L2 screen、服务 smoke、包加载 smoke 各须回答独立问题；无打包/注册/加载变化
+不重复包加载 smoke。`opt bench run` 仅作显式端到端入口，不是算子循环默认步骤。
+保留 `/health`、`99255c0` 启动 PID 归属守卫与回归。graph/system 的完整 screen
+采集门不变，不得伪装 operator 路由绕过。历史数据不得为新流程重采。
+
+Extension CI 的 push/PR 路径过滤仅排除 Markdown 与 `docs/evidence/` 下的
+JSON/TXT/LOG 结果；混合源码改动、测试、workflow、依赖或打包变动仍运行原三腿。
+发布工作流不使用此过滤，保留全量 pytest、lint、构建与包检查。
+
+正确性(token 对齐/容差声明)与性能证据留在 `docs/evidence/` 或 L2；
+形状事实与权重标签必须随证据保留。
 设备验证仍需按原审批及实验协议执行。结果先写到仓库外，审核后发布到
 `vllm-hust-benchmark`；本仓只保留固定版本链接、解析工具和测试。
 失败记录与适用边界不得丢弃。历史原件见 [benchmark 归档](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git)。
 
+
 ## 3. 代码规范
 
 - Python ≥3.10 目标;ruff `line-length = 88`,rules: `B, E, F, I, SIM, UP`
-  (见 `pyproject.toml`,提交前 `ruff check .` 必须零输出)。
+  (见 `pyproject.toml`,受影响路径的 `ruff check` 必须通过；发布保留全仓检查)。
 - 纯逻辑与设备路径分离:shape 推导、gate 判定、planner 等写成 CPU 可测的
   纯函数;设备路径用 mock 测 + 真机冒烟。
-- patch/包装代码集中放 `cascade_runner_patch.py` 等既有落点,不要散落新文件;
+- patch/包装代码集中放对应插件载体,不要散落新文件;
   新 monkeypatch 点必须同步更新 `HOST_CONTRACT.md` 与 `docs/release.md` 第 4 节。
 - 不引入新三方依赖;确需引入时先在 PR 里说明理由并更新 `pyproject.toml`。
 
@@ -58,8 +81,8 @@ ruff check .                                       # lint 门槛:零告警
 ## 5. Git 与网络
 
 - commit 原子:一个逻辑变更一个 commit,不混格式化与功能修改。
-- message 用 conventional 风格(仓库现状):`feat(cascade): ...`、
-  `fix(cascade gate): ...`、`docs: ...`、`test: ...`。
+- message 用 conventional 风格:`feat(plugins): ...`、`fix(plugins): ...`、
+  `docs: ...`、`test: ...`。
 - clone/push 统一走 **SSH over 443**(一次配置永久生效):流程见工作区
   `/vllm-workspace/docs/git-remote-and-network.md`;gh-proxy 前缀仅留给 pip git 依赖。
 

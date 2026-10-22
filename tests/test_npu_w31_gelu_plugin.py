@@ -11,24 +11,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""W3.1c tests: fi_gelu host wiring (``GeluAndMul.forward_oot`` patch).
+"""Device tests for the registered GeluAndMul OOT provider.
 
-Two sections in one file:
-
-* **CPU** (top) -- default-off contract and the pure fail-open logic.  The
-  subprocess ``sys.modules`` purity test runs anywhere; the ``_make_forward``
-  delegation tests only need ``torch`` (importorskip).
-* **NPU** (bottom) -- needs the real ``torch_npu`` + vLLM stack: dispatch
-  confirmation (which ``forward_*`` the host actually selects), the patch
-  matching the kernel / the fp32-erf golden, ACL graph capture+replay equality,
-  the fail-open delegation on the real host class, and a live host-signature
-  guard (``test_host_signature_drift.py`` style).
-
-Dispatch finding pinned below: on NPU ``CustomOp.dispatch_forward`` stores the
-inherited ``CustomOp.forward_oot`` in ``_forward_method`` (``NPUPlatform`` is
-``PlatformEnum.OOT`` and ``GeluAndMul.enabled()`` is True); ``GeluAndMul``
-defines neither ``forward_oot`` nor ``forward_cuda``.  ``FORWARD_TARGET`` is
-therefore ``forward_oot``.
+CPU-only registration contracts live in test_fi_gelu_plugin.py.
 
 Precision gate: ``ops-precision-standard`` (float_compute.md section 3)
 BFLOAT16 row -- rtol = atol = 2**-6, required_matched_ratio = 0.99, and
@@ -76,7 +61,7 @@ def _isolated_plugin_state(monkeypatch):
     monkeypatch.delenv(ENV, raising=False)
     plugin._reset_for_tests()
     yield
-    plugin._unpatch()
+    plugin.uninstall()
     plugin._reset_for_tests()
 
 
@@ -87,8 +72,8 @@ def test_load_default_off_patches_nothing_and_imports_nothing() -> None:
         "import sys;"
         "import vllm_ascend_split_batch.fi_gelu_plugin as p;"
         "assert p.load() is False;"
-        "assert p._installed_cls is None;"
-        "assert p._orig_forward is None;"
+        "assert p._registered_cls is None;"
+        "assert p._registry is None;"
         "bad=[m for m in sys.modules if m=='triton'"
         " or m.split('.')[0] in ('vllm','vllm_ascend')"
         " or m in ('vllm_ascend_split_batch.fi_gelu',)"
@@ -257,37 +242,30 @@ def _bf16_check(actual, golden, note: str = "") -> dict:
 
 
 @needs_npu
-def test_dispatch_selects_forward_oot_and_patch_replaces_it(
-    vllm_config, monkeypatch
-) -> None:
-    """Dispatch confirmation: the patched name IS the dispatched method."""
+def test_dispatch_selects_registered_oot_provider(vllm_config, monkeypatch) -> None:
     act_mod = _activation_module()
     cls = act_mod.GeluAndMul
-    # (1) unpatched: the host dispatch selects the inherited forward_oot
+    original = dict(cls.__dict__)
     before = cls(approximate="none")
-    assert before._forward_method.__name__ == plugin.FORWARD_TARGET, (
-        "NPU dispatch no longer selects "
-        f"{plugin.FORWARD_TARGET!r} (got {before._forward_method!r}); re-probe "
-        "which forward_* the host selects and update FORWARD_TARGET"
-    )
-    # (2) patched: the same dispatch slot now points at the plugin's function
+    assert before._forward_method.__name__ == plugin.FORWARD_TARGET
     monkeypatch.setenv(ENV, "1")
     assert plugin.load() is True
     after = cls(approximate="none")
-    fm = after._forward_method
-    assert fm.__name__ == plugin.FORWARD_TARGET
-    assert getattr(fm, "__func__", None) is getattr(cls, plugin.FORWARD_TARGET)
-    # idempotent
+    provider = plugin._registered_cls
+    assert type(after) is provider
+    assert after.name == cls.name == "gelu_and_mul"
+    assert after._forward_method.__func__ is provider.forward_oot
+    assert cls.__dict__ == original
+    assert type(before) is cls
     assert plugin.load() is True
-    assert getattr(cls, plugin.FORWARD_TARGET) is fm.__func__
-    # unpatch restores the inherited method exactly
-    plugin._unpatch()
-    assert plugin.FORWARD_TARGET not in cls.__dict__
-    assert cls(approximate="none")._forward_method.__name__ == "forward_oot"
+    assert plugin._registered_cls is provider
+    plugin.uninstall()
+    assert cls.__dict__ == original
+    assert type(cls(approximate="none")) is cls
 
 
 @needs_npu
-def test_patched_forward_equals_fi_gelu_kernel(vllm_config, monkeypatch) -> None:
+def test_registered_forward_equals_fi_gelu_kernel(vllm_config, monkeypatch) -> None:
     torch = pytest.importorskip("torch")
     act_mod = _activation_module()
     from vllm_ascend_split_batch.fi_gelu import api, reference
@@ -308,7 +286,7 @@ def test_patched_forward_equals_fi_gelu_kernel(vllm_config, monkeypatch) -> None
 
 
 @needs_npu
-def test_patched_forward_matches_qwen_mlp_shape(vllm_config, monkeypatch) -> None:
+def test_registered_forward_matches_qwen_mlp_shape(vllm_config, monkeypatch) -> None:
     """Real Qwen2.5-14B MLP width (inter=13824) end to end."""
     torch = pytest.importorskip("torch")
     act_mod = _activation_module()
