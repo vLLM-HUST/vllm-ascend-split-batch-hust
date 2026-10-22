@@ -52,3 +52,7 @@
 - 预算形态：2-3 个标准窗；收益天花板 = 12.4ms/step 的重叠份额。
 - 载波环境互斥注意：DBO 探针不开 D4/views 载波（单变量；两者树内惰性补丁
   与 husk 通道并存无害）。
+
+## 终章（已判死，2026-10-22）
+
+实证起服死于 config 校验层最前断言：`Microbatching currently only supports deepep_low_latency / deepep_high_throughput / nixl_ep all2all backends`。结合静态事实（DBO 钩子消费者仅 DeepEP 系内核），本 shape 的 decode 通信重叠在本栈不存在候选级接缝；candidate `dbo-ascend-tp2-feasibility` 收口为 rejected。reopen：上游泛化 microbatching 至标准 TP MoE，或顶层授权自研 TP-allReduce comm-hook（届时才进入本文第 4 步试验）。
