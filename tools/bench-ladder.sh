@@ -66,6 +66,13 @@ RECORDS=/root/包体恢复/records/ladder
 LOGS=/root/包体恢复/logs
 PY=/usr/local/python3.12.13/bin/python
 VLLM=/usr/local/python3.12.13/bin/vllm
+# 解释器兜底（LADDER_PYTHON > 本机 0.28 栈路径 > PATH）: 该路径不在本机时
+# （CPU CI / 无栈主机）若不回退, serve_env_preflight 会把「python 不存在」误判成 dlopen 失败。
+if [ -n "${LADDER_PYTHON:-}" ]; then PY=$LADDER_PYTHON; fi
+if [ ! -x "$PY" ]; then
+  PY=$(command -v python3 || command -v python || printf '%s' "$PY")
+fi
+[ -x "$VLLM" ] || VLLM=$(dirname "$PY")/vllm
 HARNESS_LM_EVAL=/root/venvs/harness/bin/lm_eval
 PARSE_PYTHON=${LADDER_PARSE_PYTHON:-$PY}
 MODEL=${LADDER_MODEL:-/models/Qwen3.5-35B-A3B}

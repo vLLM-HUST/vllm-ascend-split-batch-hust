@@ -12,7 +12,11 @@ ATB_HOME = Path("/usr/local/Ascend/nnal/atb")
 
 
 def run_guard(
-    *, ld_library_path: str, atb_home: str, skip: str = ""
+    *,
+    ld_library_path: str,
+    atb_home: str,
+    skip: str = "",
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     script = 'source "$1" __src >/dev/null 2>&1\nserve_env_preflight\n'
     env = {
@@ -23,6 +27,8 @@ def run_guard(
     }
     if skip:
         env["LADDER_SKIP_ENV_CHECK"] = skip
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         ["bash", "-c", script, "bash", str(SCRIPT)],
         capture_output=True,
@@ -73,6 +79,16 @@ def test_guard_accepts_resolvable_libatb(fake_atb_lib: Path) -> None:
     proc = run_guard(
         ld_library_path=f"{fake_atb_lib}/latest/lib:/usr/local/Ascend/driver/lib64",
         atb_home=str(fake_atb_lib),
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_guard_survives_absent_host_interpreter(fake_atb_lib: Path) -> None:
+    # 宿主无 0.28 栈解释器（CPU CI）时回退 PATH 的 python3，不报 dlopen 失败。
+    proc = run_guard(
+        ld_library_path=f"{fake_atb_lib}/latest/lib:/usr/local/Ascend/driver/lib64",
+        atb_home=str(fake_atb_lib),
+        extra_env={"LADDER_PYTHON": "/nonexistent/bin/python"},
     )
     assert proc.returncode == 0, proc.stderr
 
