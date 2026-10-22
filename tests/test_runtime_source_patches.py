@@ -3,6 +3,9 @@
 import importlib.util
 import pathlib
 
+import pytest
+from _deployment import deployed_file
+
 HERE = pathlib.Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location(
     "rsp", HERE.parent / "src" / "vllm_ascend_split_batch" / "runtime_source_patches.py"
@@ -34,6 +37,8 @@ def _tables_for(module):
 
 
 def test_gdn_transforms_apply_on_stock_orig():
+    if not deployed_file(ORIGS[rsp.GDN]):
+        pytest.skip("L2 runtime-tree originals are not deployed")
     src = ORIGS[rsp.GDN].read_text()
     d4 = _tables_for(rsp.GDN)[0]
     views = _tables_for(rsp.GDN)[1]
@@ -47,6 +52,8 @@ def test_gdn_transforms_apply_on_stock_orig():
 
 
 def test_dispatcher_transforms_apply_on_stock_orig():
+    if not deployed_file(ORIGS[rsp.TD]):
+        pytest.skip("L2 runtime-tree originals are not deployed")
     src = ORIGS[rsp.TD].read_text()
     tables = _tables_for(rsp.TD)
     out = src
@@ -58,6 +65,8 @@ def test_dispatcher_transforms_apply_on_stock_orig():
 
 
 def test_linear_transforms_apply_on_stock_orig():
+    if not deployed_file(ORIGS[rsp.LIN]):
+        pytest.skip("L2 runtime-tree originals are not deployed")
     src = ORIGS[rsp.LIN].read_text()
     tables = _tables_for(rsp.LIN)
     out = src
@@ -68,6 +77,8 @@ def test_linear_transforms_apply_on_stock_orig():
 
 
 def test_anchor_drift_is_fail_closed():
+    if not deployed_file(ORIGS[rsp.GDN]):
+        pytest.skip("L2 runtime-tree originals are not deployed")
     src = (
         ORIGS[rsp.GDN]
         .read_text()
@@ -81,6 +92,8 @@ def test_anchor_drift_is_fail_closed():
 
 
 def test_no_partial_application_on_drift():
+    if not deployed_file(ORIGS[rsp.GDN]):
+        pytest.skip("L2 runtime-tree originals are not deployed")
     src = (
         ORIGS[rsp.GDN]
         .read_text()
