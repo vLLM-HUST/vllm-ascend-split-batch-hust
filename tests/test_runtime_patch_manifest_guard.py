@@ -20,12 +20,7 @@ NEW_LAYERS = [
      "20261021T1545Z_nzSkipGate.linear.py.orig",
      "20261021T1545Z_nzSkipGate.linear.py.patch"),
 ]
-FINGERPRINTS = [
-    ("ops/gdn.py", "_PACKED_CONV_WEIGHT_NAME"),
-    ("ops/gdn.py", "_UNPACK_VIEWS_ON"),
-    ("ops/fused_moe/token_dispatcher.py", "_moe_init_routing_t1_kernel"),
-    ("ops/linear.py", "VLLM_HUST_NZ_SKIP_GATE"),
-]
+
 
 
 def test_manifest_contains_new_layers():
@@ -50,26 +45,33 @@ def test_patch_files_exist_in_pdir():
         assert (PDIR / patch).stat().st_size > 200, patch
 
 
-def test_live_tree_and_husk_are_behaviorally_equivalent():
-    """活守卫(双态等效): 树内补丁在位 或 树 stock+husk 变换在位——禁止真空态
-    (既无树补丁又无 husk 武装 = 载波全失效)。"""
-    husk = HERE.parent / "src" / "vllm_ascend_split_batch" / "runtime_source_patches.py"
-    hsrc = husk.read_text()
+def test_live_tree_is_anchor_matchable_for_husk():
+    """活守卫(C 形态严格版): 运行树必须与 husk 变换锚点逐条匹配（loader 可施变换）。
+
+    2026-10-22 教训: 重启同步源带回旧 vintage 树内补丁（views 无 contiguity 守卫），
+    env 开启即 capture 期崩（l2norm strided view）。树带补丁≠安全态——唯一安全态
+    是锚点可匹配（即 loader 语义下的 stock），任何锚点失配都会让载波静默失效。"""
+    from vllm_ascend_split_batch import runtime_source_patches as rsp
+    mod2rel = {
+        rsp.GDN: "ops/gdn.py",
+        rsp.TD: "ops/fused_moe/token_dispatcher.py",
+        rsp.LIN: "ops/linear.py",
+    }
     for tok in ("VLLM_HUST_D4_CONV_PACK", "VLLM_HUST_GDN_UNPACK_VIEWS",
                 "VLLM_HUST_MOE_INIT_TRITON", "VLLM_HUST_NZ_SKIP_GATE"):
-        assert tok in hsrc, f"husk 变换表缺 {tok}"
-    tree_patched = []
-    for rel, token in FINGERPRINTS:
+        assert tok in (HERE.parent / "src" / "vllm_ascend_split_batch" /
+                       "runtime_source_patches.py").read_text(), f"husk 变换表缺 {tok}"
+    mismatches = []
+    merged: dict[str, list] = {}
+    for _, module, transforms in rsp.TABLES:
+        merged.setdefault(mod2rel[module], []).extend(transforms)
+    for rel, transforms in merged.items():
         src = (TREE / rel).read_text(encoding="utf-8", errors="replace")
-        if token in src:
-            tree_patched.append(f"{rel}:{token}")
-    # 允许两种安全态: 树带全部补丁(手补/重放态, loader 锚点失配自动跳过)
-    #              或 树全 stock(husk loader 接管)。真空态(部分/全无)才失败。
-    assert tree_patched or all(
-        True for _ in [0]), (
-        f"运行树处于载波真空态: {missing_detail(tree_patched)}; "
-        "修复: bash /root/包体恢复/scripts/apply-runtime-patches.sh")
-
-
-def missing_detail(tree_patched):
-    return f"树内指纹 {tree_patched} 与 husk 载波(见 src/) 均不可用"
+        try:
+            rsp.apply_transforms(src, transforms)
+        except rsp.AnchorError as exc:
+            mismatches.append(f"{rel}: {exc}")
+    assert not mismatches, (
+        "运行树锚点失配 -> loader fail-closed 回 stock, 载波失效"
+        "（旧 vintage 树内补丁残留? 恢复: 用 tree-patches 对应 .orig 覆盖）: "
+        + "; ".join(mismatches[:4]))
