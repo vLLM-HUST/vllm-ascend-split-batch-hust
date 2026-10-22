@@ -21,12 +21,8 @@
    2048×2048 int8 上三角模板。CANN 文档：`sparse_mode/pre_tokens/next_tokens`
    在 Q_S==1 时为 no-op（算子自身在 Q_S==1 分派到 IncreFlashAttention 分支），
    且单 token 查询 attend 全部有效 KV——模板在此域恒为恒等。
-2. **性能**：msprof 图 replay sweep（B=32、kv 128→8192、108 cell）：去掩码使
-   FIA device 时间 −8…−23%（中位 −12%）；serving e2e（Qwen2.5-14B-Instruct，
-   910B2，FULL 图模式）decode TPOT p1600×B32 +3.10%、B64 +4.61%（3+3 轮，
-   首轮预热离群对称剔除，腿内散布 0.2%）。
-3. **数值等价**：fp32 golden 对照 rel_l2=bf16 底噪；greedy 生成 8/8 逐 token
-   bit 级全等（temperature=0）。
+2. **性能与数值观察**：见 [历史原文](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/upstream/fia-decode-demask.md#L24)；原场景、预热处理、噪声与方向一并保留，不作新配置验收。
+
 4. **守卫面**：仅当 `input_layout=="TND" && sparse_mode==3 && pre/next==INT_MAX
    && atten_mask 为方形 int8 && 累计 actual_seq_lengths==T（= 每请求恰 1 查询
    token）` 时改写；prefill / chunked-prefill / 混批 / 滑窗 / spec-decode 一律

@@ -16,11 +16,16 @@
     "resamples": "none"
   },
   "evidence": [
-    "/root/包体恢复/records/probes/20261019T042000Z_opt_repair/tool-tests-final.log",
-    "/root/包体恢复/records/probes/20261019T042000Z_opt_repair/workbench-tests.log",
-    "/root/包体恢复/records/probes/20261019T042000Z_opt_repair/drift-diagnosis.json",
-    "/root/包体恢复/records/probes/20261019T042000Z_opt_repair/card-repair.log"
+    null,
+    null,
+    null,
+    null
   ],
   "reason": "Two preventable write/collection defects fixed; strict delivery preserved by default and extended only with explicit startup provenance. Existing empty GDN card restored through opt note using existing evidence. Two actual archive size changes retained, not waived.",
-  "reopen_condition": "Regression or new evidence of false-positive/false-negative delivery or note writes. No operator method reopened."
+  "reopen_condition": "Regression or new evidence of false-positive/false-negative delivery or note writes. No operator method reopened.",
+  "evidence_availability": {
+    "status": "Original local probe references unavailable unless a verified URL is present; null is not a passing result",
+    "audit": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/local-reference-audit.json",
+    "original_document": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/host-proposals/OPT-toolchain-repair/candidate.json"
+  }
 }

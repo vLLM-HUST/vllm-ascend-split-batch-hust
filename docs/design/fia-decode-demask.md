@@ -51,7 +51,7 @@
 - 探针实测（`probe-fia/REPORT.md` §2.4）：`sparse_mode=3` **且不传 mask** 被
   tiling 拒绝（`561002`）。所以 mask 不是"多余的可选输入"，而是宿主声明
   `sparse_mode=3` 时必须附带的模式模板 —— 宿主没有为 decode 特判，
-  于是 decode 也付了这条模板路径的钱（8–23%）。**结论：不是 workaround，
+  于是 decode 也承担模板路径成本（量化观察见 [原文](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/design/fia-decode-demask.md#L50)）。**结论：不是 workaround，
   是"同一条 TND 因果路径被 decode 复用"的顺带成本。**
 
 ### 1.3 prefill 是否同用该调用？
@@ -148,8 +148,7 @@ e2e greedy 逐 token 对拍（见证据文件）。
   `next_tokens=INT_MAX` 语义不同，判别式不能共用）。
 - **`Q_S>1` 不复用**：prefill/chunked-prefill 保留 mask（mode 3 在
   `Q_S>1` 有意义），故本插件对 prefill 无任何影响。
-- **收益上限**：探针预测 decode FIA device 时间 −8…−23%（中位 −12%）
-  ≈ **3.1% TPOT**（范围 1.7–6.1%）。若 e2e 落在噪声带内，按噪声如实上报。
+- **收益上限**：探针预测及边界见 [原文](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/design/fia-decode-demask.md#L151)。预测不是端到端验收；若结果落在噪声带内，按噪声如实上报。
 - 本插件不改任何数值语义，故**不**需要 new kernel；同样不触碰
   `manifest.host.version_range`（仍钉 `==0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`）。
 

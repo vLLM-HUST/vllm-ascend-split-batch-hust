@@ -50,3 +50,14 @@ PyPI and remain referenced by [release instructions](docs/release.md).
 Archiving their evidence is not proof that their installation consumers have
 disappeared. The sdist allowlist and distribution verifier prevent evidence from
 entering future packages. No published installation asset is deleted here.
+
+## Mixed reports and local-only probes
+
+Historical prose and report-only JSON now link to immutable benchmark originals.
+See [EVIDENCE_AVAILABILITY.json](EVIDENCE_AVAILABILITY.json) for scope and the
+central availability audit. Two local references resolve to an existing raw log
+by their previously recorded SHA256. Other originals are unrecovered; null
+references and archived summaries must not be reported as successful raw checks.
+Failures, rejected methods, registration withdrawal and cohort boundaries are
+retained. Numeric routing/shape constants and installation identities are not
+measurements and remain in their implementation contracts.

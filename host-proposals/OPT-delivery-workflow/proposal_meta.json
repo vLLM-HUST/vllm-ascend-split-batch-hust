@@ -39,5 +39,10 @@
     "tests/test_operator_delivery.py",
     "tests/test_opt_delivery_integration.py"
   ],
-  "motivation_evidence": "/root/包体恢复/records/probes/20261018T145800Z_gdn_model_receipt.json"
+  "motivation_evidence": null,
+  "evidence_availability": {
+    "status": "Original local probe references unavailable unless a verified URL is present; null is not a passing result",
+    "audit": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/local-reference-audit.json",
+    "original_document": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/host-proposals/OPT-delivery-workflow/proposal_meta.json"
+  }
 }

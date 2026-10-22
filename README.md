@@ -148,12 +148,8 @@ two-stage path off under ANY microbatching (`use_ubatching`, i.e. DBO or
 
 Verified evidence — **historical (Qwen2.5 / 0.25 domain)**, Qwen2.5-Coder-14B-Instruct, 910B2, CANN 9.0.1:
 
-- eager off/on/on_fp32 token-identical; graph off/on/on_fp32 token-identical;
-- C3-shaped run (B=64, shared ~4.1k tokens, gen128): 0/64 divergent arms;
-- graph cascade at that shape: `VLLM_ASCEND_CASCADE_UPDATE_SKIP_STABLE` on/off
-  token-identical (64/64), wall 8.51s vs 9.38s (off baseline 6.49s);
-- no fail-open events during the verified runs;
-- `pytest -q` + `ruff check .` green.
+[Original correctness, timing and failure observations](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/README.md#L148).
+These historical observations do not qualify a different cohort.
 
 The full evidence set is archived in benchmark; retrieval and custody rules are
 in [EVIDENCE.md](EVIDENCE.md). See
@@ -194,15 +190,10 @@ stays on the fork chain with no device sync.
 Evidence ([docs/evidence/w2b-fi-sampling/REPORT.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/w2b-fi-sampling/REPORT.md), Qwen2.5-Coder-14B, 910B2 —
 **historical Qwen2.5/0.25 domain**, see the cohort scope above):
 
-- default-off is zero-diff (no host/kernel import, no patch) and NPU smoke is
-  6/6 PASS;
-- untruncated e2e (4k ctx, B=64, 2 repeats): median TPOT off 112.67 ms vs on
-  112.52 ms (**-0.14%**, within noise) with the FI api1 route confirmed on
-  1300/1300 steps -- sampling is only ~1% of TPOT at that batch size;
-- joint route is unreachable in the 4k-context single-card shape (B_max ~= 122
-  < the 256 floor); it only fires with a ~512-token context, so the joint
-  branch is a safe, currently dormant branch in normal deployments;
-- `pytest -q` 73 passed + `ruff check .` green.
+[Original sampling measurements and route observations](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/README.md#L193).
+The reported end-to-end difference was within noise. The joint route was not
+reachable in the long-context single-card shape. Neither observation is a new
+qualification; routing guards and the historical cohort boundary above remain.
 
 ## Extension framework
 
