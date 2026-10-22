@@ -20,9 +20,14 @@ import triton.language as tl
 
 @triton.jit
 def _moe_init_routing_t1_kernel(
-    x_ptr, ids_ptr,
-    sorted_ptr, rowidx_ptr, counts_ptr,
-    H: tl.constexpr, E: tl.constexpr, K: tl.constexpr,
+    x_ptr,
+    ids_ptr,
+    sorted_ptr,
+    rowidx_ptr,
+    counts_ptr,
+    H: tl.constexpr,
+    E: tl.constexpr,
+    K: tl.constexpr,
 ):
     kidx = tl.arange(0, K)
     ids = tl.load(ids_ptr + kidx).to(tl.int32)
@@ -32,7 +37,9 @@ def _moe_init_routing_t1_kernel(
     iv = ids[:, None].to(tl.int32)
     less = tl.sum((ids[None, :] < iv).to(tl.int32), axis=1)
     sidx = kidx[None, :]
-    ties_before = tl.sum(((ids[None, :] == iv) & (sidx < kidx[:, None])).to(tl.int32), axis=1)
+    ties_before = tl.sum(
+        ((ids[None, :] == iv) & (sidx < kidx[:, None])).to(tl.int32), axis=1
+    )
     tl.store(rowidx_ptr + kidx, (less + ties_before).to(tl.int32))
     counts = tl.zeros((E,), tl.int32)
     for j in tl.static_range(K):
@@ -65,11 +72,20 @@ def moe_init_routing_t1(hidden_states, topk_ids, expert_num: int):
         )
     k = topk_ids.shape[1]
     h = hidden_states.shape[1]
-    sorted_t = torch.empty((k, h), dtype=hidden_states.dtype, device=hidden_states.device)
+    sorted_t = torch.empty(
+        (k, h), dtype=hidden_states.dtype, device=hidden_states.device
+    )
     rowidx = torch.empty((k,), dtype=torch.int32, device=hidden_states.device)
     counts = torch.zeros((expert_num,), dtype=torch.int64, device=hidden_states.device)
     _moe_init_routing_t1_kernel[(1,)](
-        hidden_states, topk_ids, sorted_t, rowidx, counts,
-        H=h, E=expert_num, K=k, num_warps=4,
+        hidden_states,
+        topk_ids,
+        sorted_t,
+        rowidx,
+        counts,
+        H=h,
+        E=expert_num,
+        K=k,
+        num_warps=4,
     )
     return sorted_t, rowidx, counts, None

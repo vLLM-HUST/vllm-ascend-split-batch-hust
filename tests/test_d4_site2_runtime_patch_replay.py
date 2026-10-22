@@ -32,8 +32,10 @@ def test_patch_contents_anchor_expected_transforms():
     removed = sum(
         1
         for line in body.splitlines()
-        if (line.startswith("-")
-                and "conv_weights_T = conv_weights.transpose(0, 1)" in line)
+        if (
+            line.startswith("-")
+            and "conv_weights_T = conv_weights.transpose(0, 1)" in line
+        )
     )
     assert removed == 4
     assert "VLLM_HUST_D4_CONV_PACK" in body

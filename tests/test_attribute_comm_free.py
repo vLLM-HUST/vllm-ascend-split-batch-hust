@@ -104,9 +104,7 @@ def test_repo_withdrawal_and_paired_evidence():
     ).read_text()
     assert "archive/dev-hub-20261022/split-batch-direction" in pointer
     assert "02add2a27be84b106dd5e8c589b0a5bc3f928bff" in pointer
-    assert (
-        "13212eccec831dbb7ba8c0cc2dafb43967118a890f5b02f01e35b6e534f06ce3" in pointer
-    )
+    assert "13212eccec831dbb7ba8c0cc2dafb43967118a890f5b02f01e35b6e534f06ce3" in pointer
     # 撤回恒量(与内层 manifest 对应条目一致): 配对取证 13212ecc…;
     # rank_pair all_comm 2624 / allreduce 2592; 4 个 opstat 的 before/after
     # sha256 对见 manifest files[] 中 free-attribution-v1-withdrawal.json 同目录条目。

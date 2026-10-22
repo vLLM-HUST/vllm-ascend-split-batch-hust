@@ -7,6 +7,7 @@ idle 85% —— 本基准给出裸 eager 链地板, 与窗内图内值对账定�
 用法: torchrun --nproc-per-node=2 tools/bench_hcomm_allreduce_floor.py [--iters 200]
 落: <ts>-l0-hcomm-floor.json
 """
+
 import argparse
 import json
 import os
@@ -46,8 +47,11 @@ def main():
             dist.all_reduce(x)
         torch.npu.synchronize()
         us = [bench_once(x, args.iters) for _ in range(3)]
-        row = {"kb": kb, "us_med": round(statistics.median(us), 1),
-               "us_all": [round(u, 1) for u in us]}
+        row = {
+            "kb": kb,
+            "us_med": round(statistics.median(us), 1),
+            "us_all": [round(u, 1) for u in us],
+        }
         rows.append(row)
         if rank == 0:
             print(f"{kb:>7}KB: {row['us_med']}µs  (runs {row['us_all']})")
@@ -64,9 +68,10 @@ def main():
             "rows": rows,
             "window_reference": {
                 "opstat": "1021-182739-opstat.json",
-                "in_graph_us": 153.0, "avg_kb": 58.0,
+                "in_graph_us": 153.0,
+                "avg_kb": 58.0,
                 "note": "窗内为 FULL graph 图内值(无 host launch); "
-                        "eager 值含 ~35µs host 提交地板",
+                "eager 值含 ~35µs host 提交地板",
             },
         }
         with open(out, "w") as f:

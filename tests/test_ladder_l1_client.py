@@ -11,8 +11,7 @@ from pathlib import Path
 import pytest
 
 # 运行树真身由 bench-ladder.sh 的 SCRIPTS 指向; 测试允许环境覆盖以便移植。
-SCRIPT = Path(
-    os.environ.get("LADDER_L1_SCRIPT", "/root/包体恢复/scripts/ladder-l1.py"))
+SCRIPT = Path(os.environ.get("LADDER_L1_SCRIPT", "/root/包体恢复/scripts/ladder-l1.py"))
 
 
 def sse(*objs: dict) -> bytes:
@@ -27,9 +26,13 @@ def chat_stream(completion_tokens: int, prompt_tokens: int, no_space: bool) -> b
         {"choices": [{"delta": {"role": "assistant", "content": ""}}]},
         {"choices": [{"delta": {"content": "Hello"}}]},
         {"choices": [{"delta": {"content": " world"}}]},
-        {"choices": [],
-         "usage": {"prompt_tokens": prompt_tokens,
-                   "completion_tokens": completion_tokens}},
+        {
+            "choices": [],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+            },
+        },
     )
     if no_space:
         return body.replace(b"data: ", b"data:")
@@ -52,8 +55,9 @@ def make_handler(behave: dict) -> type[BaseHTTPRequestHandler]:
                 body = b"data: {broken json\n\n"
                 self.send_response(200)
             else:
-                body = chat_stream(behave["completion_tokens"], 1700,
-                                   behave["no_space"])
+                body = chat_stream(
+                    behave["completion_tokens"], 1700, behave["no_space"]
+                )
                 self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(body)))
@@ -65,8 +69,13 @@ def make_handler(behave: dict) -> type[BaseHTTPRequestHandler]:
 
 @pytest.fixture(name="fake_serve")
 def fixture_fake_serve():
-    behave = {"fail_at": set(), "bad_line_at": set(), "completion_tokens": 256,
-              "no_space": False, "requests": 0}
+    behave = {
+        "fail_at": set(),
+        "bad_line_at": set(),
+        "completion_tokens": 256,
+        "no_space": False,
+        "requests": 0,
+    }
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(behave))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -77,9 +86,21 @@ def fixture_fake_serve():
 
 def run_l1(port: int, iters: int, out_path: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(SCRIPT), "--port", str(port), "--iters", str(iters),
-         "--out", str(out_path)],
-        capture_output=True, text=True, check=False, timeout=120)
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--port",
+            str(port),
+            "--iters",
+            str(iters),
+            "--out",
+            str(out_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
 
 
 def test_success_records_usage_annotations(fake_serve, tmp_path: Path) -> None:
@@ -102,7 +123,8 @@ def test_success_records_usage_annotations(fake_serve, tmp_path: Path) -> None:
 
 
 def test_midloop_failure_keeps_rows_and_exits_nonzero(
-    fake_serve, tmp_path: Path) -> None:
+    fake_serve, tmp_path: Path
+) -> None:
     behave, port = fake_serve
     behave["fail_at"] = {2}
     out = tmp_path / "l1.json"

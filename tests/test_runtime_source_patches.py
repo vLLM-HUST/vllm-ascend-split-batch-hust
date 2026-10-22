@@ -18,8 +18,12 @@ ORIGS = {
 }
 
 FINGERPRINTS = {
-    rsp.GDN: ["_PACKED_CONV_WEIGHT_NAME", "_PACK_CONV_ENV", "_UNPACK_VIEWS_ON",
-              "_unpack_mixed_qkv_views"],
+    rsp.GDN: [
+        "_PACKED_CONV_WEIGHT_NAME",
+        "_PACK_CONV_ENV",
+        "_UNPACK_VIEWS_ON",
+        "_unpack_mixed_qkv_views",
+    ],
     rsp.TD: ["_moe_init_routing_t1", "vllm_ascend_split_batch.moe_init_triton"],
     rsp.LIN: ["VLLM_HUST_NZ_SKIP_GATE", "skip_weight_nz_conversion"],
 }
@@ -64,8 +68,11 @@ def test_linear_transforms_apply_on_stock_orig():
 
 
 def test_anchor_drift_is_fail_closed():
-    src = ORIGS[rsp.GDN].read_text().replace(
-        "class AscendGatedDeltaNetAttention", "class Renamed", 1)
+    src = (
+        ORIGS[rsp.GDN]
+        .read_text()
+        .replace("class AscendGatedDeltaNetAttention", "class Renamed", 1)
+    )
     try:
         rsp.apply_transforms(src, _tables_for(rsp.GDN)[0])
     except rsp.AnchorError:
@@ -74,9 +81,15 @@ def test_anchor_drift_is_fail_closed():
 
 
 def test_no_partial_application_on_drift():
-    src = ORIGS[rsp.GDN].read_text().replace(
-        "if spec_sequence_masks is not None:\n            conv_weights_T",
-        "if spec_sequence_masks is not None:\n            Xconv_weights_T", 1)
+    src = (
+        ORIGS[rsp.GDN]
+        .read_text()
+        .replace(
+            "if spec_sequence_masks is not None:\n            conv_weights_T",
+            "if spec_sequence_masks is not None:\n            Xconv_weights_T",
+            1,
+        )
+    )
     try:
         rsp.apply_transforms(src, _tables_for(rsp.GDN)[0])
     except rsp.AnchorError:

@@ -53,7 +53,7 @@ LIN = "vllm_ascend.ops.linear"
 # ---------------------------------------------------------------- gdn: D4 pack
 _D4_TRANSFORMS = [
     (
-        'class AscendGatedDeltaNetAttention(GatedDeltaNetAttention, HpcModule):',
+        "class AscendGatedDeltaNetAttention(GatedDeltaNetAttention, HpcModule):",
         '''_PACKED_CONV_WEIGHT_NAME = "ascend_conv1d_weight_packed"
 _PACK_CONV_ENV = "VLLM_HUST_D4_CONV_PACK"
 
@@ -93,48 +93,48 @@ class AscendGatedDeltaNetAttention(GatedDeltaNetAttention, HpcModule):''',
         1,
     ),
     (
-        '''        conv_weights = self.conv1d.weight.view(self.conv1d.weight.size(0), self.conv1d.weight.size(2))
-        if spec_sequence_masks is not None:''',
-        '''        conv_weights = self.conv1d.weight.view(self.conv1d.weight.size(0), self.conv1d.weight.size(2))
+        """        conv_weights = self.conv1d.weight.view(self.conv1d.weight.size(0), self.conv1d.weight.size(2))
+        if spec_sequence_masks is not None:""",
+        """        conv_weights = self.conv1d.weight.view(self.conv1d.weight.size(0), self.conv1d.weight.size(2))
         _packed_conv_w = getattr(self.conv1d, _PACKED_CONV_WEIGHT_NAME, None)
         conv_weights_T = (
             _packed_conv_w
             if _packed_conv_w is not None
             else conv_weights.transpose(0, 1)
         )
-        if spec_sequence_masks is not None:''',
+        if spec_sequence_masks is not None:""",
         1,
     ),
     (
-        '''        if spec_sequence_masks is not None:
+        """        if spec_sequence_masks is not None:
             conv_weights_T = conv_weights.transpose(0, 1)
-            activation_num = 1 if self.activation else 0''',
-        '''        if spec_sequence_masks is not None:
-            activation_num = 1 if self.activation else 0''',
+            activation_num = 1 if self.activation else 0""",
+        """        if spec_sequence_masks is not None:
+            activation_num = 1 if self.activation else 0""",
         1,
     ),
     (
-        '''                if get_pcp_group().world_size > 1:
+        """                if get_pcp_group().world_size > 1:
                     conv_weights_T = conv_weights.transpose(0, 1)
-                    activation_num = 1 if self.activation else 0''',
-        '''                if get_pcp_group().world_size > 1:
-                    activation_num = 1 if self.activation else 0''',
+                    activation_num = 1 if self.activation else 0""",
+        """                if get_pcp_group().world_size > 1:
+                    activation_num = 1 if self.activation else 0""",
         1,
     ),
     (
-        '''                else:
+        """                else:
                     conv_weights_T = conv_weights.transpose(0, 1)
-                    activation_num = 1 if self.activation else 0''',
-        '''                else:
-                    activation_num = 1 if self.activation else 0''',
+                    activation_num = 1 if self.activation else 0""",
+        """                else:
+                    activation_num = 1 if self.activation else 0""",
         1,
     ),
     (
-        '''        elif attn_metadata.num_decodes > 0:
+        """        elif attn_metadata.num_decodes > 0:
             conv_weights_T = conv_weights.transpose(0, 1)
-            activation_num = 1 if self.activation else 0''',
-        '''        elif attn_metadata.num_decodes > 0:
-            activation_num = 1 if self.activation else 0''',
+            activation_num = 1 if self.activation else 0""",
+        """        elif attn_metadata.num_decodes > 0:
+            activation_num = 1 if self.activation else 0""",
         1,
     ),
 ]
@@ -149,15 +149,15 @@ _UNPACK_VIEWS_ON = os.environ.get(_UNPACK_VIEWS_ENV) == "1"''',
         1,
     ),
     (
-        '''            output_non_spec = torch.empty_like(mixed_qkv_non_spec)
+        """            output_non_spec = torch.empty_like(mixed_qkv_non_spec)
             torch.ops._C_ascend.npu_causal_conv1d_custom(
                 output_non_spec,
                 mixed_qkv_non_spec,
                 conv_weights_T,
                 conv_state=self_kv_cache[0],
                 bias_opt=self.conv1d.bias,
-                query_start_loc_opt=non_spec_query_start_loc_device,''',
-        '''            if _UNPACK_VIEWS_ON:
+                query_start_loc_opt=non_spec_query_start_loc_device,""",
+        """            if _UNPACK_VIEWS_ON:
                 output_non_spec = torch.empty(
                     mixed_qkv_non_spec.shape,
                     dtype=mixed_qkv_non_spec.dtype,
@@ -171,13 +171,13 @@ _UNPACK_VIEWS_ON = os.environ.get(_UNPACK_VIEWS_ENV) == "1"''',
                 conv_weights_T,
                 conv_state=self_kv_cache[0],
                 bias_opt=self.conv1d.bias,
-                query_start_loc_opt=non_spec_query_start_loc_device,''',
+                query_start_loc_opt=non_spec_query_start_loc_device,""",
         1,
     ),
     (
-        '''        query_spec, key_spec, value_spec = self.rearrange_mixed_qkv(mixed_qkv_spec)
-        query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(mixed_qkv_non_spec)''',
-        '''        query_spec, key_spec, value_spec = self.rearrange_mixed_qkv(mixed_qkv_spec)
+        """        query_spec, key_spec, value_spec = self.rearrange_mixed_qkv(mixed_qkv_spec)
+        query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(mixed_qkv_non_spec)""",
+        """        query_spec, key_spec, value_spec = self.rearrange_mixed_qkv(mixed_qkv_spec)
         if mixed_qkv_non_spec is None:
             query_non_spec, key_non_spec, value_non_spec = None, None, None
         elif (not _UNPACK_VIEWS_ON) or attn_metadata.num_prefills != 0:
@@ -187,17 +187,17 @@ _UNPACK_VIEWS_ON = os.environ.get(_UNPACK_VIEWS_ENV) == "1"''',
                 mixed_qkv_non_spec, self
             )
         else:
-            query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(mixed_qkv_non_spec)''',
+            query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(mixed_qkv_non_spec)""",
         1,
     ),
     (
-        '''        # 2. Recurrent attention''',
-        '''        # 2. Recurrent attention
-        # (views helper 依赖 conv 输出为连续分配; 见 _UNPACK_VIEWS_ON 分支)''',
+        """        # 2. Recurrent attention""",
+        """        # 2. Recurrent attention
+        # (views helper 依赖 conv 输出为连续分配; 见 _UNPACK_VIEWS_ON 分支)""",
         1,
     ),
     (
-        '''from vllm_ascend.ops.triton.mamba.causal_conv1d import extract_last_width''',
+        """from vllm_ascend.ops.triton.mamba.causal_conv1d import extract_last_width""",
         '''from vllm_ascend.ops.triton.mamba.causal_conv1d import extract_last_width
 
 
@@ -253,10 +253,10 @@ _NZ_SKIP_TRANSFORMS = [
         1,
     ),
     (
-        '''    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        """    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         super().process_weights_after_loading(layer)
-        keep_nd_weight = _should_keep_nd_for_compatibility_weight(layer.weight.data)''',
-        '''    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        keep_nd_weight = _should_keep_nd_for_compatibility_weight(layer.weight.data)""",
+        """    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         super().process_weights_after_loading(layer)
         if os.environ.get("VLLM_HUST_NZ_SKIP_GATE") == "1" and str(
             getattr(layer, "prefix", "")
@@ -264,7 +264,7 @@ _NZ_SKIP_TRANSFORMS = [
             # NZ mode2 配置域 a2 例外: 标量门 [1,2048] 转 NZ 触发
             # aclnnMatmulWeightNz EZ1001(n=1/k=1); 官方逐层豁免属性
             layer.skip_weight_nz_conversion = True
-        keep_nd_weight = _should_keep_nd_for_compatibility_weight(layer.weight.data)''',
+        keep_nd_weight = _should_keep_nd_for_compatibility_weight(layer.weight.data)""",
         1,
     ),
 ]
@@ -280,42 +280,42 @@ NPU_RUNNER = "vllm_ascend.worker.model_runner_v1"
 # 核心侧无 os import, 用 __import__("os") 内联。
 _DBO_PLATFORM_TRANSFORMS = [
     (
-        '''        if getattr(vllm_config.parallel_config, "enable_dbo", False):
+        """        if getattr(vllm_config.parallel_config, "enable_dbo", False):
             logger.warning(
                 "Parameter is currently ignored on Ascend. parameter=enable_dbo, action: resetting to False. "
             )
-            vllm_config.parallel_config.enable_dbo = False''',
-        '''        if getattr(vllm_config.parallel_config, "enable_dbo", False) and os.environ.get("VLLM_HUST_DBO_ENABLE") != "1":
+            vllm_config.parallel_config.enable_dbo = False""",
+        """        if getattr(vllm_config.parallel_config, "enable_dbo", False) and os.environ.get("VLLM_HUST_DBO_ENABLE") != "1":
             logger.warning(
                 "Parameter is currently ignored on Ascend. parameter=enable_dbo, action: resetting to False. "
             )
-            vllm_config.parallel_config.enable_dbo = False''',
+            vllm_config.parallel_config.enable_dbo = False""",
         1,
     ),
 ]
 _DBO_CORE_TRIGGER_TRANSFORMS = [
     (
-        '''        should_ubatch, num_tokens_across_dp = False, None
-        if self.vllm_config.parallel_config.data_parallel_size > 1:''',
-        '''        should_ubatch, num_tokens_across_dp = False, None
+        """        should_ubatch, num_tokens_across_dp = False, None
+        if self.vllm_config.parallel_config.data_parallel_size > 1:""",
+        """        should_ubatch, num_tokens_across_dp = False, None
         if (self.vllm_config.parallel_config.enable_dbo and uniform_decode
                 and __import__("os").environ.get("VLLM_HUST_DBO_ENABLE") == "1"):
             should_ubatch = True
-        elif self.vllm_config.parallel_config.data_parallel_size > 1:''',
+        elif self.vllm_config.parallel_config.data_parallel_size > 1:""",
         1,
     ),
 ]
 _DBO_NPU_WRAP_TRANSFORMS = [
     (
-        '''            elif cudagraph_mode.has_full_cudagraphs():
+        """            elif cudagraph_mode.has_full_cudagraphs():
                 self.model = ACLGraphWrapper(
                     self.model,
                     self.vllm_config,
                     runtime_mode=CUDAGraphMode.FULL,
                     use_eagle=self.use_eagle,
                     enable_enpu=self.enable_enpu,
-                )''',
-        '''            elif cudagraph_mode.has_full_cudagraphs():
+                )""",
+        """            elif cudagraph_mode.has_full_cudagraphs():
                 if __import__("os").environ.get("VLLM_HUST_DBO_ENABLE") == "1":
                     from vllm.v1.worker.gpu_ubatch_wrapper import UBatchWrapper
                     self.model = UBatchWrapper(
@@ -331,7 +331,7 @@ _DBO_NPU_WRAP_TRANSFORMS = [
                         runtime_mode=CUDAGraphMode.FULL,
                         use_eagle=self.use_eagle,
                         enable_enpu=self.enable_enpu,
-                    )''',
+                    )""",
         1,
     ),
 ]
@@ -382,7 +382,9 @@ class _PatchingLoader(importlib.machinery.SourceFileLoader):
         except AnchorError as exc:
             logger.warning(
                 "runtime_source_patches: %s anchor mismatch -> stock (%s)",
-                src_path, exc)
+                src_path,
+                exc,
+            )
             return super().get_code(fullname)
         for entry in log:
             logger.info("runtime_source_patches: %s %s", src_path, entry)
@@ -402,15 +404,17 @@ class _Finder:
         parent = sys.modules.get(parent_name)
         parent_path = list(getattr(parent, "__path__", []) or [])
         if not parent_path:
-            logger.warning(
-                "runtime_source_patches: %s 父包未就绪 -> stock", fullname)
+            logger.warning("runtime_source_patches: %s 父包未就绪 -> stock", fullname)
             return None
         spec = importlib.machinery.PathFinder.find_spec(sub_name, parent_path)
         if spec is None or not getattr(spec, "origin", None):
-            logger.warning("runtime_source_patches: %s 未定位到源文件 -> stock", fullname)
+            logger.warning(
+                "runtime_source_patches: %s 未定位到源文件 -> stock", fullname
+            )
             return None
         return importlib.util.spec_from_file_location(
-            fullname, spec.origin,
+            fullname,
+            spec.origin,
             loader=_PatchingLoader(fullname, spec.origin, transforms),
         )
 
