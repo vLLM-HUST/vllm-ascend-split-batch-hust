@@ -9,7 +9,7 @@ runner, so 38 items errored on the 3.10/3.12 legs and skipped on 3.14.
 
 from pathlib import Path
 
-from _deployment import deployed_file
+from _deployment import deployed_dir, deployed_file
 
 
 def test_unreadable_parent_is_absent_not_an_error(monkeypatch):
@@ -18,6 +18,14 @@ def test_unreadable_parent_is_absent_not_an_error(monkeypatch):
 
     monkeypatch.setattr(Path, "is_file", denied)
     assert deployed_file("/root/opt-ops/scripts/opt.py") is False
+
+
+def test_untraversable_directory_is_absent_not_an_error(monkeypatch):
+    def denied(self, *args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "is_dir", denied)
+    assert deployed_dir("/root/包体恢复/records/tree-patches") is False
 
 
 def test_readable_file_is_deployed(tmp_path):

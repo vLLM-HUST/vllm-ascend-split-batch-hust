@@ -5,6 +5,8 @@ import pathlib
 import shutil
 import subprocess
 
+from _deployment import deployed_dir
+
 HERE = pathlib.Path(__file__).resolve().parent
 PATCHES = HERE.parent / "host-proposals" / "W3F2-runtime-tree" / "patches"
 
@@ -43,7 +45,7 @@ def test_patch_applies_onto_its_orig_snapshot(tmp_path):
 
 def test_repo_copies_match_l2_originals():
     l2 = pathlib.Path("/root/包体恢复/records/tree-patches")
-    if not l2.is_dir():
+    if not deployed_dir(l2):
         for pair in PAIRS:
             for name in pair:
                 assert (PATCHES / name).stat().st_size > 0

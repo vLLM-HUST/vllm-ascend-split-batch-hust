@@ -25,3 +25,11 @@ def deployed_file(path: str | Path) -> bool:
         return Path(path).is_file()
     except OSError:
         return False
+
+
+def deployed_dir(path: str | Path) -> bool:
+    """Whether ``path`` is a directory this process may traverse."""
+    try:
+        return Path(path).is_dir()
+    except OSError:
+        return False
