@@ -239,6 +239,7 @@ def install_gate_merge_all(model, *, environ=None, ops=None) -> int:
             continue
         if _guarded_install(module, environ, shared_ops):
             installed += 1
+    _trace({"event": "install_all", "installed": installed})
     if installed:
         logger.info("moe_gate_merge: installed on %d MoE blocks", installed)
     else:

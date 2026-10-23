@@ -105,6 +105,7 @@ def test_host_source_anchors_still_unique():  # noqa: D103
 
 
 def test_install_is_default_off_and_env_armed(monkeypatch):
+    monkeypatch.delitem(rsp.sys.modules, rsp.MODELS_UTILS, raising=False)
     monkeypatch.delenv(rsp.ENV_GATE_MERGE, raising=False)
     monkeypatch.setattr(rsp, "_INSTALLED", False)
     assert rsp.install() is False  # 默认关: 不注册钩子
@@ -123,8 +124,17 @@ def test_install_is_default_off_and_env_armed(monkeypatch):
     assert os.environ.get(rsp.ENV_GATE_MERGE) == "1"
 
 
+def test_install_rejects_already_imported_target(monkeypatch):
+    monkeypatch.setenv(rsp.ENV_GATE_MERGE, "1")
+    monkeypatch.setattr(rsp, "_INSTALLED", False)
+    monkeypatch.setitem(rsp.sys.modules, rsp.MODELS_UTILS, object())
+    before = list(rsp.sys.meta_path)
+    assert rsp.install() is False
+    assert rsp.sys.meta_path == before
+
+
 def test_finder_does_not_pop_target_on_find_spec_only():
-    """上游惰性探测会先 find_spec 而不 import; 那次不得把目标卸钩（2026-10-22 实测漏挂）。"""
+    """find_spec 探测不得卸掉目标钩子。"""
     import types
 
     finder = rsp._Finder({rsp.MODELS_UTILS: rsp._GATE_MERGE_TRANSFORMS})

@@ -123,6 +123,17 @@ pip install pytest-xdist
   (`enabled`/`not-enabled`/`failed`)。归因口径: **运行树 W3F2 的合并不得归因给仓内插件**;
   fail-closed 警告断言的是"没有重复合并",不是失败。
 
+#### 1.5.3 husk 源码变换的启动与安装判据
+
+- 安装产物须包含 `zz_husk_runtime_patches.pth`；仅有 editable 路径或 general-plugin
+  入口不证明启动期钩子已注册。开关须在启动 Python 前设置；`python -S` 不执行 `.pth`。
+- fresh 进程中先 `find_spec` 再 import，分别检查 spec 与模块的 loader；被装饰的方法须
+  检查 `inspect.unwrap(method)`，不能用外层 `__code__.co_names` 判定内层补丁缺席。
+- `VLLM_HUST_MOE_GATE_MERGE_TRACE=<绝对路径>` 的 `install_all.installed` 是本次
+  加载调用新增的安装数；重复调用可为 0。合成 40 层的安装 trace 不替代真实模型证据。
+- 回滚：关闭相应 `VLLM_HUST_*` 开关，重启进程并重新捕获图；不承诺进程内卸载。
+  启动通道接通不解除锚点漂移、L3 数值校验或 light L4 的独立门禁。
+
 ## 2. 宿主与集成类
 
 ### 2.1 monkeypatch 面是弱契约
