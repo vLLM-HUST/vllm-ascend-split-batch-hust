@@ -9,13 +9,18 @@ contract entirely.
 """
 
 import importlib.util
+import json
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 RESOLVER = REPO / "tools" / "stack_versions.py"
+CANDIDATE_TOOL = REPO / "tools" / "candidate_manifest.py"
 
 # Pre-existing hardcoded install paths that predate the manifest.  These are out
 # of the build path, so rewiring them is separate work; they are listed here so
@@ -46,6 +51,45 @@ def sv():
 @pytest.fixture(scope="module")
 def manifest(sv):
     return sv.load_manifest()
+
+
+@pytest.fixture(scope="module")
+def candidate(sv):
+    spec = importlib.util.spec_from_file_location(
+        "candidate_manifest_under_test", CANDIDATE_TOOL
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _source_serve_env(stack_manifest=None, python_exe=None):
+    """Source serve-env.sh in a child shell and report its exit status."""
+    env = dict(os.environ)
+    env.pop("STACK_MANIFEST", None)
+    env.pop("STACK_PYTHON", None)
+    env.pop("VLLM_SERVING_PYTHON", None)
+    if stack_manifest is not None:
+        env["STACK_MANIFEST"] = str(stack_manifest)
+    if python_exe is not None:
+        env["STACK_PYTHON"] = str(python_exe)
+    body = (
+        '. "$1/tools/serve-env.sh"; rc=$?; '
+        'printf "RC=%s\\nSERVING=%s\\n" "$rc" "${VLLM_SERVING_PYTHON-}"'
+    )
+    proc = subprocess.run(
+        ["bash", "-c", body, "_", str(REPO)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(REPO),
+    )
+    parsed = {}
+    for line in proc.stdout.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            parsed[key] = value
+    return int(parsed.get("RC", "-1")), parsed.get("SERVING", ""), proc.stderr
 
 
 def _synthetic(sv, **overrides):
@@ -224,3 +268,73 @@ def test_no_second_declaration_site():
         "build-stack pins must live only in stack-versions.json:\n"
         + "\n".join(offenders)
     )
+
+
+def test_serve_env_without_selection_uses_repo_manifest(manifest):
+    rc, serving, stderr = _source_serve_env()
+    assert rc == 0, stderr
+    assert serving == manifest["locations"]["serving_python"]
+
+
+def test_serve_env_selects_declared_manifest(tmp_path, candidate):
+    """STACK_MANIFEST must change which interpreter serving resolves to."""
+    snapshot = tmp_path / "candidate.json"
+    relocated = str(tmp_path / "candidate-venv" / "bin" / "python")
+    candidate.main(["--serving-python", relocated, "--out", str(snapshot)])
+    rc, serving, stderr = _source_serve_env(stack_manifest=snapshot)
+    assert rc == 0, stderr
+    assert serving == relocated
+
+
+def test_serve_env_fails_closed_when_manifest_cannot_be_resolved(tmp_path):
+    """A failing resolver must abort the source, not apply an empty export set."""
+    rc, serving, stderr = _source_serve_env(stack_manifest=tmp_path / "absent.json")
+    assert rc != 0
+    assert serving == ""
+    assert "manifest resolution failed" in stderr
+
+
+def test_candidate_snapshot_only_relocates_interpreter(
+    sv, manifest, candidate, tmp_path
+):
+    relocated = str(tmp_path / "candidate-venv" / "bin" / "python")
+    snapshot = candidate.build_snapshot(sv.DEFAULT_MANIFEST, relocated)
+    assert snapshot["contract"] == manifest["contract"]
+    assert snapshot["plugin_tree"] == manifest["plugin_tree"]
+    assert snapshot["locations"]["serving_python"] == relocated
+    assert snapshot["locations"]["venv"] == manifest["locations"]["venv"]
+    assert snapshot["snapshot"]["schema"] == candidate.SNAPSHOT_SCHEMA
+    assert snapshot["snapshot"]["source_manifest_sha256"] == candidate.sha256_file(
+        sv.DEFAULT_MANIFEST
+    )
+    assert snapshot["schema"] == sv.SCHEMA
+
+
+def test_candidate_snapshot_is_loadable_by_the_resolver(sv, candidate, tmp_path):
+    out = tmp_path / "candidate.json"
+    candidate.main(["--serving-python", str(tmp_path / "p"), "--out", str(out)])
+    loaded = sv.load_manifest(out)
+    assert loaded["locations"]["serving_python"] == str(tmp_path / "p")
+
+
+def test_candidate_snapshot_verify_reports_stale_source(candidate, tmp_path):
+    out = tmp_path / "candidate.json"
+    candidate.main(["--serving-python", str(tmp_path / "p"), "--out", str(out)])
+    assert candidate.verify(out, candidate.stack_versions.DEFAULT_MANIFEST) == 0
+
+    doc = json.loads(out.read_text())
+    doc["snapshot"]["source_manifest_sha256"] = "0" * 64
+    out.write_text(json.dumps(doc))
+    assert candidate.verify(out, candidate.stack_versions.DEFAULT_MANIFEST) == 1
+
+
+def test_candidate_snapshot_exposes_no_contract_option(sv):
+    """The snapshot tool offers no flag that could rewrite a contract value."""
+    proc = subprocess.run(
+        [sys.executable, str(CANDIDATE_TOOL), "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    for key in sv.CONTRACT_KEYS:
+        assert f"--{key}" not in proc.stdout, key
