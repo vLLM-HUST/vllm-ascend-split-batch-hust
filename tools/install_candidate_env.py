@@ -25,6 +25,9 @@ import sys
 from pathlib import Path
 
 DEFAULT_EXPECTED = "opencv-python-headless {opencv} has requirement numpy>=2"
+# torchaudio on PyPI is not the +cpu build and fails to load its native library
+# against a cpu-only torch; the pinned stack must come from the torch cpu index.
+DEFAULT_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 
 
 def clean_env():
@@ -92,6 +95,11 @@ def main(argv=None):
     parser.add_argument("--plugin-wheel")
     parser.add_argument("--extra-find-links", action="append", default=[])
     parser.add_argument(
+        "--torch-index",
+        default=DEFAULT_TORCH_INDEX,
+        help="extra index that carries the +cpu torch stack; empty string disables it",
+    )
+    parser.add_argument(
         "--expected-conflict",
         default=DEFAULT_EXPECTED,
         help="registered pip-check line; {opencv} is filled from the installed version",
@@ -121,6 +129,8 @@ def main(argv=None):
     find_links = ["--find-links", str(args.wheelhouse)]
     for extra in args.extra_find_links:
         find_links += ["--find-links", extra]
+    if args.torch_index:
+        find_links += ["--extra-index-url", args.torch_index]
 
     # 1. plugin's declared dependencies, contract pins on top.  Doing this before
     #    the core closure keeps the resolver off the opencv/numpy contradiction.
