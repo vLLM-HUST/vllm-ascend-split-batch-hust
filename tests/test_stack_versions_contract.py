@@ -55,6 +55,7 @@ def _synthetic(sv, **overrides):
             "python": "3.12.13",
             "torch": "2.13.0+cpu",
             "torch_npu": "2.13.0rc1",
+            "numpy": "1.26.4",
             "cann": "9.1.0",
             "atb": "9.1.0",
             "soc_version": "ascend910b1",
@@ -62,6 +63,7 @@ def _synthetic(sv, **overrides):
         },
         "locations": {
             "venv": "/nonexistent/venv",
+            "serving_python": "/nonexistent/serving/python",
             "cann_home": "/nonexistent/cann",
             "atb_home": "/nonexistent/atb",
         },
@@ -80,10 +82,44 @@ def _actual(sv, manifest_doc, **overrides):
 
 def test_manifest_declares_contract_and_locations(manifest):
     assert set(manifest["contract"]) == set(
-        ("python", "torch", "torch_npu", "cann", "atb", "soc_version", "cxx11_abi")
+        (
+            "python",
+            "torch",
+            "torch_npu",
+            "numpy",
+            "cann",
+            "atb",
+            "soc_version",
+            "cxx11_abi",
+        )
     )
-    assert set(manifest["locations"]) == {"venv", "cann_home", "atb_home"}
+    assert set(manifest["locations"]) == {
+        "venv",
+        "serving_python",
+        "cann_home",
+        "atb_home",
+    }
     assert isinstance(manifest["contract"]["cxx11_abi"], bool)
+
+
+def test_missing_serving_python_is_drift(sv):
+    """A declared serving interpreter that is absent must not pass silently."""
+    doc = _synthetic(sv)
+    fields = {field for field, _, _ in sv.serving_drift(doc)}
+    assert fields == {"serving_python"}
+
+
+def test_serve_env_excludes_build_venv(sv, manifest):
+    """Serving must not inherit the build venv's torch alongside its own vllm."""
+    joined = "\n".join(sv.serve_env_exports(manifest))
+    assert "VIRTUAL_ENV" not in joined
+    assert f"{manifest['locations']['venv']}/bin" not in joined
+    assert (
+        f"export VLLM_SERVING_PYTHON={manifest['locations']['serving_python']}"
+        in joined
+    )
+    for key in ("ASCEND_HOME_PATH", "ATB_HOME_PATH", "ATB_ENV", "SOC_VERSION"):
+        assert f"export {key}=" in joined, key
 
 
 def test_pep440_rc_spelling_is_equivalent(sv, manifest):
@@ -153,11 +189,12 @@ def test_resolver_emits_no_capability_probe_flags(sv, manifest):
     assert "CMAKE_REQUIRED" not in joined
 
 
-def test_build_env_restates_no_pin():
-    text = (REPO / "tools" / "build-env.sh").read_text()
-    assert ASCEND_PATH.search(text) is None
-    for literal in ("2.13.0", "9.1.0", "ascend910"):
-        assert literal not in text, literal
+def test_env_scripts_restate_no_pin():
+    for name in ("build-env.sh", "serve-env.sh"):
+        text = (REPO / "tools" / name).read_text()
+        assert ASCEND_PATH.search(text) is None, name
+        for literal in ("2.13.0", "9.1.0", "ascend910", "python3.12"):
+            assert literal not in text, (name, literal)
 
 
 def test_no_second_declaration_site():
@@ -170,6 +207,8 @@ def test_no_second_declaration_site():
             if rel in KNOWN_EXEMPT or path.name in {
                 "stack-versions.json",
                 "stack_versions.py",
+                "build-env.sh",
+                "serve-env.sh",
             }:
                 continue
             if rel == "tests/test_stack_versions_contract.py":

@@ -10,12 +10,12 @@ Capability probes (``HAVE_ACLRT_*`` and friends inside CANN's ascendc.cmake) are
 deliberately *not* represented here -- they stay adaptive, because they ask what
 the installed headers support rather than what version the build contract pins.
 
-Stdlib only, and no ``import torch``: probing versions through
-``importlib.metadata`` keeps ``--check`` fast enough to run on every build.
+Stdlib only, and no ``import torch``: versions are read from wheel metadata via a
+short subprocess in the declared interpreter, which keeps ``--check`` fast and
+independent of whoever launched it.
 """
 
 import argparse
-import importlib.metadata
 import json
 import re
 import subprocess
@@ -30,12 +30,13 @@ CONTRACT_KEYS = (
     "python",
     "torch",
     "torch_npu",
+    "numpy",
     "cann",
     "atb",
     "soc_version",
     "cxx11_abi",
 )
-LOCATION_KEYS = ("venv", "cann_home", "atb_home")
+LOCATION_KEYS = ("venv", "serving_python", "cann_home", "atb_home")
 
 
 def load_manifest(path=None):
@@ -104,20 +105,47 @@ def probe_python_executable(python_exe):
     return out.stdout.strip()
 
 
+def dist_versions(python_exe, names):
+    """Distribution versions as seen by *that* interpreter, not the caller.
+
+    Reading importlib.metadata in-process would silently report the packages of
+    whichever python invoked the resolver, so ``--check`` would answer a
+    different question depending on how it was launched.
+    """
+    code = (
+        "import json,sys\n"
+        "from importlib.metadata import version, PackageNotFoundError\n"
+        "out = {}\n"
+        "for name in sys.argv[1:]:\n"
+        "    try:\n"
+        "        out[name] = version(name)\n"
+        "    except PackageNotFoundError:\n"
+        "        out[name] = None\n"
+        "sys.stdout.write(json.dumps(out))\n"
+    )
+    try:
+        out = subprocess.run(
+            [str(python_exe), "-c", code, *names],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return dict.fromkeys(names)
+    return json.loads(out.stdout)
+
+
 def probe(manifest, python_exe=None, device_soc=None):
     """Return the values actually observable on this host."""
     contract = manifest["contract"]
     locations = manifest["locations"]
     venv = Path(locations["venv"])
+    venv_python = Path(python_exe or (venv / "bin" / "python"))
     site_packages = (
         venv / "lib" / f"python{python_series(contract['python'])}" / "site-packages"
     )
 
-    def dist(name):
-        try:
-            return importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            return None
+    dists = dist_versions(venv_python, ("torch", "torch_npu", "numpy"))
 
     atb_abi_dir = (
         Path(locations["atb_home"])
@@ -126,15 +154,32 @@ def probe(manifest, python_exe=None, device_soc=None):
         / f"cxx_abi_{1 if contract['cxx11_abi'] else 0}"
     )
     return {
-        "python": probe_python_executable(python_exe or (venv / "bin" / "python")),
-        "torch": dist("torch"),
-        "torch_npu": dist("torch_npu"),
+        "python": probe_python_executable(venv_python),
+        "torch": dists.get("torch"),
+        "torch_npu": dists.get("torch_npu"),
+        "numpy": dists.get("numpy"),
         "cann": probe_cann(locations["cann_home"]),
         "atb": probe_atb(locations["atb_home"]),
         "soc_version": device_soc,
         "cxx11_abi": atb_abi_dir.is_dir(),
         "_torch_npu_include": str(site_packages / "torch_npu"),
     }
+
+
+def serving_drift(manifest):
+    """The serving interpreter must carry the same torch/torch_npu/numpy pins."""
+    serving = Path(manifest["locations"]["serving_python"])
+    if not serving.is_file():
+        return [("serving_python", manifest["locations"]["serving_python"], None)]
+    dists = dist_versions(serving, ("torch", "torch_npu", "numpy"))
+    contract = manifest["contract"]
+    key_map = {"torch": "torch", "torch_npu": "torch_npu", "numpy": "numpy"}
+    found = []
+    for name, key in key_map.items():
+        seen = dists.get(name)
+        if seen is None or canon(str(seen)) != canon(str(contract[key])):
+            found.append((f"serving.{key}", contract[key], seen))
+    return found
 
 
 def drift(manifest, actual):
@@ -221,10 +266,34 @@ def cmake_args(manifest):
     ]
 
 
+def serve_env_exports(manifest):
+    """CANN/ATB + the serving interpreter, deliberately without the build venv.
+
+    Serving runs vllm from ``locations.serving_python``; prepending the build
+    venv would mix that venv's torch with the serving interpreter's vllm.
+    """
+    contract = manifest["contract"]
+    locations = manifest["locations"]
+    abi = 1 if contract["cxx11_abi"] else 0
+    serving = locations["serving_python"]
+    return [
+        f"export CANN_HOME={locations['cann_home']}",
+        f"export ASCEND_HOME_PATH={locations['cann_home']}",
+        f"export ATB_HOME_PATH={locations['atb_home']}/latest/atb/cxx_abi_{abi}",
+        f"export ATB_ENV={locations['atb_home']}/set_env.sh",
+        f"export ATB_CXX_ABI={abi}",
+        f"export SOC_VERSION={contract['soc_version']}",
+        f"export VLLM_SERVING_PYTHON={serving}",
+    ]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
     parser.add_argument("--env", action="store_true", help="emit shell exports")
+    parser.add_argument(
+        "--serve-env", action="store_true", help="emit serving shell exports"
+    )
     parser.add_argument("--cmake-args", action="store_true", help="emit CMake -D flags")
     parser.add_argument("--check", action="store_true", help="exit non-zero on drift")
     parser.add_argument(
@@ -237,12 +306,15 @@ def main(argv=None):
     if args.env:
         print("\n".join(env_exports(manifest)))
         return 0
+    if args.serve_env:
+        print("\n".join(serve_env_exports(manifest)))
+        return 0
     if args.cmake_args:
         print(" ".join(cmake_args(manifest)))
         return 0
 
     actual = probe(manifest)
-    found = drift(manifest, actual)
+    found = drift(manifest, actual) + serving_drift(manifest)
     pin = plugin_torch_pin(manifest["plugin_tree"])
 
     if args.json:
