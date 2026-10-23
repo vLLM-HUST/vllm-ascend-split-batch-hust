@@ -113,3 +113,35 @@ def test_guard_absent_atb_home_is_noop(tmp_path: Path) -> None:
 @pytest.mark.skipif(not ATB_HOME.is_dir(), reason="nnal/atb 不在该容器")
 def test_login_env_canary() -> None:
     ctypes.CDLL("libatb.so")
+
+
+def _vllm_resolution(**env_extra: str) -> subprocess.CompletedProcess[str]:
+    script = 'source "$1" __src >/dev/null 2>&1\nprintf "%s\\n" "$VLLM"\n'
+    env = {"PATH": "/usr/bin:/bin", "HOME": "/root", **env_extra}
+    return subprocess.run(
+        ["bash", "-c", script, "bash", str(SCRIPT)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=60,
+    )
+
+
+def test_serve_entry_defaults_to_the_pinned_interpreter() -> None:
+    proc = _vllm_resolution()
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "/usr/local/python3.12.13/bin/vllm"
+
+
+def test_serve_entry_honours_explicit_vllm() -> None:
+    proc = _vllm_resolution(LADDER_VLLM="/usr/bin/true")
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "/usr/bin/true"
+
+
+def test_serve_entry_does_not_fall_back_when_explicit_vllm_is_missing() -> None:
+    """An explicitly named entry that is absent must not be replaced silently."""
+    proc = _vllm_resolution(LADDER_VLLM="/nonexistent/vllm")
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "/nonexistent/vllm"

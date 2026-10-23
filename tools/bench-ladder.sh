@@ -65,14 +65,17 @@ SCRIPTS=/root/包体恢复/scripts
 RECORDS=/root/包体恢复/records/ladder
 LOGS=/root/包体恢复/logs
 PY=/usr/local/python3.12.13/bin/python
-VLLM=/usr/local/python3.12.13/bin/vllm
+VLLM=${LADDER_VLLM:-/usr/local/python3.12.13/bin/vllm}
 # 解释器兜底（LADDER_PYTHON > 本机 0.28 栈路径 > PATH）: 该路径不在本机时
 # （CPU CI / 无栈主机）若不回退, serve_env_preflight 会把「python 不存在」误判成 dlopen 失败。
 if [ -n "${LADDER_PYTHON:-}" ]; then PY=$LADDER_PYTHON; fi
 if [ ! -x "$PY" ]; then
   PY=$(command -v python3 || command -v python || printf '%s' "$PY")
 fi
-[ -x "$VLLM" ] || VLLM=$(dirname "$PY")/vllm
+# 显式指定 serve 入口时不回退: 回退会静默换成另一套解释器, 起服归属就不成立。
+if [ -z "${LADDER_VLLM:-}" ]; then
+  [ -x "$VLLM" ] || VLLM=$(dirname "$PY")/vllm
+fi
 HARNESS_LM_EVAL=/root/venvs/harness/bin/lm_eval
 PARSE_PYTHON=${LADDER_PARSE_PYTHON:-$PY}
 MODEL=${LADDER_MODEL:-/models/Qwen3.5-35B-A3B}
@@ -629,6 +632,10 @@ serve_env_preflight() {
 
 cmd_serve() {
   local profile=0 tier=plain max_iters=0 require_shapes=0
+  if [ -n "${LADDER_VLLM:-}" ] && [ ! -x "$VLLM" ]; then
+    echo "bench-ladder: LADDER_VLLM=$LADDER_VLLM 不可执行 → 拒绝起服（显式指定不回退）" >&2
+    return 2
+  fi
   if [ "${1:-}" = "--profile" ]; then
     profile=1; shift
     tier=${1:-${LADDER_PROFILE_TIER:-light}}
