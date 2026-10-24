@@ -96,6 +96,9 @@ jobs:
         run: python tools/check_distribution.py release-assets
       - name: Assemble the release body from the annotated tag
         run: |
+          # checkout lands a lightweight tag, so %(contents) would fall back to the
+          # commit message; replace it with the tag object before reading the body.
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           {
             echo "PyPI: https://pypi.org/project/vllm-ascend-split-batch/${GITHUB_REF_NAME#v}/"
             echo
