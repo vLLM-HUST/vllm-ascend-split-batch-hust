@@ -770,7 +770,7 @@ PyPI 只在 Add 时做**一次只读校验**,然后在你名下存一条 "pendin
 [发布原始记录、安装字节摘要与历史验证](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/release.md#L913).
 安装消费者入口：[PyPI](https://pypi.org/project/vllm-ascend-split-batch/0.1.3/)、[Release](https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/releases/tag/v0.1.3)。已发布安装包保持不可改写；历史结果不自动继承到新宿主。
 
-### 11.10 0.2.0 待发布(2026-10-24):cascade 源码删除 + 入口/extra 退役
+### 11.10 0.2.0 已发布(2026-10-24T03:07Z):cascade 源码删除 + 入口/extra 退役
 
 **版本语义**:0.1.3 → **0.2.0**(minor)。删除 `cascade-attention` 入口点与 `[kernels]` extra 对已安装
 消费者是破坏性变更,0.x 系列按 minor 进位而非 patch;同版本号不可覆盖,故不用 0.1.4。
@@ -798,8 +798,18 @@ PyPI 只在 Add 时做**一次只读校验**,然后在你名下存一条 "pendin
 discovery 期 import `planner`、opt-ops runtime helper 版本),与版本号改动无关;CI 侧由
 `publish.yml` 再复核一次。
 
-**发布状态**:待发布。本机无 PyPI 凭据,上传由 `v0.2.0` tag push 触发的 `publish.yml`(OIDC)执行;
+**发布状态**:已发布。上传由 `v0.2.0` tag push 触发的 `publish.yml`(OIDC)执行;
 Release 资产由 `release.yml` 从 PyPI 下载并核 digest 得到。
+
+**发布记录**(2026-10-24T03:07Z,tag `v0.2.0` → commit `2ce8032`):`publish.yml` 与 `release.yml`
+两个 run 均 success。PyPI 上 whl `578ddf07…`(136281 B)、tar.gz `fa30f16c…`(108898 B);
+Release 资产 `dist.sha256` 与之逐字一致,本机重算两份字节的 sha256 亦一致。本机重建同版本 whl
+为 136283 B ⇒ **重建不等于已发布字节**,资产只认 PyPI 那份。三条机械判据全部通过:①PyPI JSON 200
+且 digest 对得上;②Release 资产=PyPI 字节;③干净 venv `pip install vllm-ascend-split-batch==0.2.0`
+后 `version=0.2.0`、6 个 bundle、无 `cascade-attention`、`Provides-Extra` 只有 `test`。该 venv 内
+`vllm.general_plugins` 共 10 条,其中 1 条来自同环境的 `ms-service-profiler`,本包贡献 9 条。
+
+安装消费者入口：[PyPI](https://pypi.org/project/vllm-ascend-split-batch/0.2.0/)、[Release](https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/releases/tag/v0.2.0)。已发布安装包保持不可改写；历史结果不自动继承到新宿主。
 
 **发布后的三条机械判据**(任一不满足 = 发布未完成):
 1. `https://pypi.org/pypi/vllm-ascend-split-batch/0.2.0/json` 返回 200,whl 与 tar.gz 的 sha256 与 Release 资产 `dist.sha256` 逐字一致;
