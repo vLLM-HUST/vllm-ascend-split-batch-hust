@@ -44,4 +44,4 @@ __all__ = [
     "top_k_top_p_sampling_from_probs",
     "top_p_sampling_from_probs",
 ]
-__version__ = "0.1.3"
+__version__ = "0.2.0"
