@@ -52,6 +52,27 @@ jobs:
       # Device- and host-dependent tests skip via tests/_device_stack.py; the
       # host-tree guards are deselected here and run on the NPU host instead.
       - run: pytest -q -m "not host_tree" --junitxml=pytest-results-${{ matrix.python }}.xml
+      # Red-leg visibility without artifact download auth: surface each junit
+      # failure/error as a check annotation (annotations are public on public
+      # repos, artifact downloads are not). Capped at 10 by GitHub.
+      - name: surface pytest failures as annotations
+        if: failure()
+        run: |
+          python - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+          found = False
+          for f in sorted(glob.glob("pytest-results-*.xml")):
+              for tc in ET.parse(f).getroot().iter("testcase"):
+                  for bad in list(tc):
+                      if bad.tag in ("failure", "error"):
+                          found = True
+                          name = f"{tc.get('classname')}::{tc.get('name')}"
+                          msg = (bad.get("message") or "").splitlines()[0][:160]
+                          print(f"::error title={name}::{msg}")
+          if not found:
+              print("::error::pytest failed but junit reports no failure/error entries")
+          PY
       - name: upload pytest diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
