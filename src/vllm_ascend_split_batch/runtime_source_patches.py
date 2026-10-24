@@ -211,9 +211,9 @@ def _unpack_mixed_qkv_views(mixed, layer):
     qd = layer.key_dim // layer.tp_size
     vd = layer.value_dim // layer.tp_size
     s = mixed.shape[0]
-    q = mixed[:, :qd].view(1, s, -1, layer.head_k_dim)
-    k = mixed[:, qd:2 * qd].view(1, s, -1, layer.head_k_dim)
-    v = mixed[:, 2 * qd:].view(1, s, -1, layer.head_v_dim)
+    q = mixed[:, :qd].contiguous().view(1, s, -1, layer.head_k_dim)
+    k = mixed[:, qd:2 * qd].contiguous().view(1, s, -1, layer.head_k_dim)
+    v = mixed[:, 2 * qd:].contiguous().view(1, s, -1, layer.head_v_dim)
     return q, k, v''',
         1,
     ),

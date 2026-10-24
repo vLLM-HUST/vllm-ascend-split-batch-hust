@@ -1,0 +1,151 @@
+{
+  "task": "P0 mixed-QKV contiguous consumer-layout fix",
+  "base_head": "895a435d82f53091687162e84e1ac5eff5983cd8",
+  "branch": "028/gdn-small-op",
+  "candidate": "concatd-gdn-unpack-views",
+  "stage": "validating",
+  "default_off": true,
+  "implementation": "Three contiguous().view() slices, synchronized persisted transform and both runtime trees; caller guards unchanged. Multirow slices may allocate.",
+  "failure_site": "Old helper returns a strided view; downstream l2norm_fwd view(-1, head_dim) fails for multirow input. Regression test reproduces this exact flatten failure.",
+  "checks": {
+    "cpu": "33 passed",
+    "ruff": "PASS on changed Python files",
+    "rollback": "Reverse patch output byte-identical to host.gdn.py.orig; deployed source not modified by rollback check",
+    "capture": "PASS in both serves",
+    "l3": "8/8 identical to 1024-084116, final historical carrier environment",
+    "l0": "PASS for T=1/row_stride=4096/bf16, 3 eager paired repeats; synthetic-only result, host submission included",
+    "l4_target": "PASS, total ConcatD 960 -> 30; decode reduction matches 31 iterations x 30 GDN layers; residual prefill cat remains",
+    "computing": "NOT FORMALLY ACCEPTED: primary new artifact is rank1, baseline rank0. Observed values are direction-only; no cross-rank delta or ranking.",
+    "coverage": "exit 0; FAIL 0 / WARN 75"
+  },
+  "l0_us_median": {
+    "baseline": 134.015,
+    "candidate": 44.18
+  },
+  "baseline": {
+    "rank_path": "/root/prof/ladder-1024-074938/dp0_pp0_tp0_dcp0_ep0_rank0_1712769_20261024075553072_ascend_pt",
+    "coverage": {
+      "prefill_token_volume": 353,
+      "window_iterations": 32,
+      "captured_request_count": 1
+    },
+    "weight_tags": {
+      "model": "Qwen3.5-35B-A3B",
+      "precision": "bf16"
+    },
+    "carriers": {
+      "VLLM_HUST_GATE_FP32": "1",
+      "VLLM_HUST_GDN_MERGE_INPROJ": "1",
+      "husk_package": "vllm_ascend_split_batch"
+    },
+    "ConcatD": {
+      "count": 960,
+      "total_ms": 13.851234
+    },
+    "all_kernel_ms": 476.013,
+    "concatd_share_all_kernel_pct": 2.9098436387241526,
+    "compute_ms_observed": 371.336
+  },
+  "candidate_observation": {
+    "rank_path": "/root/prof/ladder-1024-102237/dp0_pp0_tp1_dcp0_ep1_rank1_2107623_20261024103031235_ascend_pt",
+    "coverage": {
+      "prefill_token_volume": 353,
+      "window_iterations": 32,
+      "captured_request_count": 1
+    },
+    "weight_tags": {
+      "model": "Qwen3.5-35B-A3B",
+      "precision": "bf16"
+    },
+    "carriers": {
+      "VLLM_HUST_GATE_FP32": "1",
+      "VLLM_HUST_GDN_MERGE_INPROJ": "1",
+      "husk_package": "vllm_ascend_split_batch"
+    },
+    "ConcatD": {
+      "count": 30,
+      "total_ms": 0.51527
+    },
+    "all_kernel_ms": 732.32,
+    "concatd_share_all_kernel_pct": 0.07036131745684947,
+    "compute_ms_observed": 350.358
+  },
+  "limits": [
+    "Initial hust-base plain serve lacked husk. Its capture/L3 passed but it is not the computing comparator. The second serve used the historical default interpreter, Gate FP32 and W3F2 markers.",
+    "Second serve was profile-configured as requested in P0, but L3 capture and comparison completed before start_profile. No latency/throughput gate was measured on that serve.",
+    "Source loader anchor mismatch falls back to already patched tree. Tests exercise the persisted generated helper too.",
+    "Only single-row eager L0 was measured; multirow correctness is CPU-tested, not an accepted saturated-shape performance claim.",
+    "Rank0 raw trace of the same new window is preserved and unparsed. Do not re-serve or recapture to close that gap.",
+    "No L1/L2, old carrier A/B, free analysis, or prior remeasurement repeated. No push."
+  ],
+  "budget": {
+    "serve_starts_used": 2,
+    "serve_starts_max": 2,
+    "wall_min_cap": 25
+  },
+  "rollback": {
+    "patch": "patches/20261024_contiguous.gdn.py.patch",
+    "command": "patch -R -p1 -d <deployed-tree> < <patch>",
+    "orig_evidence": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/host.gdn.py.orig"
+  },
+  "knowledge": {
+    "path": "/root/cannbot-knowledge/knowledge/model/inference/runbooks/runtime/torch_split_noncontiguous_view_reshape_minibatch.md",
+    "status": "stable",
+    "platform": "agnostic",
+    "use": "PyTorch layout debugging principle only; no vendor operator-spec claim"
+  },
+  "evidence": [
+    {
+      "path": "/root/包体恢复/records/ladder/1024-075552-opstat.json",
+      "sha256": "2ac09b22104f3fc6085080823b5b2d48dd04f08d0ce1b554cd9aa069f9092281"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-103031-opstat.json",
+      "sha256": "5b007fe101f7ff4186257d8cef94b796726249473359f8d41a0d5fba3049636c"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-102911-l0-gdn-qkv-unpack.json",
+      "sha256": "46fc2435b0919b2f081b3e407c25cfe787fc5c44d525e808f3b112cc2d99b04e"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-102758-l3.json",
+      "sha256": "cedec6f60037f57447c7ffa4067489a27376c21971d9452ea61ce6022e0f9700"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/candidate-before.json",
+      "sha256": "3f7576f25b98d39c72203b9b3f2ae3c309075b9a68f2ccfbe6fbdf7833b3c6a5"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/candidate-final.json",
+      "sha256": "5c63cf4787b32a4fc5918aba9e9966367c3064bdaced71de0010b729af19b8f5"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/source-snapshot.json",
+      "sha256": "8ecb9671c25fa47ee4c7b9cdf48c6298965c4815be273981e6bbd0da5eb8cd4b"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/pytest-final.log",
+      "sha256": "929ac44bcf5359be7007fd8650c662619d4b8ead4c8a6cffb48e8cc20d3f25d1"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/l3-baseline-env-compare.log",
+      "sha256": "a077f1b23b093a4ed12e90d74d6306f82ffce795dbdee8a969cef3a016691dc2"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/coverage.log",
+      "sha256": "4ea18fe495e79236f547ad0585ebe58c928d039ec448bdaff18f601c3bf6cb32"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/host.gdn.py.orig",
+      "sha256": "b93b5ca2958710493be43dcd15c9fa3c30a4f68815ac7512165fec84b801def9"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/runtime.gdn.py.orig",
+      "sha256": "b93b5ca2958710493be43dcd15c9fa3c30a4f68815ac7512165fec84b801def9"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/host.rollback.gdn.py",
+      "sha256": "b93b5ca2958710493be43dcd15c9fa3c30a4f68815ac7512165fec84b801def9"
+    }
+  ]
+}
