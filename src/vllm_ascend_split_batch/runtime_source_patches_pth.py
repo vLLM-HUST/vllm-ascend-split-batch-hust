@@ -13,8 +13,8 @@
 
 """.pth 入口: 解释器启动期注册源码变换钩子(早于一切业务 import)。
 
-仅当相关 env 门开启时才武装(默认零开销); 与 gate_fp32_plugin.load() 的
-install() 调用幂等。site-packages 落点持久, 不受 /vllm-workspace 重灌影响。
+GDN 解包钩子默认注册，模型/形状在执行点门控；不在启动期导入 torch 或宿主。
+其它变换需显式 env 开启。install() 幂等，site-packages 入口不改运行树。
 """
 
 try:

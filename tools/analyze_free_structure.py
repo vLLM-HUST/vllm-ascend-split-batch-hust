@@ -18,6 +18,7 @@
   tools/analyze_free_structure.py <window_dir|raw_window_dir> [--gap-us N] [--json OUT]
   未给路径时取 /root/prof 下最新的 ladder-* 窗口。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,8 +31,13 @@ import statistics
 import sys
 
 RAW_ROOT = "/root/包体恢复/records/ladder/raw"
-BUCKETS = (("<2us", 0, 2), ("2-10us", 2, 10), ("10-100us", 10, 100),
-           ("0.1-1ms", 100, 1000), (">1ms", 1000, float("inf")))
+BUCKETS = (
+    ("<2us", 0, 2),
+    ("2-10us", 2, 10),
+    ("10-100us", 10, 100),
+    ("0.1-1ms", 100, 1000),
+    (">1ms", 1000, float("inf")),
+)
 
 
 def find_kernel_csv(path: str) -> str:
@@ -115,7 +121,9 @@ def batch_profile(kern) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("path", nargs="?", default="")
-    ap.add_argument("--gap-us", type=float, default=3000.0, help="切段间隙阈值（默认 3000us）")
+    ap.add_argument(
+        "--gap-us", type=float, default=3000.0, help="切段间隙阈值（默认 3000us）"
+    )
     ap.add_argument("--json", default="")
     args = ap.parse_args()
 
@@ -151,12 +159,22 @@ def main() -> int:
         "schema": "opt-ops-free-structure.v1",
         "window": os.path.basename(os.path.normpath(path)),
         "kernel_csv": csv_path,
-        "totals": {"span_ms": round(span, 1), "busy_ms": round(busy, 1),
-                   "free_ms": round(free_total, 1),
-                   "free_pct": round(free_total / span * 100, 1) if span else 0},
-        "gap_buckets": {k: {"count": bsum[k][0], "ms": round(bsum[k][1], 1),
-                            "share_pct": round(bsum[k][1] / free_total * 100, 1) if free_total else 0}
-                        for k, _, _ in BUCKETS},
+        "totals": {
+            "span_ms": round(span, 1),
+            "busy_ms": round(busy, 1),
+            "free_ms": round(free_total, 1),
+            "free_pct": round(free_total / span * 100, 1) if span else 0,
+        },
+        "gap_buckets": {
+            k: {
+                "count": bsum[k][0],
+                "ms": round(bsum[k][1], 1),
+                "share_pct": round(bsum[k][1] / free_total * 100, 1)
+                if free_total
+                else 0,
+            }
+            for k, _, _ in BUCKETS
+        },
         "segments": [],
     }
     for kern, gap in segs:
@@ -173,17 +191,27 @@ def main() -> int:
             json.dump(out, fh, ensure_ascii=False, indent=1)
 
     t = out["totals"]
-    print(f"窗口 {out['window']}: span={t['span_ms']}ms busy={t['busy_ms']}ms free={t['free_ms']}ms({t['free_pct']}%)")
-    print(f"  段内 free={t['free_in_segments_ms']}ms  段间空档={t['free_between_segments_ms']}ms")
+    print(
+        f"窗口 {out['window']}: span={t['span_ms']}ms busy={t['busy_ms']}ms "
+        f"free={t['free_ms']}ms({t['free_pct']}%)"
+    )
+    print(
+        f"  段内 free={t['free_in_segments_ms']}ms  "
+        f"段间空档={t['free_between_segments_ms']}ms"
+    )
     print(f"\n{'间隙桶':<10}{'次数':>7}{'时长ms':>9}{'占free':>8}")
     for k, _, _ in BUCKETS:
         b = out["gap_buckets"][k]
         print(f"{k:<10}{b['count']:>7}{b['ms']:>9.1f}{b['share_pct']:>7.1f}%")
-    print(f"\n{'#':>3}{'t_ms':>8}{'span':>8}{'busy':>8}{'free':>8}{'kern':>6}{'内隙中位us':>10}{'M':>5}{'段后空档':>9}")
+    print(
+        f"\n{'#':>3}{'t_ms':>8}{'span':>8}{'busy':>8}{'free':>8}{'kern':>6}{'内隙中位us':>10}{'M':>5}{'段后空档':>9}"
+    )
     for i, s in enumerate(out["segments"]):
-        print(f"{i:>3}{s['t_start_ms']:>8.1f}{s['span_ms']:>8.1f}{s['busy_ms']:>8.1f}"
-              f"{s['free_ms']:>8.1f}{s['kernels']:>6}{s['inner_gap_median_us']:>10.1f}"
-              f"{str(s.get('m_mode', '-')):>5}{s['gap_after_ms']:>9.1f}")
+        print(
+            f"{i:>3}{s['t_start_ms']:>8.1f}{s['span_ms']:>8.1f}{s['busy_ms']:>8.1f}"
+            f"{s['free_ms']:>8.1f}{s['kernels']:>6}{s['inner_gap_median_us']:>10.1f}"
+            f"{str(s.get('m_mode', '-')):>5}{s['gap_after_ms']:>9.1f}"
+        )
     return 0
 
 

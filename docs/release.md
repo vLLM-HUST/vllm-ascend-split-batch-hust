@@ -822,6 +822,23 @@ Release 资产 `dist.sha256` 与之逐字一致,本机重算两份字节的 sha2
 2. `releases/tag/v0.2.0` 的资产是 PyPI 字节,不是本地重建;
 3. 干净 venv `pip install vllm-ascend-split-batch==0.2.0`:`importlib.metadata.version` = `0.2.0`,`entry_points` 无 `cascade-attention`,`Provides-Extra` 只有 `test`。
 
+### 11.11 0.3.0 待发布：限定范围 GDN 解包默认启用
+
+**发布状态：待发布。** 本地构建、分支 push 或实验 accepted 均不等于发布完成。
+0.2.0 → 0.3.0 使用 minor，因安装后默认执行路径发生变化。
+
+- 安装入口仍为现有 `.pth`；无新增 entry point、extra 或 bundle 激活。
+  启动期注册 GDN import hook，不导入 torch/宿主；不再承诺该 hook 的零启动开销。
+- 默认启用范围与回退条件以 [支持矩阵](support-matrix.md) 的 GDN 解包行为准。
+  `VLLM_HUST_GDN_UNPACK_VIEWS=0` 显式关闭；切换后重启全部 worker 并重新捕获图。
+  其它插件默认值、cascade 退役与 import_only planner 不变。
+- 接入验证须使用构建 wheel 的非 editable 安装，核对解释器、模块落点和实际
+  GDN loader；unset/0 双向验证，未覆盖形状回 stock，FULL capture 与 L3 对拍通过。
+- 合入须经 PR 与 Extension CI 三个 Python 腿及组织可信必需检查，不绕过保护。
+  通过后才推 `v0.3.0` annotated tag，上传只走 `publish.yml` OIDC。
+- 发布完成须核对 PyPI 0.3.0 的 wheel/sdist、Release 资产逐字节 digest、干净
+  venv 从索引安装的版本/入口/默认行为。未核对前保持本节“待发布”。
+
 # Distribution custody
 
 Source distributions include only runtime source, packaging metadata, README,

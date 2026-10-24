@@ -14,24 +14,34 @@ def run_shell(tmp_path, command, *args):
     records.mkdir(exist_ok=True)
     return subprocess.run(
         [
-            "bash", "-c",
+            "bash",
+            "-c",
             'source "$1" __src >/dev/null 2>&1\n'
             'PY="$2"; RECORDS="$3/records"; SCRIPTS="$3/scripts"; MODEL="$3/model"\n'
-            'shift 3\n' + command,
-            "bash", str(SCRIPT), sys.executable, str(tmp_path), *map(str, args),
+            "shift 3\n" + command,
+            "bash",
+            str(SCRIPT),
+            sys.executable,
+            str(tmp_path),
+            *map(str, args),
         ],
         env={k: v for k, v in os.environ.items() if not k.startswith("LADDER_")},
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
 def document(rank, volume=353):
     return {
         "asc_dir": str(rank),
-        "load_caliber": {"window_coverage": {
-            "schema": "opt-ops-window-coverage.v1",
-            "declared": True, "prefill_token_volume": volume,
-        }},
+        "load_caliber": {
+            "window_coverage": {
+                "schema": "opt-ops-window-coverage.v1",
+                "declared": True,
+                "prefill_token_volume": volume,
+            }
+        },
         "cohort": {"id": "test", "model": "Qwen3.5-35B-A3B", "precision": "bf16"},
     }
 
@@ -50,8 +60,8 @@ def window(tmp_path):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     (scripts / "ladder-opstat.py").write_text(
-        'import json, sys\nfrom pathlib import Path\n'
-        'args = dict(zip(sys.argv[1::2], sys.argv[2::2]))\n'
+        "import json, sys\nfrom pathlib import Path\n"
+        "args = dict(zip(sys.argv[1::2], sys.argv[2::2]))\n"
         'cohort = json.loads(Path(args["--cohort-file"]).read_text()) '
         'if "--cohort-file" in args else {"model": "unknown"}\n'
         'doc = {"asc_dir": args["--asc-dir"], "cohort": cohort, '
@@ -88,15 +98,18 @@ def test_scope_rejects_missing_or_placeholder_weights(tmp_path, field, value):
     assert not proc.stdout.strip()
 
 
-@pytest.mark.parametrize("facts", [
-    {"schema": "opt-ops-window-coverage.v1"},
-    {"prefill_token_volume": 353, "declared": False},
-    {"prefill_token_volume": True},
-    {"prefill_token_volume": -1},
-    {"prefill_token_volume": float("nan")},
-    {"prefill_token_volume": float("inf")},
-    [353],
-])
+@pytest.mark.parametrize(
+    "facts",
+    [
+        {"schema": "opt-ops-window-coverage.v1"},
+        {"prefill_token_volume": 353, "declared": False},
+        {"prefill_token_volume": True},
+        {"prefill_token_volume": -1},
+        {"prefill_token_volume": float("nan")},
+        {"prefill_token_volume": float("inf")},
+        [353],
+    ],
+)
 def test_scope_rejects_placeholder_or_invalid_shapes(tmp_path, facts):
     doc = document(tmp_path / "rank0")
     doc["load_caliber"]["window_coverage"] = facts
@@ -172,7 +185,7 @@ def test_recovery_incomplete_rank_does_not_parse_or_write(tmp_path, window):
 
 
 def test_recovery_help_does_not_inspect_window(tmp_path):
-    proc = run_shell(tmp_path, 'cmd_recover_profile --help')
+    proc = run_shell(tmp_path, "cmd_recover_profile --help")
     assert proc.returncode == 0
     assert "多 rank" in proc.stdout
     assert not list((tmp_path / "records").iterdir())

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = '''from functools import wraps
+SOURCE = """from functools import wraps
 from vllm.logger import init_logger
 
 
@@ -30,7 +30,7 @@ class AutoWeightsLoader:
         autoloaded_weights = set(weights)
         self._check_skipped_aliases(autoloaded_weights)
         return autoloaded_weights
-'''
+"""
 
 
 @pytest.mark.parametrize("enabled", ["0", "1"])
@@ -50,7 +50,11 @@ def test_fresh_probe_then_import_and_install(tmp_path, enabled):
     env["VLLM_HUST_MOE_GATE_MERGE"] = enabled
     env["VLLM_HUST_MOE_GATE_MERGE_TRACE"] = str(tmp_path / "trace.jsonl")
     result = subprocess.run(
-        [sys.executable, "-S", "-c", r'''
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            r"""
 import importlib
 import importlib.util
 import inspect
@@ -63,7 +67,11 @@ sys.path.insert(0, sys.argv[1])
 site.addsitedir(sys.argv[2])
 from vllm_ascend_split_batch import runtime_source_patches as rsp
 on = os.environ["VLLM_HUST_MOE_GATE_MERGE"] == "1"
-assert rsp._INSTALLED == on
+assert rsp._INSTALLED
+finders = [f for f in sys.meta_path if isinstance(f, rsp._Finder)]
+assert len(finders) == 1
+assert rsp.GDN in finders[0]._targets
+assert (rsp.MODELS_UTILS in finders[0]._targets) == on
 for _ in range(2):
     spec = importlib.util.find_spec(rsp.MODELS_UTILS)
     assert isinstance(spec.loader, rsp._PatchingLoader) == on
@@ -103,7 +111,12 @@ else:
     assert "vllm_ascend_split_batch.moe_gate_merge" not in sys.modules
     assert not pathlib.Path(os.environ["VLLM_HUST_MOE_GATE_MERGE_TRACE"]).exists()
 assert "torch" not in sys.modules
-''', str(tmp_path), str(site_dir), str(ROOT / "tests")],
+assert "vllm_ascend_split_batch.planner" not in sys.modules
+""",
+            str(tmp_path),
+            str(site_dir),
+            str(ROOT / "tests"),
+        ],
         env=env,
         capture_output=True,
         text=True,

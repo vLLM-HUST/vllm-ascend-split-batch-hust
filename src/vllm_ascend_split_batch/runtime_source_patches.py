@@ -22,11 +22,12 @@ fail-closed 语义:
 * 每条变换 (anchor, replacement, count) 断言精确命中; 任一失配 -> 该模块整体
   回退 stock（不产出半变换源码）, 并打 warning（锚点漂移 = 上游改了该文件）。
 * 目标模块已在 sys.modules（迟注册）-> 跳过并 warning（不打补丁的 stock 行为）。
-* 全部载波 default-off, 由各自既有 env 门控制（与本树内版本同名同语义）。
+* GDN 解包只在已验收 T=1/T=16 域默认启用；显式 0 关闭，其余载波 default-off。
+* 无法规范化的遗留 GDN helper 拒绝加载，不执行未知宽范围实现。
 
 表内容与 2026-10-21 运行树补丁一一对应:
 * VLLM_HUST_D4_CONV_PACK   -> vllm_ascend.ops.gdn（conv 权重连续分配+消费, D4 site2）
-* VLLM_HUST_GDN_UNPACK_VIEWS -> vllm_ascend.ops.gdn（decode T=1 零拷贝视图; 依赖上者）
+* VLLM_HUST_GDN_UNPACK_VIEWS -> vllm_ascend.ops.gdn（连续纯 decode T=1/T=16；不依赖 D4 pack）
 * VLLM_HUST_MOE_INIT_TRITON  -> vllm_ascend.ops.fused_moe.token_dispatcher（decode T=1 triton init）
 * VLLM_HUST_NZ_SKIP_GATE     -> vllm_ascend.ops.linear（NZ mode2 标量门豁免）
 * VLLM_HUST_MOE_GATE_MERGE   -> vllm.model_executor.models.utils（在
@@ -36,6 +37,7 @@ fail-closed 语义:
 
 from __future__ import annotations
 
+import ast
 import importlib.machinery
 import importlib.util
 import logging
@@ -396,6 +398,110 @@ class AnchorError(Exception):
     pass
 
 
+def scoped_gdn_source(source: str) -> str:
+    legacy = "def _unpack_mixed_qkv_views(" in source
+    if legacy:
+        node = next(
+            n
+            for n in ast.parse(source).body
+            if isinstance(n, ast.FunctionDef) and n.name == "_unpack_mixed_qkv_views"
+        )
+        expected = next(
+            n
+            for n in ast.parse(_VIEWS_TRANSFORMS[-1][1]).body
+            if isinstance(n, ast.FunctionDef)
+        )
+        if ast.dump(node) != ast.dump(expected):
+            raise AnchorError("unrecognized deployed unpack helper")
+        source = source.replace(ast.get_source_segment(source, node), "", 1)
+        source = source.replace(
+            '_UNPACK_VIEWS_ENV = "VLLM_HUST_GDN_UNPACK_VIEWS"\n'
+            '_UNPACK_VIEWS_ON = os.environ.get(_UNPACK_VIEWS_ENV) == "1"',
+            "",
+            1,
+        )
+        dispatch = _VIEWS_TRANSFORMS[2][1]
+        variants = (
+            dispatch,
+            dispatch.replace(" and mixed_qkv_non_spec.shape[0] == 1", ""),
+        )
+        matched = next((v for v in variants if source.count(v) == 1), None)
+        if matched is None:
+            raise AnchorError("unrecognized deployed unpack dispatcher")
+        source = source.replace(matched, _VIEWS_TRANSFORMS[2][0], 1)
+        conditional = _VIEWS_TRANSFORMS[1][1]
+        if conditional in source:
+            source = source.replace(conditional, _VIEWS_TRANSFORMS[1][0], 1)
+        allocation = (
+            "            output_non_spec = torch.empty(\n"
+            "                mixed_qkv_non_spec.shape,\n"
+            "                dtype=mixed_qkv_non_spec.dtype,\n"
+            "                device=mixed_qkv_non_spec.device,\n"
+            "            )"
+        )
+        source = source.replace(
+            allocation,
+            "            output_non_spec = torch.empty_like(mixed_qkv_non_spec)",
+            1,
+        )
+    methods = [
+        n
+        for n in ast.walk(ast.parse(source))
+        if isinstance(n, ast.FunctionDef) and n.name == "process_weights_after_loading"
+    ]
+    if len(methods) != 1:
+        raise AnchorError("GDN weight-load configuration seam mismatch")
+    body = methods[0].body
+    first = (
+        body[1]
+        if isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+        else body[0]
+    )
+    lines = source.splitlines(keepends=True)
+    lines.insert(
+        first.lineno - 1, " " * first.col_offset + "_hust_unpack_configure(self)\n"
+    )
+    source = "".join(lines)
+    allocation = "            output_non_spec = torch.empty_like(mixed_qkv_non_spec)"
+    dispatch = _VIEWS_TRANSFORMS[2][0]
+    anchor = "from vllm_ascend.ops.triton.mamba.causal_conv1d import extract_last_width"
+    transforms = [
+        (
+            anchor,
+            anchor + "\nfrom vllm_ascend_split_batch.gdn_unpack import (\n"
+            "    eligible as _hust_unpack_eligible, unpack as _unpack_mixed_qkv_views,\n"
+            "    configure as _hust_unpack_configure,\n)",
+            1,
+        ),
+        (
+            allocation,
+            "            if _hust_unpack_eligible(self, mixed_qkv_non_spec, attn_metadata):\n"
+            "                output_non_spec = torch.empty(\n"
+            "                    mixed_qkv_non_spec.shape,\n"
+            "                    dtype=mixed_qkv_non_spec.dtype,\n"
+            "                    device=mixed_qkv_non_spec.device,\n"
+            "                )\n"
+            "            else:\n" + "    " + allocation,
+            1,
+        ),
+        (
+            dispatch,
+            "        query_spec, key_spec, value_spec = self.rearrange_mixed_qkv(mixed_qkv_spec)\n"
+            "        if (_hust_unpack_eligible(self, mixed_qkv_non_spec, attn_metadata)\n"
+            "                and mixed_qkv_non_spec.is_contiguous()):\n"
+            "            query_non_spec, key_non_spec, value_non_spec = _unpack_mixed_qkv_views(\n"
+            "                mixed_qkv_non_spec, self\n"
+            "            )\n"
+            "        else:\n"
+            "            query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(mixed_qkv_non_spec)",
+            1,
+        ),
+    ]
+    return apply_transforms(source, transforms)[0]
+
+
 class _PatchingLoader(importlib.machinery.SourceFileLoader):
     """对目标模块源码文本施锚点变换后编译; 失败即原样编译（stock）。
 
@@ -410,6 +516,16 @@ class _PatchingLoader(importlib.machinery.SourceFileLoader):
     def get_code(self, fullname):
         src_path = self.get_filename(fullname)
         source = self.get_data(src_path).decode("utf-8")
+        if fullname == GDN:
+            try:
+                source = scoped_gdn_source(source)
+            except AnchorError as exc:
+                if "def _unpack_mixed_qkv_views(" in source:
+                    raise ImportError("unsafe legacy GDN unpack drift") from exc
+                logger.warning(
+                    "runtime_source_patches: GDN scope mismatch -> stock (%s)", exc
+                )
+                return super().get_code(fullname)
         try:
             patched, log = apply_transforms(source, self._transforms)
         except AnchorError as exc:
@@ -418,7 +534,7 @@ class _PatchingLoader(importlib.machinery.SourceFileLoader):
                 src_path,
                 exc,
             )
-            return super().get_code(fullname)
+            return compile(source, src_path, "exec", dont_inherit=True)
         for entry in log:
             logger.info("runtime_source_patches: %s %s", src_path, entry)
         return compile(patched, src_path, "exec", dont_inherit=True)
@@ -458,16 +574,14 @@ _INSTALLED = False
 
 
 def install() -> bool:
-    """env 门控注册 meta-path 钩子; 无相关 env 时不注册（零开销）。幂等。"""
+    """幂等注册 GDN 范围守卫及显式 env 开启的其它变换，不导入宿主。"""
     global _INSTALLED
     if _INSTALLED:
         return True
-    targets: dict[str, list] = {}
+    targets: dict[str, list] = {GDN: []}
     for env, module, transforms in TABLES:
-        if os.environ.get(env) == "1":
+        if env != ENV_VIEWS and os.environ.get(env) == "1":
             targets.setdefault(module, []).extend(transforms)
-    if not targets:
-        return False
     if any(m in sys.modules for m in targets):
         logger.warning(
             "runtime_source_patches: 目标模块 %s 已被 import, 迟注册不生效 -> stock",
@@ -483,5 +597,5 @@ def install() -> bool:
 
 
 def load() -> bool:
-    """vllm general_plugins 兼容入口（default-off）。"""
+    """vllm general_plugins 兼容入口，沿用安装时的范围与开关。"""
     return install()

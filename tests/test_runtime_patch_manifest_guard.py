@@ -70,6 +70,7 @@ def test_patch_files_exist_in_pdir():
         assert (PDIR / patch).stat().st_size > 200, patch
 
 
+@pytest.mark.host_tree
 def test_live_tree_is_anchor_matchable_for_husk():
     """活守卫(C 形态严格版): 运行树必须与 husk 变换锚点逐条匹配（loader 可施变换）。
 
@@ -109,22 +110,32 @@ def test_live_tree_is_anchor_matchable_for_husk():
         ), f"husk 变换表缺 {tok}"
     mismatches = []
     merged: dict[str, list] = {}
+    merged[mod2rel[rsp.GDN]] = []
     for _, module, transforms in rsp.TABLES:
-        merged.setdefault(mod2rel[module], []).extend(transforms)
+        if module != rsp.GDN:
+            merged.setdefault(mod2rel[module], []).extend(transforms)
     if not all(deployed_file(TREE / rel) for rel in merged):
         pytest.skip("vllm-ascend runtime tree is not deployed")
     for rel, transforms in merged.items():
         src = (TREE / rel).read_text(encoding="utf-8", errors="replace")
         try:
-            rsp.apply_transforms(src, transforms)
+            if rel == mod2rel[rsp.GDN]:
+                rsp.scoped_gdn_source(src)
+            else:
+                rsp.apply_transforms(src, transforms)
         except rsp.AnchorError as exc:
             mismatches.append(f"{rel}: {exc}")
-    # C-ON 验证态钉子(1021-182645 L3 8/8): views 变换的 empty_like 恒 2
     gdn_src = (TREE / "ops/gdn.py").read_text(encoding="utf-8", errors="replace")
     assert "ops/gdn.py" in merged
-    out_gdn, _ = rsp.apply_transforms(gdn_src, merged["ops/gdn.py"])
-    assert out_gdn.count("torch.empty_like(mixed_qkv_non_spec)") == 3, (
-        "views 验证态漂移(C-ON 运行时: stock prefill 回退 1 + views 2)"
+    out_gdn = rsp.scoped_gdn_source(gdn_src)
+    assert (
+        out_gdn.count("_hust_unpack_eligible(self, mixed_qkv_non_spec, attn_metadata)")
+        == 2
+    )
+    assert "_UNPACK_VIEWS_ON =" not in out_gdn
+    assert (
+        "else:\n                output_non_spec = torch.empty_like(mixed_qkv_non_spec)"
+        in out_gdn
     )
     assert not mismatches, (
         "运行树锚点失配 -> loader fail-closed 回 stock, 载波失效"

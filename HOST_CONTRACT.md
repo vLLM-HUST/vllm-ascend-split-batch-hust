@@ -24,6 +24,25 @@ decode, unsupported graph modes, and unknown capture sizes. It must never lazily
 capture an unbounded key set or modify global forward context outside a scoped
 context manager.
 
+## GDN QKV unpack (scoped default-on)
+
+- The installed `.pth` arms `runtime_source_patches.scoped_gdn_source` before host
+  import, without importing torch or the host at interpreter startup.
+- Stock and recognized legacy GDN sources use `gdn_unpack.unpack` and the same
+  narrow guard. No host file is written and D4 conv packing is not required.
+- Default domain: Qwen3.5-35B-A3B, BF16, TP2, FULL graph, pure decode T=1/16,
+  contiguous input with per-rank Q/K/V channels 1024/1024/2048, head dimension128.
+  Graph eligibility is frozen during weight loading, outside traced forward.
+- Other shapes, models, graph modes, dtypes, prefill/mixed batches, quantization
+  and speculative decoding use stock. Explicit `VLLM_HUST_GDN_UNPACK_VIEWS=0`
+  disables the accepted path; explicit `1` does not widen it.
+- Stock anchor drift falls back unchanged. Unrecognized legacy helper/dispatcher
+  drift refuses module loading, rather than silently executing a wider old path.
+- Rollback requires setting the switch to 0 and restarting/recapturing graphs,
+  or reinstalling the previous published wheel and restarting. Physical legacy
+  tree patches remain a separate rollback responsibility.
+- This does not activate the QKV norm proposal below or change other plugins.
+
 ## GDN QKV norm tier-2 proposal (default-off)
 
 No `gdn-qkv-norm` plugin or bundle entry is exposed. The accepted kernel

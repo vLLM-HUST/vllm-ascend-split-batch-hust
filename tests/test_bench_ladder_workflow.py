@@ -373,7 +373,9 @@ def test_carrier_probe_records_absent_package_without_crashing(
     log.write_text(SERVE_LOG_MARKERS)
     # -S 起解释器 = 不处理 site-packages（等价于 overlay 里的 husk 安装被抹掉）
     site_blocker = tmp_path / "python-nosite"
-    site_blocker.write_text(f'#!/bin/sh\nexec "{sys.executable}" -S "$@"\n')
+    site_blocker.write_text(
+        f'#!/bin/sh\nunset PYTHONPATH\nexec "{sys.executable}" -S "$@"\n'
+    )
     site_blocker.chmod(0o755)
 
     doc = probe(python=str(site_blocker), log=log)

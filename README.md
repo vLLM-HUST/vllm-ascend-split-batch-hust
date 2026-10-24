@@ -18,10 +18,21 @@ See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
 pip install vllm-ascend-split-batch
 ```
 
-The published PyPI `0.1.3` release predates cascade source removal; installing it
-does not apply this checkout's deletion. `0.2.0` carries this checkout's state and
-is the current release. Receipt and mechanical criteria:
-[docs/release.md](docs/release.md) §11.10.
+PyPI `0.2.0` is the current published release; this checkout prepares `0.3.0`.
+Publication is pending until the index and Release bytes are verified.
+Receipts and mechanical criteria: [docs/release.md](docs/release.md) §11.10–11.11.
+
+**Scoped default-on GDN unpack:** on the verified 0.28 image / CANN 9.1.0 /
+2×910B2 / Qwen3.5-35B-A3B / BF16 / TP2 / FULL graph stack, contiguous pure decode
+T=1 and T=16 use the accepted unpack helper. Prefill, mixed batches, other shapes,
+models, dtypes, quantization and speculative decoding use stock. D4 conv packing
+is not required. `VLLM_HUST_GDN_UNPACK_VIEWS=0` disables this path; restart workers
+and recapture graphs after changing it. The installed `.pth` registers the import
+hook without importing torch or the host; tensor guards run only in GDN.
+Unrecognized stock source falls back unchanged; an unrecognized legacy unpack
+implementation refuses to load rather than execute an unbounded old path.
+Operator evidence: [scoped acceptance](host-proposals/ConcatD-zero-copy-unpack/20261024_final.result.json).
+This is not an end-to-end throughput claim.
 
 **What you get:** 9 `vllm.general_plugins` carriers and 6 extension bundles.
 The root split-batch bundle is planner-only and cannot be activated. There is

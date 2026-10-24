@@ -4,15 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vllm-ascend-split-batch"
-version = "0.2.0"
+version = "0.3.0"
 description = "vLLM-HUST plugin carriers for vllm-ascend: decode FIA de-mask, RoPE variant fixes, zero-cost wiring, MLP chunking and inert split-batch planning"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 dependencies = []
 # Honest maturity label: the carriers are validated on a point-pinned host build
-# (see host.version_range and docs/release.md §0.1), every capability defaults to
-# off, and the split-batch planner is descriptor-only.
+# (see host.version_range and docs/release.md §0.1); GDN unpack defaults on only
+# for the accepted T1/T16 domain. The split-batch planner is descriptor-only.
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

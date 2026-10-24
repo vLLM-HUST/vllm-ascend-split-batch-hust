@@ -107,11 +107,14 @@ def test_host_source_anchors_still_unique():  # noqa: D103
 def test_install_is_default_off_and_env_armed(monkeypatch):
     monkeypatch.delitem(rsp.sys.modules, rsp.MODELS_UTILS, raising=False)
     monkeypatch.delenv(rsp.ENV_GATE_MERGE, raising=False)
-    monkeypatch.setattr(rsp, "_INSTALLED", False)
-    assert rsp.install() is False  # 默认关: 不注册钩子
-    monkeypatch.setenv(rsp.ENV_GATE_MERGE, "1")
+    monkeypatch.delitem(rsp.sys.modules, rsp.GDN, raising=False)
     monkeypatch.setattr(rsp, "_INSTALLED", False)
     monkeypatch.setattr(rsp.sys, "meta_path", list(rsp.sys.meta_path))
+    assert rsp.install() is True
+    assert rsp.GDN in rsp.sys.meta_path[0]._targets
+    assert rsp.MODELS_UTILS not in rsp.sys.meta_path[0]._targets
+    monkeypatch.setenv(rsp.ENV_GATE_MERGE, "1")
+    monkeypatch.setattr(rsp, "_INSTALLED", False)
     try:
         assert rsp.install() is True
         assert isinstance(rsp.sys.meta_path[0], rsp._Finder)
