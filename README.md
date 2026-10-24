@@ -20,8 +20,8 @@ pip install vllm-ascend-split-batch
 
 The published PyPI `0.1.3` release predates cascade source removal; installing it
 does not apply this checkout's deletion. `0.2.0` carries this checkout's state and
-is not yet on the index — until it is, build and install this checkout's wheel.
-Release receipt: [docs/release.md](docs/release.md) §11.10.
+is the current release. Receipt and mechanical criteria:
+[docs/release.md](docs/release.md) §11.10.
 
 **What you get:** 9 `vllm.general_plugins` carriers and 6 extension bundles.
 The root split-batch bundle is planner-only and cannot be activated. There is

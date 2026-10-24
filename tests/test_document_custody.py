@@ -46,7 +46,7 @@ def test_unrecovered_probes_are_explicit_and_not_successful_urls():
 
 def test_installation_consumers_and_boundary_are_retained():
     release = (ROOT / "docs/release.md").read_text()
-    for version in ("0.1.0", "0.1.1", "0.1.2", "0.1.3"):
+    for version in ("0.1.0", "0.1.1", "0.1.2", "0.1.3", "0.2.0"):
         assert f"https://pypi.org/project/vllm-ascend-split-batch/{version}/" in release
         assert f"releases/tag/v{version}" in release
     readme = (ROOT / "README.md").read_text()
