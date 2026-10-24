@@ -973,6 +973,12 @@ cmd_l0() {
   local ts; ts=$(date +%m%d-%H%M%S)
   local op=${1:-all}
   [ $# -gt 0 ] && shift
+  if [ "$op" = "ConcatDContiguous" ]; then
+    local concat_dir; concat_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    "$PY" "$concat_dir/bench_concatd_contiguous.py" "$@" \
+      --out "$RECORDS/${ts}-l0-concatd-contiguous.json"
+    return $?
+  fi
   if [ "$op" = "GdnQkvNorm" ]; then
     local norm_dir; norm_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     "$PY" "$norm_dir/bench_gdn_qkv_norm.py" "$@" \
@@ -991,6 +997,20 @@ cmd_l0() {
   # 自带 --out 放最后, 保证落 L2 的带时间戳新文件（只追加, 不覆盖既有归档）
   "$PY" "$SCRIPTS/bench-l0.py" --op "$op" "$@" \
     --out "$RECORDS/${ts}-l0.json"
+}
+
+profile_rank_dir() {
+  local window=${1:?need window} rank=${2:-0} path
+  [[ "$rank" =~ ^[0-9]+$ ]] || { echo "profile: rank 必须为非负整数" >&2; return 2; }
+  local -a matches=()
+  for path in "$window"/*_rank"$rank"_*_ascend_pt; do
+    [ -d "$path" ] && matches+=("$path")
+  done
+  if [ "${#matches[@]}" -ne 1 ]; then
+    echo "profile: rank=$rank 必须唯一匹配一个 ascend_pt，实际 ${#matches[@]}；保留原始数据，不按 mtime 回退" >&2
+    return 1
+  fi
+  printf '%s\n' "${matches[0]}"
 }
 
 cmd_profile() {
@@ -1289,8 +1309,8 @@ PYEOF
     prev=$cur; sleep 20
   done
   echo "trace 落盘稳定（$(du -sh "$prof_dir" | cut -f1)），开始解析"
-  local asc_dir; asc_dir=$(ls -td "$prof_dir"/*_ascend_pt 2>/dev/null | head -1)
-  [ -z "$asc_dir" ] && { echo "未找到 ascend_pt 目录"; return 1; }
+  local asc_dir
+  asc_dir=$(profile_rank_dir "$prof_dir" "${LADDER_PROFILE_RANK:-0}") || return $?
   # 2026-10-13: 空壳必须早退。曾在 serve 运行期间更换 --profiler-config.torch_profiler_dir 的目标
   # （我为了避开 PVC 盘满，把该路径的符号链接重指到空目录）→ CANN 侧写不进去，ascend_pt 只有空壳，
   # 而离线解析会「秒过 PARSE_DONE 但什么都不产出」，白等 12 分钟才报「缺 op_statistic.csv」。
