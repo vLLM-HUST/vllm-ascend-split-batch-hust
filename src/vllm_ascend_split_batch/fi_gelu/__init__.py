@@ -25,4 +25,4 @@ only touched on the first ``gelu_and_mul`` call).
 from .api import gelu_and_mul
 
 __all__ = ["gelu_and_mul"]
-__version__ = "0.1.3"
+__version__ = "0.2.0"
