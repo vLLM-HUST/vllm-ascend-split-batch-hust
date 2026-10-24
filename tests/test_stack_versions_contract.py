@@ -271,14 +271,23 @@ def test_no_second_declaration_site():
     )
 
 
+def _serve_env_stack_present(manifest):
+    """serve-env.sh sources the declared CANN set_env.sh; without it rc!=0."""
+    return deployed_file(Path(manifest["locations"]["cann_home"]) / "set_env.sh")
+
+
 def test_serve_env_without_selection_uses_repo_manifest(manifest):
+    if not _serve_env_stack_present(manifest):
+        pytest.skip("declared CANN stack not installed on this host")
     rc, serving, stderr = _source_serve_env()
     assert rc == 0, stderr
     assert serving == manifest["locations"]["serving_python"]
 
 
-def test_serve_env_selects_declared_manifest(tmp_path, candidate):
+def test_serve_env_selects_declared_manifest(tmp_path, candidate, manifest):
     """STACK_MANIFEST must change which interpreter serving resolves to."""
+    if not _serve_env_stack_present(manifest):
+        pytest.skip("declared CANN stack not installed on this host")
     snapshot = tmp_path / "candidate.json"
     relocated = str(tmp_path / "candidate-venv" / "bin" / "python")
     candidate.main(["--serving-python", relocated, "--out", str(snapshot)])

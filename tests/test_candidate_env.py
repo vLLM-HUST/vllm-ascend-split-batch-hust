@@ -122,8 +122,21 @@ print(json.dumps(out))
         assert name in origin or f"{name.replace('_', '/')}" in origin, (name, origin)
 
 
+def _serve_env_stack_present():
+    """serve-env.sh sources the declared CANN set_env.sh; without it rc!=0."""
+    try:
+        cann = json.loads((REPO / "stack-versions.json").read_text(encoding="utf-8"))[
+            "locations"
+        ]["cann_home"]
+    except (OSError, ValueError, KeyError):
+        return False
+    return deployed_file(Path(cann) / "set_env.sh")
+
+
 def test_serve_env_exports_contain_no_legacy_tree():
     """Neither PYTHONPATH nor LD_LIBRARY_PATH may re-add a retired tree."""
+    if not _serve_env_stack_present():
+        pytest.skip("declared CANN stack not installed on this host")
     body = (
         '. "$1/tools/serve-env.sh" >/dev/null 2>&1; rc=$?; '
         'printf "RC=%s\\nPP=%s\\nLLP=%s\\n" "$rc" '

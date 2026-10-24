@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _deployment import deployed_file
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "bench-ladder.sh"
@@ -129,9 +130,12 @@ def _vllm_resolution(**env_extra: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_serve_entry_defaults_to_the_pinned_interpreter() -> None:
+    pinned = Path("/usr/local/python3.12.13/bin/vllm")
+    if not deployed_file(pinned):
+        pytest.skip("pinned serving interpreter not installed on this host")
     proc = _vllm_resolution()
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == "/usr/local/python3.12.13/bin/vllm"
+    assert proc.stdout.strip() == str(pinned)
 
 
 def test_serve_entry_honours_explicit_vllm() -> None:
