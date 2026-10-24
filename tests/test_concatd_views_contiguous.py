@@ -107,3 +107,49 @@ def test_runtime_patch_matches_carrier():
     assert len(added) == 3
     assert all(line in source for line in added)
     assert all(".contiguous().view(" in line for line in added)
+
+
+@pytest.mark.parametrize("rows", [1, 2, 8, 16, 32])
+@pytest.mark.parametrize("prefills", [0, 1])
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("contiguous", [False, True])
+def test_production_dispatch_scope(rows, prefills, enabled, contiguous):
+    import textwrap
+
+    source = next(
+        new
+        for _, new, _ in rsp._VIEWS_TRANSFORMS
+        if "elif mixed_qkv_non_spec.is_contiguous()" in new
+    )
+    calls = []
+
+    def stock(x):
+        if x is None:
+            return None, None, None
+        calls.append("stock")
+        return "stock", "stock", "stock"
+
+    def views(x, layer):
+        calls.append("views")
+        return "views", "views", "views"
+
+    namespace = {"_UNPACK_VIEWS_ON": enabled, "_unpack_mixed_qkv_views": views}
+    body = textwrap.indent(textwrap.dedent(source), "    ")
+    exec(
+        "def dispatch(self, attn_metadata, mixed_qkv_spec, mixed_qkv_non_spec):\n"
+        + body
+        + "\n    return query_non_spec, key_non_spec, value_non_spec\n",
+        namespace,
+    )
+    mixed = torch.zeros(rows, 4096) if contiguous else torch.zeros(rows, 8192)[:, ::2]
+    got = namespace["dispatch"](
+        SimpleNamespace(rearrange_mixed_qkv=stock),
+        SimpleNamespace(num_prefills=prefills),
+        None,
+        mixed,
+    )
+    expected = (
+        "views" if enabled and not prefills and rows == 1 and contiguous else "stock"
+    )
+    assert calls == [expected]
+    assert got == (expected,) * 3
