@@ -30,7 +30,7 @@
 | `aot_cache_guard` | 编译期 AOTAutograd 缓存 | 0 | 0 | 0 | 稳态窗口不可见；只影响启动/预热 |
 | `fi_sampling` | decode 采样路径 | ≤1.73 | 0.16 | 0.47 | 低于两道门槛 |
 | `rope_fix` | `split_qkv_rmsnorm_mrope_kernel` | ≤2.00 | 0.18 | 0.54 | 低于两道门槛 |
-| `gdn_merge_inproj` | `in_proj_ba` 的 `MatMulV2` | ≤12.48 | 1.12 | 3.36 | 低于墙钟门槛 3.1×；仅 `computing` 侧理论上可判 |
+| `gdn_merge_inproj` | `in_proj_ba` 的 `MatMulV2` | 0 新增 | 0 | 0 | **已落地**：并入 W3-F2 运行树补丁（`gdn.py` `_w3f2_merged`），基线态已生效 |
 
 `fi_sampling` 的上界取 top-25 最低项 `Abs`（1.73 ms）：采样相关算子在 profile 里不入 top-25，整条路径全消也不超过该值。
 
@@ -41,11 +41,13 @@
 理由：收益上界低于可测量门槛。此类改动的"通过"无法与平台噪声区分，因此不能作为可发布结论；
 结案文本即为"上限 X ms = Y% stage，低于门槛"，不进入基线。
 
-`gdn_merge_inproj` 附带两条边界：
+`gdn_merge_inproj` 与探针结论的差别（易误读，单列）：
 
-- 墙钟侧不可见（1.12% ≪ 3.5%），只有 `computing` 侧名义可判（3.36% vs 0.3% 地板）；
-- 它是六条里唯一存在真实源码缝隙的一条（0.28 的 `gdn.py` 无 in-proj 合并挂点）。
-  若未来要验，单次 `serve --profile light` + 只读 `computing` 与 `MatMulV2` total 即可，不需要配对设计。
+- 探针报"仅 `gdn_merge_inproj` 真缺缝"，缺的是**插件侧 env 载体**的挂点，不是合并本身；
+- 合并在运行树补丁 **W3-F2** 里已实现（`gdn.py` 的 `_w3f2_merged` / `_MERGE_GDN_INPROJ`，
+  权重一次并成 `[6176,2048]`），基线态 `VLLM_HUST_GDN_MERGE_INPROJ=1` 已生效，
+  起服预检输出 `runtime_tree.w3f2=applied (w3f2_gdn_merge_applied×2)`；
+- 因此该机制**没有剩余可得收益**：表中原估的 12.48 ms 已含在基线 `MatMulV2` 的 100.27 ms 内。
 
 ## 四、重开条件
 
