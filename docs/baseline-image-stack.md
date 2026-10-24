@@ -36,10 +36,15 @@ torchaudio `2.11.0+cpu`、triton `3.5.0`、triton_ascend `3.2.2`、numpy `1.26.4
 
 ```bash
 TORCHINDUCTOR_FX_GRAPH_CACHE=0 TORCHINDUCTOR_AUTOGRAD_CACHE=0 \
+VLLM_HUST_GATE_FP32=1 VLLM_HUST_GDN_MERGE_INPROJ=1 \
 /root/venvs/hust-base/bin/vllm serve /models/Qwen3.5-35B-A3B \
   --tensor-parallel-size 2 --max-model-len 8192 --port 8000 \
   --no-enable-prefix-caching --dtype bfloat16 --served-model-name Qwen3.5-35B-A3B
 ```
+
+`VLLM_HUST_*` 必须显式给：不设不等于"关闭"，而是载体入口点存在、日志无生效 marker，
+carrier 归因记成 `present-not-observed` —— 实验会拿到"载体全关"的错位结论。
+`VLLM_HUST_SHARED_GATE_PACK` 默认关，做 OFF/ON 对照时才显式切 1。
 
 两个 inductor 开关必需：缺任一项，图捕获阶段抛
 `AssertionError: expected OutputCode, got <GraphModule>`（torch 2.13 AOT 自动微分缓存路径）。
