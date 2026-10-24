@@ -1,0 +1,68 @@
+diff --git a/tools/bench-ladder.sh b/tools/bench-ladder.sh
+index f64c945..b716b8e 100755
+--- a/tools/bench-ladder.sh
++++ b/tools/bench-ladder.sh
+@@ -1412 +1412 @@ PYEOF
+-#   (产物) 存在**与该 rank 关联**的有效 opstat: load_caliber.id **已登记**(≠ unmarked),
++#   (产物) 存在与该 rank 关联、带形状事实及 model/precision 标签的 opstat，
+@@ -1430 +1430 @@ rank_inputs_ok() {
+-# 范围有效 = load_caliber.id 已登记且 ≠ unmarked（"仅非空字符串/占位 unmarked"不算有效）。
++# 范围有效 = 形状事实 + 非占位 model/precision 标签；口径 id 仅导航。
+@@ -1439,5 +1439,18 @@ def caliber_ok(doc):
+-    """v4：范围有效 = 自带形状事实(window_coverage/prefill_token_volume) + 权重标签(cohort.model)。"""
+-    doc = doc or {}
+-    wc = (doc.get("load_caliber") or {}).get("window_coverage") or doc.get("shape_facts") or {}
+-    wl = doc.get("weight_label") or (doc.get("cohort") or {})
+-    return bool(wc.get("schema") or wc.get("prefill_token_volume")) and bool(wl.get("model"))
++    """范围有效 = 形状事实 + 非占位 model/precision 标签。"""
++    if not isinstance(doc, dict):
++        return False
++    lc = doc.get("load_caliber") or {}
++    if not isinstance(lc, dict):
++        return False
++    wc = lc.get("window_coverage") or doc.get("shape_facts") or {}
++    wl = doc.get("weight_label") or doc.get("cohort") or {}
++    if not isinstance(wc, dict) or not isinstance(wl, dict):
++        return False
++    def labelled(value):
++        return isinstance(value, str) and value.strip().lower() not in (
++            "", "unknown", "unmarked", "unspecified", "n/a", "null", "none")
++    volume = wc.get("prefill_token_volume")
++    return (wc.get("declared") is not False
++            and isinstance(volume, (int, float)) and not isinstance(volume, bool)
++            and 0 <= volume < float("inf")
++            and labelled(wl.get("model")) and labelled(wl.get("precision")))
+@@ -1452,0 +1466,2 @@ def ok(path):
++    if not isinstance(ad, str):
++        return False
+@@ -1635,2 +1650 @@ EOF
+-# 口径必须能从**已登记窗口源**核实: 关联 opstat 的 load_caliber、或显式 --caliber/LADDER_LOAD_CALIBER;
+-# 缺失/未登记/unmarked 一律失败, 让用户显式提供（不得以 unmarked 成功）。
++# 范围须有形状事实及同窗 model/precision 标签；口径 id 仅导航。
+@@ -1638,0 +1653,5 @@ cmd_recover_profile() {
++  if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
++    echo '用法: opt bench recover-profile <单 rank 窗目录|ascend_pt> [ts] [--opstat <path>] [--caliber <id>]'
++    echo '多 rank 窗口须显式传 ascend_pt；只读取既有解析产物和同窗 cohort.json，不解析原始 trace。'
++    return 0
++  fi
+@@ -1656 +1675,11 @@ cmd_recover_profile() {
+-    asc_dir=$(ls -td "$target"/*_ascend_pt 2>/dev/null | head -1)
++    local rank
++    local -a ranks=()
++    for rank in "$target"/*_ascend_pt; do
++      [ -d "$rank" ] && ranks+=("$rank")
++    done
++    if [ "${#ranks[@]}" -gt 1 ]; then
++      echo "recover-profile: 多 rank 窗口须显式指定 ascend_pt，不按 mtime 选 rank: $target" >&2
++      printf '  %s\n' "${ranks[@]}" >&2
++      return 1
++    fi
++    [ "${#ranks[@]}" -eq 1 ] && asc_dir=${ranks[0]}
+@@ -1693,0 +1723,5 @@ PYEOF
++  local cohort_path="$(dirname "$asc_dir")/cohort.json"
++  if [ ! -f "$cohort_path" ]; then
++    echo "recover-profile: 缺同窗权重标签 $cohort_path；不借用当前环境标签，不写产物。" >&2
++    return 1
++  fi
+@@ -1700,0 +1735 @@ PYEOF
++       --cohort-file "$cohort_path" \

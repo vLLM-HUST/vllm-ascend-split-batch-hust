@@ -1,0 +1,11 @@
+--- a/vllm_ascend/ops/gdn.py
++++ b/vllm_ascend/ops/gdn.py
+@@ -63,5 +63,5 @@
+     s = mixed.shape[0]
+-    q = mixed[:, :qd].view(1, s, -1, layer.head_k_dim)
+-    k = mixed[:, qd:2 * qd].view(1, s, -1, layer.head_k_dim)
+-    v = mixed[:, 2 * qd:].view(1, s, -1, layer.head_v_dim)
++    q = mixed[:, :qd].contiguous().view(1, s, -1, layer.head_k_dim)
++    k = mixed[:, qd:2 * qd].contiguous().view(1, s, -1, layer.head_k_dim)
++    v = mixed[:, 2 * qd:].contiguous().view(1, s, -1, layer.head_v_dim)
+     return q, k, v

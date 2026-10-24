@@ -667,3 +667,87 @@ def test_ladder_dispatches_gdn_qkv_unpack() -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert "bench_gdn_qkv_unpack" in proc.stdout
+
+
+def test_paired_changes_use_candidate_over_baseline(tool):
+    assert tool.paired_changes([100.0, 200.0, 0.0], [50.0, 300.0, 1.0]) == [
+        -50.0,
+        50.0,
+        None,
+    ]
+    with pytest.raises(ValueError):
+        tool.paired_changes([100.0], [])
+
+
+def shape_source_fixture(tmp_path, model="Qwen3.5-35B-A3B", precision="bf16"):
+    import csv
+
+    rank = tmp_path / "rank0_ascend_pt"
+    output = rank / "ASCEND_PROFILER_OUTPUT"
+    output.mkdir(parents=True)
+    kernel = output / "kernel_details.csv"
+    with kernel.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Type", "Input Shapes", "Output Shapes", "Input Data Types"])
+        writer.writerow(
+            ["ConcatD", "1024;1024;2048", "4096", "DT_BF16;DT_BF16;DT_BF16"]
+        )
+        writer.writerow(
+            [
+                "RecurrentGatedDeltaRule",
+                "1,8,128;1,8,128;1,16,128;1,16",
+                "1,16,128",
+                "DT_BF16",
+            ]
+        )
+    opstat = tmp_path / "source-opstat.json"
+    opstat.write_text(
+        json.dumps(
+            {"asc_dir": str(rank), "cohort": {"model": model, "precision": precision}}
+        )
+    )
+    return opstat, kernel
+
+
+def test_shape_source_binds_new_t1_run_without_relabelling_defaults(tool, tmp_path):
+    source, _ = shape_source_fixture(tmp_path)
+    evidence = tool.decode_shape_source(str(source), tool.Dims())
+    assert evidence["matched_calls"] == 1
+    assert evidence["kernel_details"]["sha256"]
+    assert tool.shape_role(1, 4096) == tool.SHAPE_SYNTHETIC
+    assert tool.shape_role(1, 4096, evidence) == tool.SHAPE_MEASURED
+    assert tool.shape_role(1, 6176, evidence) == tool.SHAPE_SYNTHETIC
+    candidate = write_candidate(tmp_path, "bound_candidate", GOOD_CANDIDATE)
+    rc, doc = run_inprocess(
+        tool,
+        tmp_path,
+        *SMALL,
+        *PACKED,
+        "--tokens",
+        "1",
+        "--candidate",
+        candidate,
+        "--shape-source-opstat",
+        str(source),
+    )
+    assert rc == 0
+    assert doc["cells"][0]["phase"] == "decode"
+    assert doc["cells"][0]["phase_source"] == "shape_source"
+    assert doc["cells"][0]["perf"]["shape_role"] == tool.SHAPE_MEASURED
+    assert doc["shape_scope"]["measured"] == ["T1-rs4096"]
+
+
+@pytest.mark.parametrize(
+    "model,precision", [("other", "bf16"), ("Qwen3.5-35B-A3B", "fp16")]
+)
+def test_shape_source_rejects_weight_mismatch(tool, tmp_path, model, precision):
+    source, _ = shape_source_fixture(tmp_path, model, precision)
+    with pytest.raises(ValueError, match="model/precision mismatch"):
+        tool.decode_shape_source(str(source), tool.Dims())
+
+
+def test_shape_source_requires_matching_decode_and_qkv_shapes(tool, tmp_path):
+    source, kernel = shape_source_fixture(tmp_path)
+    kernel.write_text(kernel.read_text().replace("1,8,128", "16,8,128"))
+    with pytest.raises(ValueError, match="matched T1"):
+        tool.decode_shape_source(str(source), tool.Dims())

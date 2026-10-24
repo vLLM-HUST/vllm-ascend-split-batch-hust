@@ -1,0 +1,225 @@
+{
+  "task": "Continue acceptance: offline preserved rank0 comparison only",
+  "base_head": "caeb8af8d604e07d43ca864691a83693d7c6a82d",
+  "branch": "028/gdn-small-op",
+  "candidate": "concatd-gdn-unpack-views",
+  "stage": "validating",
+  "default_off": true,
+  "implementation_changed": false,
+  "new_serve_starts": 0,
+  "new_captures": 0,
+  "new_l0_runs": 0,
+  "source_checks": {
+    "rank": "PASS",
+    "weight_tags_and_carriers": "PASS",
+    "window_coverage": "PASS",
+    "anchor_shapes": "PASS",
+    "original_files_match_copy": "PASS"
+  },
+  "observations": [
+    {
+      "label": "baseline_rank0",
+      "ConcatD": {
+        "count": 960,
+        "total_ms": 13.851234
+      },
+      "all_kernel_ms": 476.013,
+      "concatd_share_all_kernel_pct": 2.9098436387241526,
+      "noncommunication_kernel_sum_ms": 371.336
+    },
+    {
+      "label": "candidate_rank0",
+      "ConcatD": {
+        "count": 30,
+        "total_ms": 0.523236
+      },
+      "all_kernel_ms": 423.716,
+      "concatd_share_all_kernel_pct": 0.12348743025989108,
+      "noncommunication_kernel_sum_ms": 351.649
+    }
+  ],
+  "compute_stop_condition": {
+    "triggered": false,
+    "delta_ms": -19.687000000000012,
+    "change_pct": -5.301667492513518
+  },
+  "coverage": "exit 0; FAIL 0 / WARN 75",
+  "l3": "Reuse unchanged-source 1024-102758 capture and prior compare PASS 8/8; not rerun",
+  "acceptance_gaps": [
+    "Artifact-bound applicable-shape L0 still not formally accepted; existing T1 result is synthetic-coverage with phase null and is not relabelled.",
+    "Saturated-concurrency shape distribution is not established by this truncated single-request window. Guard keeps multirow and prefill on stock; no benefit is claimed there."
+  ],
+  "shape_facts": {
+    "decode": {
+      "mixed_shape": [
+        1,
+        4096
+      ],
+      "qkv_widths": [
+        1024,
+        1024,
+        2048
+      ],
+      "dtype": "bf16",
+      "calls_per_arm": 930,
+      "ConcatD_calls": [
+        930,
+        0
+      ]
+    },
+    "prefill": {
+      "tokens": 353,
+      "ConcatD_calls": [
+        30,
+        30
+      ]
+    },
+    "iterations": 32,
+    "captured_request_count_lower_bound": 1,
+    "source": "Shape histograms and CSV hashes in external audit.json; stride is not present in CSV, contiguous row layout is required by source guard."
+  },
+  "limitations": [
+    "Single retained L4 window per arm; no new collection or serving.",
+    "Captured request count is a lower bound, not proof of saturated concurrency.",
+    "L0 T1 artifact remains synthetic-coverage with phase null; not relabelled or accepted as saturated-shape evidence.",
+    "No end-to-end throughput claim; compute sum is only the existing stop-condition check, not the operator acceptance metric.",
+    "recover-profile omitted cohort; labelled artifact was separately generated with explicit original cohort/manifest inputs; unlabelled artifact is not used for comparison."
+  ],
+  "candidate_snapshot": {
+    "id": "concatd-gdn-unpack-views",
+    "route": "028/D4-const-hoist",
+    "caliber": "synthetic-fixed-protocol",
+    "cohort": "028-qwen35-35b-a3b-tp2-fullgraph",
+    "op": "ConcatD",
+    "phase": "decode",
+    "stop_condition": "①修复后 ConcatD 仍 >100 次 → 载体未生效，回滚；②L3 非 8/8 → 回滚；③修复后 computing 相对基线无改善 → 改判 rejected 并保持 default-off。",
+    "reopen_condition": "无",
+    "stage": "validating",
+    "scenario": "synthetic-fixed-protocol N=4, light 32 iterations; existing baseline shape source 1024-075552-opstat.json",
+    "method": "Three contiguous().view() slices; UNPACK=1, D4_CONV_PACK=0; tree helper and persisted source transform synchronized",
+    "budget": {
+      "wall_min": 25,
+      "serve_starts_max": 2,
+      "serve_starts_used": 2,
+      "authorization": "用户 next-round-plan P0"
+    },
+    "next_action": "Offline rank0 gap closed. Do not serve or recapture. Before any additional L0 experiment, obtain an explicit bounded budget extension (prior wall_min=25 / serve starts 2 of 2 consumed). Plan an artifact-bound T1/bf16/4096 decoder L0; keep current synthetic-only L0 unchanged. Saturated-concurrency shape coverage remains unproven; T>1 is guarded to stock, not an optimization claim.",
+    "reason": "Same retained window rank0 parsed offline from a verified byte-identical copy; original raw files preserved. Explicit original cohort/model/bf16/carriers and window facts match baseline: 353 prefill tokens, 32 iterations, captured-request lower bound 1. ConcatD 960/13.851234ms -> 30/0.523236ms; own all-kernel denominators 476.013/423.716ms, shares 2.909844%/0.123487%. Decode ConcatD [1024;1024;2048] disappears 930 -> 0; all 30 remaining calls are prefill. Noncommunication kernel sum 371.336 -> 351.649ms (-5.3017%); existing computing rejection condition NOT triggered. Applicable artifact-bound L0 and saturated-concurrency coverage remain unaccepted. Existing T1 L0 remains synthetic-coverage/phase null, not relabelled. Preserve validating/default-off; reuse unchanged-code L3 8/8; no throughput or graph benefit claim.",
+    "checks": {
+      "l0": {
+        "status": "PASS",
+        "evidence": [
+          {
+            "path": "/root/包体恢复/records/ladder/1024-102911-l0-gdn-qkv-unpack.json",
+            "sha256": "46fc2435b0919b2f081b3e407c25cfe787fc5c44d525e808f3b112cc2d99b04e"
+          }
+        ],
+        "scope": "Existing synthetic-only T1 cell; not accepted as artifact-bound saturated-shape performance evidence."
+      },
+      "l3": {
+        "status": "PASS",
+        "evidence": [
+          {
+            "path": "/root/包体恢复/records/ladder/1024-102758-l3.json",
+            "sha256": "cedec6f60037f57447c7ffa4067489a27376c21971d9452ea61ce6022e0f9700"
+          },
+          {
+            "path": "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/l3-baseline-env-compare.log",
+            "sha256": "a077f1b23b093a4ed12e90d74d6306f82ffce795dbdee8a969cef3a016691dc2"
+          }
+        ]
+      },
+      "l4": {
+        "status": "PASS",
+        "evidence": [
+          {
+            "path": "/root/包体恢复/records/ladder/1024-1120-rank0-labelled-opstat.json",
+            "sha256": "6a2d9b37e4c802ba93bcdec45cc7a0e897f00a0b30f0fc566b526e28dd74ef9d"
+          },
+          {
+            "path": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/audit.json",
+            "sha256": "d991154ba89db3c428b8b6756da9aa68d9ba4adf70945d796ce0328f5f08cce3"
+          }
+        ],
+        "scope": "Same-rank matched shape/weight target-op count/time; noncommunication-kernel-sum stop condition not triggered. Single retained window, not saturated-concurrency acceptance."
+      }
+    },
+    "evidence": [
+      "/root/包体恢复/records/ladder/1024-102911-l0-gdn-qkv-unpack.json",
+      "/root/包体恢复/records/ladder/1024-102758-l3.json",
+      "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/l3-baseline-env-compare.log",
+      "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/pytest-final.log",
+      "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/source-snapshot.json",
+      "/root/包体恢复/records/ladder/1024-103031-opstat.json",
+      "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/coverage.log",
+      "/root/prof/ladder-1024-102237/cohort.json",
+      "/root/prof/ladder-1024-102237/load-manifest.json",
+      "/root/包体恢复/records/ladder/1024-1120-rank0-labelled-opstat.json",
+      "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/audit.py",
+      "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/audit.json",
+      "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/coverage.log"
+    ]
+  },
+  "reproduction": {
+    "audit_script": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/audit.py",
+    "command": "python /root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/audit.py",
+    "output_policy": "audit.py uses exclusive creation; for rerun copy the script to a new evidence directory, set ROOT there and copy window plus referenced logs there; never overwrite existing audit.json",
+    "parser_log": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/labelled-opstat.log",
+    "raw_copy": "window/dp0_pp0_tp0_dcp0_ep0_rank0_2107622_20261024103031236_ascend_pt"
+  },
+  "next_action": "Offline rank0 gap closed. Do not serve or recapture. Before any additional L0 experiment, obtain an explicit bounded budget extension (prior wall_min=25 / serve starts 2 of 2 consumed). Plan an artifact-bound T1/bf16/4096 decoder L0; keep current synthetic-only L0 unchanged. Saturated-concurrency shape coverage remains unproven; T>1 is guarded to stock, not an optimization claim.",
+  "evidence": [
+    {
+      "path": "/root/包体恢复/records/ladder/1024-075552-opstat.json",
+      "sha256": "2ac09b22104f3fc6085080823b5b2d48dd04f08d0ce1b554cd9aa069f9092281"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-1120-rank0-labelled-opstat.json",
+      "sha256": "6a2d9b37e4c802ba93bcdec45cc7a0e897f00a0b30f0fc566b526e28dd74ef9d"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/audit.py",
+      "sha256": "a0d2debabb19d1eb8c9eed1e83de89b97dea4fb194dd787b95d35b44f26bb66f"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/parse.log",
+      "sha256": "e81b9beb82a6d65b8e42152540eda1bb494417d5cb525319ba2e9537519fb009"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/recover.log",
+      "sha256": "bf2fdbe83eee460f3323bf63368cdd039d0efa81cafc72cacee1e81150e33826"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/labelled-opstat.log",
+      "sha256": "931858e366d2994d0b1f9481e98fcc955ce352944a4279a55af9a91341791141"
+    },
+    {
+      "path": "/root/prof/ladder-1024-102237/cohort.json",
+      "sha256": "20c4e784c8b171ad39d2fc47ae8f26d799c6edef8d035cf009f46322e0c17361"
+    },
+    {
+      "path": "/root/prof/ladder-1024-102237/load-manifest.json",
+      "sha256": "987198a3c88ccee3760d1d4628eb5480549d0472d4361ab17ceebcb92dc26ced"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-102911-l0-gdn-qkv-unpack.json",
+      "sha256": "46fc2435b0919b2f081b3e407c25cfe787fc5c44d525e808f3b112cc2d99b04e"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-102758-l3.json",
+      "sha256": "cedec6f60037f57447c7ffa4067489a27376c21971d9452ea61ce6022e0f9700"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/audit.json",
+      "sha256": "d991154ba89db3c428b8b6756da9aa68d9ba4adf70945d796ce0328f5f08cce3"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/candidate-final.json",
+      "sha256": "2c4309111add66a583aa7206813ccc5d43d8e56ad6ce8df4255c596af766495a"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/coverage.log",
+      "sha256": "4ea18fe495e79236f547ad0585ebe58c928d039ec448bdaff18f601c3bf6cb32"
+    }
+  ]
+}

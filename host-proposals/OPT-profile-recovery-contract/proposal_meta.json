@@ -1,0 +1,121 @@
+{
+  "schema": "profile-recovery-contract-fix.v1",
+  "base_head": "bdfd07085804ddd1731c3fb0e718705e4c9960c7",
+  "branch": "028/gdn-small-op",
+  "scope": "Offline recovery and per-rank artifact delivery judgment; no model execution changes",
+  "fixes": [
+    "Pass sibling cohort.json to the producer; never substitute current environment model/precision labels. Missing cohort fails before output.",
+    "Require actual nonnegative finite prefill_token_volume and non-placeholder model/precision; schema name or model=unknown alone is not evidence. Reject declared=false and malformed metadata.",
+    "Recovery of multiple ranks requires an explicit ascend_pt path; no mtime-based implicit rank selection. Single-rank window input remains supported.",
+    "recover-profile --help reports usage without inspecting or writing a window."
+  ],
+  "boundaries": [
+    "No historical artifact is rewritten or relabelled; outputs still use new append-only filenames.",
+    "Missing parsed input still fails without automatically parsing raw trace or deleting anything.",
+    "window_opstat_ok is also used by live profile delivery and slim, so invalid weight/shape metadata can no longer authorize slimming. Existing explicit-hint association behavior is otherwise unchanged.",
+    "Live capture rank selection is not changed; this patch only makes offline recovery rank selection explicit.",
+    "No L0 applicability inference or synthetic-to-measured relabelling; operator candidate remains validating/default-off.",
+    "No service start, profile collection, model smoke, model L3 or full-repository pytest; source changes do not affect model numerics."
+  ],
+  "deployment": {
+    "canonical": "tools/bench-ladder.sh",
+    "active_entry": "/root/包体恢复/scripts/bench-ladder.sh delegates to the canonical repository script",
+    "external_scripts_changed": false
+  },
+  "rollback": {
+    "patch": "patch.diff",
+    "apply_check": "patch --dry-run -p1 -d <repository> < host-proposals/OPT-profile-recovery-contract/patch.diff",
+    "reverse_check": "patch --dry-run -R -p1 -d <repository> < host-proposals/OPT-profile-recovery-contract/patch.diff",
+    "reverse": "patch -R -p1 -d <repository> < host-proposals/OPT-profile-recovery-contract/patch.diff",
+    "verification": "Forward patch byte-identical to implementation; reverse patch byte-identical to base, tested only in a temporary checkout."
+  },
+  "checks": {
+    "targeted_tests": {
+      "command": "python -m pytest -q tests/test_profile_recovery_contract.py tests/test_bench_ladder_workflow.py",
+      "result": "56 passed; exit 0"
+    },
+    "baseline_negative_control": {
+      "source": "bdfd070:tools/bench-ladder.sh",
+      "result": "Three selected regression tests fail on base; pytest exit 1 is expected and explicitly asserted, not suppressed."
+    },
+    "ruff": {
+      "command": "ruff check tests/test_profile_recovery_contract.py",
+      "result": "PASS; exit 0"
+    },
+    "shell_syntax": {
+      "command": "bash -n tools/bench-ladder.sh",
+      "result": "PASS; exit 0"
+    },
+    "offline_real_recovery": "PASS; explicit existing rank0 input, same cohort/shape summary/ops/device_ms as independently labelled reference; no trace parsing or capture",
+    "offline_real_ambiguity": "PASS; multi-rank window refused, exit 1, no new ladder artifacts",
+    "coverage": "exit 0; FAIL 0 / WARN 75"
+  },
+  "environment": {
+    "python": "3.12.13 (main, Aug  3 2026, 03:44:26) [GCC 11.4.0]",
+    "pytest": "8.3.2"
+  },
+  "source_hashes": [
+    {
+      "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/tools/bench-ladder.sh",
+      "sha256": "7a91c1028740178e412b7bb3457c8c88adf48df636473f48852bc045e30d94d5"
+    },
+    {
+      "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/tests/test_profile_recovery_contract.py",
+      "sha256": "5fd7c734b60cadc47de1bae292c43ac696a01466e485919ae7ec7900db281f84"
+    },
+    {
+      "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/host-proposals/OPT-profile-recovery-contract/patch.diff",
+      "sha256": "76b058f0f6f547b049a8f7faad887f2ad3794b334d3a9c00fe4ffbf2104d640c"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1130Z_profile_recovery_contract/pytest.log",
+      "sha256": "d1b43adf773f6d0b9efa3235240d73d7032872045263b33521ed6e8418282c47"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1130Z_profile_recovery_contract/before-regression.log",
+      "sha256": "89a93157247239a5263b9ccb12d03350ff76b534421270d7ebb1104a49e0a035"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1130Z_profile_recovery_contract/ruff.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1130Z_profile_recovery_contract/recover.log",
+      "sha256": "73eef05806f8d9394348193cbac63ef25c3600178c0f49443efc7ead9f803c0b"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1130Z_profile_recovery_contract/rollback-and-offline-check.json",
+      "sha256": "725067e87d318af5a4f3fb1010741721e6a80de9b31fe2ada81f8739cdd33880"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1130Z_profile_recovery_contract/zero-context-patch-check.json",
+      "sha256": "82a18941e43c721ee20492bcda04fff054b3d3d3fa7203a08b8eccd3725c1ffb"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1130Z_profile_recovery_contract/ambiguous-window.log",
+      "sha256": "ba155c2223a57aef46ed4f9982fd732aaaa683a6bdcbb717012db91d969f653f"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1130Z_profile_recovery_contract/ambiguous-window-check.json",
+      "sha256": "bfc8bbd8a2a27e68bff26fbe819c4beb7f29e1803fa10ab20573a06ed42e7abe"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1130Z_profile_recovery_contract/coverage.log",
+      "sha256": "4ea18fe495e79236f547ad0585ebe58c928d039ec448bdaff18f601c3bf6cb32"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-1130-tooling-regression-recover-opstat.json",
+      "sha256": "4683013b850a837ac7c83f2637ce8bccdc48f40fcb5e6eccb0954ca322d211fd"
+    }
+  ],
+  "operator_decision": {
+    "id": "concatd-gdn-unpack-views",
+    "stage": "validating",
+    "default_off": true,
+    "changed": false,
+    "remaining": "Artifact-bound applicable L0 and saturated-concurrency evidence are not supplied by this tooling fix."
+  },
+  "remote_publication": "Not authorized; no push or release"
+}

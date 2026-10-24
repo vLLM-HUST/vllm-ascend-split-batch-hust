@@ -123,6 +123,17 @@ pip install pytest-xdist
   (`enabled`/`not-enabled`/`failed`)。归因口径: **运行树 W3F2 的合并不得归因给仓内插件**;
   fail-closed 警告断言的是"没有重复合并",不是失败。
 
+#### 1.5.3 husk 源码变换的启动与安装判据
+
+- 安装产物须包含 `zz_husk_runtime_patches.pth`；仅有 editable 路径或 general-plugin
+  入口不证明启动期钩子已注册。开关须在启动 Python 前设置；`python -S` 不执行 `.pth`。
+- fresh 进程中先 `find_spec` 再 import，分别检查 spec 与模块的 loader；被装饰的方法须
+  检查 `inspect.unwrap(method)`，不能用外层 `__code__.co_names` 判定内层补丁缺席。
+- `VLLM_HUST_MOE_GATE_MERGE_TRACE=<绝对路径>` 的 `install_all.installed` 是本次
+  加载调用新增的安装数；重复调用可为 0。合成 40 层的安装 trace 不替代真实模型证据。
+- 回滚：关闭相应 `VLLM_HUST_*` 开关，重启进程并重新捕获图；不承诺进程内卸载。
+  启动通道接通不解除锚点漂移、L3 数值校验或 light L4 的独立门禁。
+
 ## 2. 宿主与集成类
 
 ### 2.1 monkeypatch 面是弱契约
@@ -270,3 +281,41 @@ segment == 0 else K`)。栈顶均在
 triton-ascend 后需重验。
 
 **证据可用性**：已通过原路径映射和 SHA256 核实 [multibuffer graph probe](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/multibuffer-determinism-20261018/multibuffer-graph.json)；两份 separate-graph 崩溃日志仍未找回。原引用保存在 [可用性审计](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/ba341ca915c0c8556865c8f662346ced9fc0e0c7/archive/mod-git-20261022/split-probe-recovery/local-reference-audit.json)；这里只保留历史故障描述，不声称已回验原始栈或重新验证根因。
+
+### 3.7 构建栈版本契约被写成多处,并靠自适应跨版本
+
+- **症状**:torch / torch_npu / CANN / ATB 四元组与 SOC 分散在构建脚本、命令行、
+  插件 `CMakeLists.txt` 与文档里。实测一次干净构建要手敲 `-DSOC_VERSION`、
+  `-DTORCH_NPU_PATH`、venv 路径与 CANN home 四处;插件 `CMakeLists.txt` 另有一处
+  `TORCH_VERSION VERSION_EQUAL "2.13.0"` 钉点。任何一处漏改,构建仍可能"成功",
+  但产物已不是契约声明的栈。
+- **原因**:版本**契约**和能力**探测**被混为一谈。能力探测必须自适应(问的是
+  "装好的头文件支持什么"),版本契约不许自适应(问的是"这一版是哪一版")。
+  两者都自适应时,升级就变成构建自动跨过版本,而不是人做决定并补证据。
+  同理,`ascend-toolkit/latest` 这类软链是隐式自适应——装了什么就跟什么。
+- **姿势**:`stack-versions.json` 是四元组 + SOC + 路径的唯一声明源。
+  `tools/stack_versions.py --env` / `--cmake-args` 从它派生一切构建输入,
+  `tools/build-env.sh` 只应用不重述。`--check` 对实际安装值做比对并以退出码 1
+  报告漂移(含插件 `CMakeLists.txt` 的 torch 钉点),**不**自动跟随。
+  能力探测(`HAVE_ACLRT_*` 等,in CANN `ascendc.cmake`)保持自适应,不进清单。
+  升级 = 改清单一行 + 重采证据;守护测试 `tests/test_stack_versions_contract.py`
+  禁止出现第二处声明。
+- **比较口径**:`+cpu` 这类 local segment 属契约(CPU 轮子与 CUDA 轮子不可等价),
+  不剥离;PEP 440 拼写差异(`2.13.0.rc1` vs `2.13.0rc1`)按同一版本比较。
+  无卡机器查不到 SOC 不算漂移——清单仍钉住构建目标。
+- **残留**(不在构建路径,单独改):`tools/bench-ladder.sh` 的 ATB 默认值(已可用
+  `LADDER_ATB_HOME` 覆盖)、`tools/repair-ascend-login-env.sh` 的旧登录环境修复。
+  两者及其守护测试在 `tests/test_stack_versions_contract.py` 里显式登记豁免。
+
+### 3.8 ConcatD zero-copy 载体的切片 `.view()` 在图捕获期必崩(2026-10-24 复核)
+
+- **症状**:`VLLM_HUST_GDN_UNPACK_VIEWS=1` 起服时在 `capture_model` 抛
+  `view size is not compatible with input tensor's size and stride (... spans across two
+  contiguous subspaces)`;表面像"组合冲突",实际单开也崩。
+- **根因**:`gdn.py` 的 `_unpack_mixed_qkv_views` 对 `mixed` 做列切片后直接 `.view(...)`。
+  切片在 dim1 上非连续,`view` 不合法;调用点 `mixed_qkv_non_spec.is_contiguous()` 只查**输入**,
+  不覆盖切片结果。D4、W3-F2 合并均无关(关掉仍崩)。
+- **姿势**:不要把这个开关当"可用态"直接开。要启用须先改切片为 `.contiguous().view(...)`
+  或 `.reshape(...)`,再验 capture 通过 + `ConcatD` 归零 + L3 8/8;若拷贝开销吃掉收益则判 rejected。
+- **连带**:起服预检的 seam 断言不覆盖"图捕获期才暴露"的不兼容,预检放行 ≠ 能起服。
+  证据:`records/probes/20261024T0950Z_remeasure_round/summary.md` §三。

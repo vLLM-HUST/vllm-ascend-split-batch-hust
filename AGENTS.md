@@ -16,7 +16,7 @@ vllm-ascend 宿主的插件壳与 split-batch 规划契约；cascade 实现源�
    宿主能力只走官方公开面(general_plugins entry / `--additional-config` /
    `--worker-cls` / 官方 CLI+env)。不注册 `vllm.platform_plugins`。
    (旧基线 `/vllm-workspace/vllm`、`/vllm-workspace/vllm-ascend` 已于 2026-09-10 删除。)
-2. default-off:新能力必须 env-gated 且默认与原生行为零差异。
+2. 新能力默认 env-gated、default-off。已授权例外：Qwen3.5-35B-A3B/BF16/TP2 的连续纯 decode GDN 解包 T=1、T=16 默认启用；其它形状、prefill、量化或 speculative 配置回退 stock，`VLLM_HUST_GDN_UNPACK_VIEWS=0` 强制关闭。其它能力不继承此例外。
 3. bundle 保持 `import_only` 直到三项证据齐(default-off 冒烟/正确性/性能);
    `host.version_range` 禁止写 `>=0`。
 4. `provenance/` 只读;提取代码保留 Huawei 版权头与溯源。

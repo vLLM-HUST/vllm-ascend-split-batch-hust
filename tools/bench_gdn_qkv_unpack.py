@@ -42,6 +42,7 @@ L4/all-kernel 占比。
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import importlib
 import importlib.util
@@ -91,10 +92,7 @@ TIMER_SCOPE_NPU = "npu_event_elapsed_eager_chain_including_host_submission_gaps"
 TIMER_SCOPE_CPU = "host_wall_perf_counter_elapsed_including_host_submission"
 METRIC_NPU = "us_per_iter_event_elapsed"
 METRIC_CPU = "us_host_total"
-SCOPE_MEASURED = (
-    "same-shape independent eager-chain local latency per call "
-    "(baseline 4 launches vs candidate 1)"
-)
+SCOPE_MEASURED = "same-shape independent eager-chain local latency per call"
 SCOPE_SYNTHETIC = "synthetic coverage only; not a production-shape gain"
 PERF_DTYPE = "bfloat16"
 SUPPLEMENT_DTYPES = ("float16", "float32")
@@ -419,11 +417,62 @@ def _callable_file(fn) -> str:
     return os.path.abspath(getattr(mod, "__file__", "") or "")
 
 
-def shape_role(tokens: int, row_stride: int) -> str:
+def decode_shape_source(path: str, d: Dims) -> dict:
+    with open(path) as f:
+        doc = json.load(f)
+    tags = doc.get("cohort") or {}
+    if tags.get("model") != MODEL or tags.get("precision") != "bf16":
+        raise ValueError("shape source model/precision mismatch")
+    kernel = os.path.join(doc["asc_dir"], "ASCEND_PROFILER_OUTPUT/kernel_details.csv")
+    expected = f"{d.q_dim};{d.k_dim};{d.v_dim}"
+    count = recurrent = 0
+    q_shape, k_shape, v_shape = (
+        f"1,{dim // head},{head}"
+        for dim, head in (
+            (d.q_dim, d.head_k_dim),
+            (d.k_dim, d.head_k_dim),
+            (d.v_dim, d.head_v_dim),
+        )
+    )
+    with open(kernel) as f:
+        for row in csv.DictReader(f):
+            if row.get("Type") == "RecurrentGatedDeltaRule" and row.get(
+                "Input Shapes", ""
+            ).strip('"').startswith(f"{q_shape};{k_shape};{v_shape};"):
+                recurrent += 1
+            if (
+                row.get("Type") == "ConcatD"
+                and row.get("Input Shapes", "").strip('"') == expected
+                and row.get("Output Shapes", "").strip('"') == str(d.width)
+                and row.get("Input Data Types") == "DT_BF16;DT_BF16;DT_BF16"
+            ):
+                count += 1
+    if not count or recurrent != count:
+        raise ValueError("shape source lacks matched T1 bf16 ConcatD/decode calls")
+    return {
+        "opstat": {"path": os.path.abspath(path), "sha256": sha256_file(path)},
+        "kernel_details": {"path": kernel, "sha256": sha256_file(kernel)},
+        "weight_tags": tags,
+        "matched_calls": count,
+        "tokens": 1,
+        "phase": "decode",
+        "layout_boundary": "T1 contiguous input only; row stride is degenerate at T1",
+    }
+
+
+def shape_role(tokens: int, row_stride: int, source: dict | None = None) -> str:
     """两条轴都取实测事实才算 measured；否则只作合成覆盖。"""
-    if tokens in DECLARED_PHASES and row_stride == MEASURED_ROW_STRIDE:
+    known = tokens in DECLARED_PHASES or (tokens == 1 and bool(source))
+    if known and row_stride == MEASURED_ROW_STRIDE:
         return SHAPE_MEASURED
     return SHAPE_SYNTHETIC
+
+
+def paired_changes(base_runs: list[float], cand_runs: list[float]) -> list:
+    return [
+        round((c / b - 1) * 100, 3) if b else None
+        for b, c in zip(base_runs, cand_runs, strict=True)
+    ]
 
 
 def timed(fn, iters: int, device: str) -> dict:
@@ -610,7 +659,7 @@ def resolve_device(spec: str) -> tuple[str, dict]:
 def run_cell(cell: dict, ctx: dict) -> dict:
     d, device = ctx["dims"], ctx["device"]
     tokens, row_stride = cell["T"], cell["row_stride"]
-    role = shape_role(tokens, row_stride)
+    role = shape_role(tokens, row_stride, ctx.get("shape_source"))
     seed_base = ctx["seed"] + tokens * 1000 + row_stride
     doc = {
         "id": cell["id"],
@@ -695,10 +744,7 @@ def run_cell(cell: dict, ctx: dict) -> dict:
         base_key = perf["baseline"]["metric"]
         base_runs = [r[base_key] for r in rows["baseline"]]
         cand_runs = [r[base_key] for r in rows["candidate"]]
-        paired = [
-            round((c / b - 1) * 100, 3) if b else None
-            for b, c in zip(cand_runs, base_runs, strict=True)
-        ]
+        paired = paired_changes(base_runs, cand_runs)
         doc["perf"]["paired_delta_pct"] = paired
         doc["perf"]["paired_delta_pct_median"] = (
             round(statistics.median([p for p in paired if p is not None]), 3)
@@ -768,6 +814,11 @@ def main(argv: list[str] | None = None) -> int:
         " timeout；不重试）",
     )
     ap.add_argument("--out", default="", help="结果 json 输出路径")
+    ap.add_argument(
+        "--shape-source-opstat",
+        default="",
+        help="以同模型 bf16 opstat 及其 kernel CSV 绑定 T1 decode 形状",
+    )
     args = ap.parse_args(argv)
 
     global _DIMS
@@ -802,7 +853,7 @@ def main(argv: list[str] | None = None) -> int:
         "goal": {
             "op": "rearrange_mixed_qkv (GDN mixed QKV unpack)",
             "baseline": "split + reshape x3 + cat = 4 launch（逐字上游实现）",
-            "candidate": "单次 copy（同契约）",
+            "candidate": args.candidate if not args.baseline_only else None,
             "callsite": {
                 "canonical": f"{CANONICAL}:{CANONICAL_LINES}",
                 "callers": list(CALLSITES),
@@ -827,11 +878,18 @@ def main(argv: list[str] | None = None) -> int:
             "不宣称任何 e2e/吞吐/图指标收益；L0 数字不换算成端到端",
             "计时是 eager 链流程局部延迟（含链内 host 供给空洞），"
             "不是 FULL/图模式时长，也不是 L4/all-kernel 占比",
-            "T=1/2/17 与行跨距 6176 为合成覆盖，不作生产范围、不称实测 shape 收益",
+            "未绑定 shape_source 的 T=1，以及 T=2/17、行跨距 6176 仅作合成覆盖",
         ],
     }
 
     try:
+        shape_source = (
+            decode_shape_source(args.shape_source_opstat, d)
+            if args.shape_source_opstat
+            else None
+        )
+        if shape_source:
+            product["shape_source"] = shape_source
         device, hw = resolve_device(args.device)
         product["hardware"] = hw
         product["caliber"] = {
@@ -906,6 +964,9 @@ def main(argv: list[str] | None = None) -> int:
         }
         product["code"] = code_provenance(cand_info)
 
+        phases = dict(DECLARED_PHASES)
+        if shape_source:
+            phases[1] = "decode"
         cells = []
         for tokens_i in tokens:
             for stride in strides:
@@ -914,13 +975,15 @@ def main(argv: list[str] | None = None) -> int:
                         "id": f"T{tokens_i}-rs{stride}",
                         "T": tokens_i,
                         "row_stride": stride,
-                        "phase": DECLARED_PHASES.get(tokens_i),
+                        "phase": phases.get(tokens_i),
                         "phase_source": (
-                            "declared"
+                            "shape_source"
+                            if tokens_i == 1 and shape_source
+                            else "declared"
                             if tokens_i in DECLARED_PHASES
                             else "undeclared (correctness-only)"
                         ),
-                        "shape_role": shape_role(tokens_i, stride),
+                        "shape_role": shape_role(tokens_i, stride, shape_source),
                     }
                 )
         product["shape_scope"] = {
@@ -941,6 +1004,7 @@ def main(argv: list[str] | None = None) -> int:
             "arms": arms,
             "schedule": ab_schedule(arms, args.repeats),
             "candidate": candidate,
+            "shape_source": shape_source,
         }
         for cell in cells:
             budget.check(f"before cell {cell['id']}")

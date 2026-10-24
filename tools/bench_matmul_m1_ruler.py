@@ -17,14 +17,20 @@
 对窗 1021-031741 实测的 8 个 MatMulV2 权重桶，每桶测三量（全部 eager、单卡、
 ``torch.npu.Event`` 包夹）:
 
-* ``t_m1``   —— ``F.linear(x[1,H], W)`` 中位时长（现状标尺）；
-* ``bw_floor`` —— 同权重整读整写 device copy 的实测带宽换算的纯装载地板
+* ``t_m1``   —— ``F.linear(x[1,H], W)`` 中位时长（eager 现状标尺）；
+* ``bw_floor`` —— 同权重整读整写 device copy 的实测带宽**按单向折算**的纯装载地板
   （经验值: 不宣称 HBM 峰值带宽，只取本卡本态可达值）；
 * ``launch_floor`` —— 最小 GEMM ``F.linear(x[1,H], W[8,H])`` 的中位时长
   （kernel 启动/最小工作量地板探针）。
 
-判读量 ``headroom_vs_effective_floor = (t_m1 - max(bw_floor, launch_floor)) / t_m1``。
-标尺只立不裁决: kernel 替换/tiling 类方法属 W1R 相邻家族，进入前需先问。
+判读量（v2，FULL 图内）::
+
+    window_us_per_call = window_ms * 1000 / (calls_per_it * WINDOW_ITERS)
+    pct_of_read_ceiling = (weight_bytes / window_us_per_call) / READ_CEILING_GBPS
+
+理由: eager 提交地板实测 34.6–36.6µs，**大于**这些桶在 FULL 图内的 per-call 设备时间
+（v1 证据: 11.97–26.11µs），因此 eager 侧的 ``eager_headroom_pct`` 只记录不判读。
+本标尺只立不裁决: kernel 替换/tiling 类方法属 W1R 相邻家族，进入前需先问。
 
 退出码：0 成功｜1 失败｜2 用法错。
 """
@@ -41,13 +47,26 @@ import subprocess
 import sys
 import time
 
-import torch
-import torch.nn.functional as F
-
 SCHEMA = "opt-ops-l0-matmul-m1-ruler.v1"
+RULER_VERSION = 2
 HIDDEN = 2048
 TIMER_SCOPE = "npu_event_elapsed_eager_chain_including_host_submission_gaps"
 RC_OK, RC_FAIL, RC_USAGE = 0, 1, 2
+# 窗 1021-031741 的捕获范围（optstat: capture_scope=vllm-max-iterations-32）
+WINDOW_ITERS = 32
+# 同卡权重纯读上限（D7 卡记录 lm_head 纯读 1.51TB/s; 只作"距离上限"的分母, 不作收益宣称）
+READ_CEILING_GBPS = 1510.0
+# 每迭代 callsite 计数（与 CELLS 的 callsite 文本同源; 用来把 window_ms 折成 per-call）
+CALLS_PER_IT = {
+    "gdn_inproj": 30,
+    "out_o": 40,
+    "fa_qkv": 10,
+    "router": 40,
+    "shared_gate_up": 40,
+    "shared_down": 40,
+    "shared_gate": 40,
+    "lm_head": 1,
+}
 
 # 窗 1021-031741 decode M=1 实测桶（weight -> (N, K, window_ms, callsite)）
 CELLS = {
@@ -62,7 +81,69 @@ CELLS = {
 }
 
 
+def oneway_bw_gbps(bytes_moved: int, t_us: float) -> float:
+    """``copy_`` 的读+写合计字节折成**单向**带宽（GB/s）。
+
+    v1 直接拿合计字节除以耗时当单向用，`bw_floor` 因此恰好小一半
+    （gdn_inproj: 11.532µs 应为 23.06µs）。
+    """
+    return bytes_moved / 2.0 / (t_us * 1e-6) / 1e9
+
+
+def load_floor_us(nbytes: int, oneway_gbps: float) -> float:
+    """按单向可达带宽换算的纯装载地板（µs）。"""
+    return nbytes / (oneway_gbps * 1e9) * 1e6
+
+
+def window_us_per_call(window_ms: float, calls_per_it: int, iters: int) -> float:
+    """FULL 图内单次调用设备时长（µs）。"""
+    return window_ms * 1000.0 / (calls_per_it * iters)
+
+
+def read_efficiency_pct(
+    nbytes: int, us: float, ceiling_gbps: float = READ_CEILING_GBPS
+) -> float:
+    """有效读带宽占同卡纯读上限的百分比（判读量）。"""
+    eff = nbytes / (us * 1e-6) / 1e9
+    return eff / ceiling_gbps * 100.0
+
+
+CONVERGED_PCT = 70.0
+
+
+def build_reading(cells: list[dict]) -> dict:
+    """按 FULL 图内有效读占纯读上限分档（纯函数, CPU 可测）。"""
+    pct = {c["id"]: c["pct_of_read_ceiling"] for c in cells}
+    big = [c["id"] for c in cells if c["weight_mb"] > 4]
+    return {
+        "rule": (
+            f"按 FULL 图内 per-call 有效读占同卡纯读上限判读: "
+            f">={CONVERGED_PCT:.0f}% → 该桶装载面已收敛; "
+            f"<{CONVERGED_PCT:.0f}% → 存在**未测**装载空间（可达性需 kernel 通路证据, 本标尺不裁决）"
+        ),
+        "judged_metric": "pct_of_read_ceiling",
+        "read_ceiling_gbps": READ_CEILING_GBPS,
+        "converged_threshold_pct": CONVERGED_PCT,
+        "window": {"source": "窗 1021-031741", "iters": WINDOW_ITERS},
+        "per_cell_pct_of_read_ceiling": pct,
+        "converged": sorted(i for i, v in pct.items() if v >= CONVERGED_PCT),
+        "unmeasured_headroom": sorted(i for i, v in pct.items() if v < CONVERGED_PCT),
+        "big_cells": big,
+        "big_pct_median": round(
+            statistics.median([pct[i] for i in big]), 1
+        )
+        if big
+        else None,
+        "withdrawn": (
+            "v1 规则「>4MB 桶 headroom<20% → D7 无 kernel 杠杆」作废: 其分母是 eager 提交地板"
+            "（34.6–36.6µs）, 大于被测桶的 FULL 图内 per-call（11.97–26.11µs）, 等于测不到"
+        ),
+    }
+
+
 def timed(fn, iters: int) -> float:
+    import torch
+
     torch.npu.synchronize()
     start = torch.npu.Event(enable_timing=True)
     end = torch.npu.Event(enable_timing=True)
@@ -75,6 +156,8 @@ def timed(fn, iters: int) -> float:
 
 
 def median_us(fn, warmup: int, iters: int, repeats: int) -> float:
+    import torch
+
     for _ in range(warmup):
         fn()
     torch.npu.synchronize()
@@ -82,6 +165,9 @@ def median_us(fn, warmup: int, iters: int, repeats: int) -> float:
 
 
 def run_cell(name: str, n: int, k: int, ctx: dict) -> dict:
+    import torch
+    import torch.nn.functional as F
+
     dev = ctx["device"]
     gen = torch.Generator(device="cpu").manual_seed(ctx["seed"] + n + k)
     x = torch.randn(1, k, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
@@ -96,9 +182,9 @@ def run_cell(name: str, n: int, k: int, ctx: dict) -> dict:
         w2.copy_(w)
 
     t_copy = median_us(copy_w, warmup, max(iters // 4, 20), repeats)
-    bytes_moved = w.numel() * w.element_size() * 2  # 读+写
-    bw_gbps = bytes_moved / (t_copy * 1e-6) / 1e9
-    bw_floor_us = round((w.numel() * w.element_size()) / (bw_gbps * 1e9) * 1e6, 3)
+    nbytes = w.numel() * w.element_size()
+    copy_bw = oneway_bw_gbps(nbytes * 2, t_copy)
+    bw_floor_us = round(load_floor_us(nbytes, copy_bw), 3)
 
     w_min = (
         torch.randn(8, k, generator=gen, dtype=torch.float32).to(torch.bfloat16).to(dev)
@@ -106,20 +192,30 @@ def run_cell(name: str, n: int, k: int, ctx: dict) -> dict:
     t_launch = median_us(lambda: F.linear(x, w_min), warmup, iters, repeats)
 
     effective_floor = max(bw_floor_us, t_launch)
-    headroom = round((t_m1 - effective_floor) / t_m1 * 100, 2)
+    eager_headroom = round((t_m1 - effective_floor) / t_m1 * 100, 2)
+    per_call = round(
+        window_us_per_call(CELLS[name][2], CALLS_PER_IT[name], WINDOW_ITERS), 2
+    )
     doc = {
         "id": name,
         "weight": [n, k],
-        "weight_mb": round(w.numel() * w.element_size() / 1e6, 2),
+        "weight_mb": round(nbytes / 1e6, 2),
         "callsite": CELLS[name][3],
+        "calls_per_it": CALLS_PER_IT[name],
         "window_ms": CELLS[name][2],
+        "window_us_per_call": per_call,
+        "effective_read_gbps": round(nbytes / (per_call * 1e-6) / 1e9, 1),
+        "pct_of_read_ceiling": round(read_efficiency_pct(nbytes, per_call), 1),
         "t_m1_us": t_m1,
         "t_copy_us": t_copy,
-        "copy_bw_gbps": round(bw_gbps, 1),
+        "copy_bw_gbps": round(copy_bw * 2, 1),
+        "copy_bw_oneway_gbps": round(copy_bw, 1),
         "bw_floor_us": bw_floor_us,
         "t_launch_probe_us": t_launch,
         "effective_floor_us": round(effective_floor, 3),
-        "headroom_vs_effective_floor_pct": headroom,
+        "eager_headroom_pct": eager_headroom,
+        "headroom_vs_effective_floor_pct": eager_headroom,
+        "eager_headroom_judged": False,
         "binding": "bw" if bw_floor_us >= t_launch else "launch",
     }
     del x, w, w2, w_min
@@ -148,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         print("--iters/--repeats 必须 >0", file=sys.stderr)
         return RC_USAGE
     try:
+        import torch
         import torch_npu  # noqa: F401
     except Exception as exc:  # noqa: BLE001
         print(f"要求 NPU 但无法 import torch_npu: {exc!r}", file=sys.stderr)
@@ -175,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         head = None
     product = {
         "schema": SCHEMA,
+        "ruler_version": RULER_VERSION,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "status": "ok",
         "command": {
@@ -186,10 +284,11 @@ def main(argv: list[str] | None = None) -> int:
         "route": "028/D7-matmulv2-decode-fusion",
         "goal": {
             "what": "decode M=1 skinny GEMM kernel headroom 标尺（只立标尺, 不裁决 kernel 替换）",
+            "judged_metric": "pct_of_read_ceiling = FULL 图内 per-call 有效读 / 同卡纯读上限",
             "floors": {
-                "bw": "同权重整读整写 device copy 实测带宽换算（经验地板, 非峰值宣称）",
-                "launch": "最小 GEMM [8,H] 探针（启动/最小工作量地板）",
-                "effective": "max(bw, launch)",
+                "bw": "同权重 copy_ 实测带宽**单向折算**后的纯装载地板（经验地板, 非峰值宣称）",
+                "launch": "最小 GEMM [8,H] 探针（eager 启动/最小工作量地板, 只记录不判读）",
+                "effective": "max(bw, launch)（eager 侧, v2 起不参与判读）",
             },
         },
         "hardware": {
@@ -205,9 +304,12 @@ def main(argv: list[str] | None = None) -> int:
         },
         "cells": [],
         "not_claimed": [
-            "eager Event 链延迟, 不是 FULL/图模式时长; 图模式 kernel 时长以窗 1021-031741 为准",
-            "copy 带宽是读+写混合实测值, 与 GEMM 纯读装载模式不完全同构, bw_floor 是下界近似",
-            "headroom 不构成 kernel 替换收益结论; W1R 相邻家族进入需先问",
+            "eager Event 链延迟, 不是 FULL/图模式时长; 图模式 per-call 由 window_ms/calls_per_it 折算",
+            "eager 提交地板实测 34.6–36.6µs, 大于这些桶的 FULL 图内 per-call(11.97–26.11µs), "
+            "故 eager_headroom_pct 只记录不判读",
+            "copy_ 是读+写混合实测; v2 按单向折算 bw_floor（v1 误用双向, 地板小一半）",
+            "pct_of_read_ceiling 只说明与纯读上限的距离, 不构成 kernel 替换收益结论; "
+            "W1R 相邻家族进入需先问",
         ],
     }
     ctx = {
@@ -223,20 +325,13 @@ def main(argv: list[str] | None = None) -> int:
         product["cells"].append(doc)
         print(
             f"  {name:16s} W={doc['weight']} {doc['weight_mb']:>7}MB  "
-            f"t_m1={doc['t_m1_us']:>8.2f}us  bw_floor={doc['bw_floor_us']:>7.2f}us"
-            f"(@{doc['copy_bw_gbps']:.0f}GB/s)  launch={doc['t_launch_probe_us']:>5.2f}us  "
-            f"headroom={doc['headroom_vs_effective_floor_pct']:>6.2f}%  [{doc['binding']}]"
+            f"per_call={doc['window_us_per_call']:>7.2f}us  "
+            f"read={doc['effective_read_gbps']:>7.1f}GB/s "
+            f"({doc['pct_of_read_ceiling']:>5.1f}% of {READ_CEILING_GBPS:.0f})  "
+            f"eager t_m1={doc['t_m1_us']:>8.2f}us (bw_floor={doc['bw_floor_us']:>7.2f}us | "
+            f"launch={doc['t_launch_probe_us']:>5.2f}us, 不判读)"
         )
-    big = [c for c in product["cells"] if c["weight_mb"] > 4]
-    product["reading"] = {
-        "rule": ">4MB 桶 headroom<20% → D7 无 kernel 杠杆（收敛）; 单桶高 headroom 仅立候选不裁决",
-        "big_cells": [c["id"] for c in big],
-        "big_headroom_median_pct": round(
-            statistics.median([c["headroom_vs_effective_floor_pct"] for c in big]), 2
-        )
-        if big
-        else None,
-    }
+    product["reading"] = build_reading(product["cells"])
     product["budget"] = {"elapsed_s": round(time.monotonic() - t_start, 2)}
     if args.out:
         with open(args.out, "w") as f:

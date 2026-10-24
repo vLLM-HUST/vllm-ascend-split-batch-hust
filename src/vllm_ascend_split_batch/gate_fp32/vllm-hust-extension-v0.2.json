@@ -1,7 +1,7 @@
 {
   "schema_version": "0.2-experimental",
   "extension_id": "org.vllm-hust.gate-fp32",
-  "extension_version": "0.2.0",
+  "extension_version": "0.3.0",
   "kind": "in_process_plugin",
   "host": {
     "provider": "vllm",

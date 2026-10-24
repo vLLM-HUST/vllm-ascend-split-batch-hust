@@ -1,0 +1,20 @@
+{
+  "schema": "vllm-hust.stack-versions.v1",
+  "contract": {
+    "python": "3.12.13",
+    "torch": "2.13.0+cpu",
+    "torch_npu": "2.13.0rc1",
+    "numpy": "1.26.4",
+    "cann": "9.1.0",
+    "atb": "9.1.0",
+    "soc_version": "ascend910b1",
+    "cxx11_abi": true
+  },
+  "locations": {
+    "venv": "/root/venvs/hust-host-dev",
+    "serving_python": "/usr/local/python3.12.13/bin/python",
+    "cann_home": "/usr/local/Ascend/cann-9.1.0",
+    "atb_home": "/usr/local/Ascend/nnal/atb"
+  },
+  "plugin_tree": "/root/vllm-workspace/.stack/plugin-host-ascend"
+}

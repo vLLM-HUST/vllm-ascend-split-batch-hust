@@ -30,6 +30,7 @@
 | 历史实现溯源（索引 + 逐条核对结论） | [../PROVENANCE.md](../PROVENANCE.md) / [provenance-verification.md](provenance-verification.md) / [../provenance/](../provenance/)(只读) |
 | 算子落点:编译型实现独立交付；cascade 外部 wheel 依赖已断开；**Triton/纯 Python 载体在本仓** | [architecture.md](architecture.md) §2/§5 + 本仓 `src/vllm_ascend_split_batch/` |
 | 算子调度(选择)接口 | [design/operator-dispatch.md](design/operator-dispatch.md)(骨架,未接线) |
+| 载体能否进基线的判据 × 天花板门槛 × 已收口结论 | [carrier-ab-protocol.md](carrier-ab-protocol.md)（流程）+ [carrier-ceiling-closure.md](carrier-ceiling-closure.md)（算术与判定） |
 | 架构语义、编程规范、发布、踩坑、进度 | 本目录 |
 
 改行为必须同步改对应权威文档;本目录只放指针,不复制内容。

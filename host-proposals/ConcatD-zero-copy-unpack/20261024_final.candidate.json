@@ -1,0 +1,124 @@
+{
+  "id": "concatd-gdn-unpack-views",
+  "route": "028/D4-const-hoist",
+  "caliber": "synthetic-fixed-protocol",
+  "cohort": "028-qwen35-35b-a3b-tp2-fullgraph",
+  "op": "ConcatD",
+  "phase": "decode",
+  "stop_condition": "①修复后 ConcatD 仍 >100 次 → 载体未生效，回滚；②L3 非 8/8 → 回滚；③修复后 computing 相对基线无改善 → 改判 rejected 并保持 default-off。",
+  "reopen_condition": "无",
+  "stage": "accepted",
+  "scenario": "Existing registered gdn16 batched-raw shape source conc16; actual rank0 OFF window prefill5286/iterations32/request-lower-bound16; dominant decodeT16.",
+  "method": "Deployed helper three contiguous().view() slices on contiguous pure decode; persistent transformer T1-only, deployed-tree dispatcher multirow. Default-off remains.",
+  "budget": "用户授权无限实验预算及当前工作分支 push；本轮2次起服、OFF/ON各1次light L4、L0各3轮配对；服务均已停止；不追加采集。",
+  "next_action": "No further collection for the accepted T1/T16 scopes. Keep default-off; deliver current branch commits and authorized push. No main merge, tag or package release.",
+  "reason": "Scoped operator acceptance: source-bound T1 and deployed pure-decode T16 L0 improve (3 paired repeats); all QKV and actual NPU l2norm bitwise checks PASS; original sequential L3 8/8 and new plain batched16/16 compare PASS. Matched-rank0 conc16 target Cat810/13.612479ms ->0; all Cat1200/19.370755ms ->390/5.629819ms, denominator all-kernel2357.478/1983.907ms. Compute878.220 ->859.576ms does not trigger stop. Existing matched T1 totalCat960 ->30 satisfies original <100 condition. Residual390 in unequal conc16 facts are prefill/mixed/output merges, not pure-decode T16 target. No generic all-T/layout, throughput or statistical timing claim.",
+  "checks": {
+    "l0": {
+      "status": "PASS",
+      "evidence": [
+        {
+          "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/121121-l0-concatd-contiguous-labelled.json",
+          "sha256": "a924875fe2ee73f5a6bac774d2d806dcd2943d6770e54b62380dd2c765f595f5"
+        },
+        {
+          "path": "/root/包体恢复/records/ladder/1024-121121-l0-concatd-contiguous.json",
+          "sha256": "d128e4387e9ec062c7957200ff26c029d26eaa2fb682c034bc62dabfc25612f0"
+        },
+        {
+          "path": "/root/包体恢复/records/ladder/1024-115012-l0-gdn-qkv-unpack.json",
+          "sha256": "9672aa1c55c770b35508396cb3c216ace88068d7fde64e21071e3ba03b60d056"
+        }
+      ],
+      "scope": "Actual CSV matched T1/2/8/16; T32 synthetic only. All output dtypes/strides/values and actual NPU l2norm bitwise. Eager timing including host submission gaps; multirow T16 median paired change -28.947%."
+    },
+    "l3": {
+      "status": "PASS",
+      "evidence": [
+        {
+          "path": "/root/包体恢复/records/ladder/1024-120701-gdn16-l3.json",
+          "sha256": "312b5644dbdd52df5bde61e757563c31a63a939a8c1771c3bdda8341b0a0a1c3"
+        },
+        {
+          "path": "/root/包体恢复/records/ladder/1024-122059-gdn16-l3.json",
+          "sha256": "312b5644dbdd52df5bde61e757563c31a63a939a8c1771c3bdda8341b0a0a1c3"
+        },
+        {
+          "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/gdn16-compare.log",
+          "sha256": "06d6ad679db0a961b38f0e86850203945ac647dbad73d26efff73a3c6f4fac9a"
+        }
+      ],
+      "scope": "Plain unprofiled batched raw gdn16, seed42/greedy/128 each, compare identical 16/16; previous sequential8/8 also PASS."
+    },
+    "l4": {
+      "status": "PASS",
+      "evidence": [
+        {
+          "path": "/root/包体恢复/records/ladder/1024-120748-opstat.json",
+          "sha256": "fde344c4ccd9b4c448cd953568930293023cb600b132e66b6c1bf1bd39661720"
+        },
+        {
+          "path": "/root/包体恢复/records/ladder/1024-122249-opstat.json",
+          "sha256": "1a484eb6c07b6ab496414dd5d8d569664fd7fbb269d7903d9f0016baccb98124"
+        },
+        {
+          "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/audit-final.json",
+          "sha256": "a7c2d4cb035300f83caf2e368248ef5fbc13e34453d3da16734cf78607ee85b4"
+        },
+        {
+          "path": "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/audit.json",
+          "sha256": "d991154ba89db3c428b8b6756da9aa68d9ba4adf70945d796ce0328f5f08cce3"
+        }
+      ],
+      "scope": "Same rank0, model/bf16, carriers, host/graph, prefill5286/iterations32/request-lower-bound16 and anchor histograms equal. T16 static pure-decode Cat810->0. Original T1 matched window retained separately; no cross-shape subtraction. Single light L4 per arm."
+    }
+  },
+  "evidence": [
+    "/root/包体恢复/records/ladder/1024-102911-l0-gdn-qkv-unpack.json",
+    "/root/包体恢复/records/ladder/1024-102758-l3.json",
+    "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/l3-baseline-env-compare.log",
+    "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/pytest-final.log",
+    "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/source-snapshot.json",
+    "/root/包体恢复/records/ladder/1024-103031-opstat.json",
+    "/root/包体恢复/records/probes/20261024T1015Z_concatd_contiguous/coverage.log",
+    "/root/prof/ladder-1024-102237/cohort.json",
+    "/root/prof/ladder-1024-102237/load-manifest.json",
+    "/root/包体恢复/records/ladder/1024-1120-rank0-labelled-opstat.json",
+    "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/audit.py",
+    "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/audit.json",
+    "/root/包体恢复/records/probes/20261024T1120Z_concatd_acceptance/coverage.log",
+    "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/121121-l0-concatd-contiguous-labelled.json",
+    "/root/包体恢复/records/ladder/1024-121121-l0-concatd-contiguous.json",
+    "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/gdn16-compare.log",
+    "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/audit-final.json",
+    "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/coverage-final.log",
+    "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/source-final-verification.json",
+    "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/tooling-rollback.json",
+    "/root/包体恢复/records/ladder/1024-122249-opstat.json"
+  ],
+  "accepted_scope": {
+    "model": "Qwen3.5-35B-A3B",
+    "precision": "bf16",
+    "tp": 2,
+    "graph": "FULL",
+    "callsite": "contiguous pure-decode GDN QKV unpack",
+    "channels_per_rank": [
+      1024,
+      1024,
+      2048
+    ],
+    "tokens": [
+      1,
+      16
+    ],
+    "persistent_dispatcher": "T1 only",
+    "deployed_tree_dispatcher": "contiguous multirow; acceptance limited to measured T1/T16",
+    "default_off": true
+  },
+  "scope_exclusions": [
+    "No prefill/mixed-batch Cat elimination claim",
+    "T2/8: L0 dimensions matched; no optimized-callsite L4 performance acceptance",
+    "T32: synthetic L0 only",
+    "No all-T, noncontiguous-layout, MTP, other model/precision/cohort or throughput extrapolation"
+  ]
+}

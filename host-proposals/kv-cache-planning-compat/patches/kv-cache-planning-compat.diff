@@ -1,0 +1,303 @@
+diff --git a/vllm_ascend/_310p/worker/v2/model_runner.py b/vllm_ascend/_310p/worker/v2/model_runner.py
+index 0da2654a8..dcd96cd7e 100644
+--- a/vllm_ascend/_310p/worker/v2/model_runner.py
++++ b/vllm_ascend/_310p/worker/v2/model_runner.py
+@@ -19,7 +19,7 @@ from vllm.utils.math_utils import cdiv
+ from vllm.utils.platform_utils import is_pin_memory_available
+ from vllm.utils.torch_utils import get_dtype_size
+ from vllm.v1 import kv_cache_interface
+-from vllm.v1.core.kv_cache_utils import KVCacheBlockCopy
++from vllm_ascend._kv_cache_compat import KVCacheBlockCopy
+ from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
+ from vllm.v1.kv_cache_interface import (
+     AttentionSpec,
+diff --git a/vllm_ascend/_310p/worker_310p.py b/vllm_ascend/_310p/worker_310p.py
+index acbaed103..fb919ad76 100644
+--- a/vllm_ascend/_310p/worker_310p.py
++++ b/vllm_ascend/_310p/worker_310p.py
+@@ -23,7 +23,7 @@ from vllm.logger import logger
+ from vllm.utils.mem_constants import GiB_bytes
+ from vllm.utils.mem_utils import MemorySnapshot, memory_profiling
+ from vllm.utils.torch_utils import set_random_seed  # noqa: E402
+-from vllm.v1.core.kv_cache_utils import get_kv_cache_groups
++from vllm_ascend._kv_cache_compat import get_kv_cache_groups
+ 
+ from vllm_ascend._310p.kv_cache_sharing import get_310p_shared_cache_slots
+ from vllm_ascend._310p.model_runner_310p import NPUModelRunner310
+diff --git a/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/coordinator.py b/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/coordinator.py
+index ebc44de50..815992dbd 100644
+--- a/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/coordinator.py
++++ b/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/coordinator.py
+@@ -11,7 +11,7 @@ from weakref import proxy
+ from vllm.logger import logger
+ from vllm.utils.math_utils import cdiv
+ from vllm.v1.core.block_pool import BlockPool
+-from vllm.v1.core.kv_cache_utils import BlockHash, BlockHashList, KVCacheBlock
++from vllm_ascend._kv_cache_compat import BlockHash, BlockHashList, KVCacheBlock
+ from vllm.v1.core.single_type_kv_cache_manager import SingleTypeKVCacheManager
+ from vllm.v1.kv_cache_interface import (
+     FullAttentionSpec,
+diff --git a/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/kv_transfer.py b/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/kv_transfer.py
+index fae1f9104..da39b4ecb 100644
+--- a/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/kv_transfer.py
++++ b/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/kv_transfer.py
+@@ -14,7 +14,7 @@ import numpy as np
+ import torch
+ from vllm.distributed.kv_events import BlockStored
+ from vllm.logger import logger
+-from vllm.v1.core.kv_cache_utils import maybe_convert_block_hash
++from vllm_ascend._kv_cache_compat import maybe_convert_block_hash
+ 
+ from vllm_ascend.ascend_config import get_ascend_config
+ from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.attention_fence import AttentionComputeStartGate
+diff --git a/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/metadata.py b/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/metadata.py
+index 4b963e178..5b8b0738c 100644
+--- a/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/metadata.py
++++ b/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/metadata.py
+@@ -11,7 +11,7 @@ import torch
+ from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorMetadata, KVConnectorWorkerMetadata
+ from vllm.logger import logger
+ from vllm.utils.math_utils import cdiv
+-from vllm.v1.core.kv_cache_utils import BlockHash, BlockHashList
++from vllm_ascend._kv_cache_compat import BlockHash, BlockHashList
+ from vllm.v1.kv_cache_interface import FullAttentionSpec, UniformTypeKVCacheSpecs
+ 
+ from vllm_ascend.core.kv_cache_interface import is_prefix_cacheable
+diff --git a/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/pool_scheduler.py b/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/pool_scheduler.py
+index 3fad11403..e3cf04441 100644
+--- a/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/pool_scheduler.py
++++ b/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/pool_scheduler.py
+@@ -12,7 +12,7 @@ from vllm.logger import logger
+ from vllm.utils.network_utils import make_zmq_socket
+ from vllm.v1.core.block_pool import BlockPool
+ from vllm.v1.core.kv_cache_manager import KVCacheBlocks
+-from vllm.v1.core.kv_cache_utils import BlockHash
++from vllm_ascend._kv_cache_compat import BlockHash
+ from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
+ from vllm.v1.kv_cache_interface import (
+     KVCacheConfig,
+diff --git a/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/pool_worker.py b/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/pool_worker.py
+index 8b704f8c1..3bb2c180f 100644
+--- a/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/pool_worker.py
++++ b/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_store/pool_worker.py
+@@ -22,7 +22,7 @@ from vllm.distributed import (
+ )
+ from vllm.distributed.kv_events import BlockStored
+ from vllm.logger import logger
+-from vllm.v1.core.kv_cache_utils import BlockHash, maybe_convert_block_hash
++from vllm_ascend._kv_cache_compat import BlockHash, maybe_convert_block_hash
+ from vllm.v1.kv_cache_interface import (
+     KVCacheConfig,
+     MambaSpec,
+diff --git a/vllm_ascend/distributed/kv_transfer/kv_pool/kv_offload/preempt_offload/manager.py b/vllm_ascend/distributed/kv_transfer/kv_pool/kv_offload/preempt_offload/manager.py
+index 45eb78c47..f7362d6f7 100644
+--- a/vllm_ascend/distributed/kv_transfer/kv_pool/kv_offload/preempt_offload/manager.py
++++ b/vllm_ascend/distributed/kv_transfer/kv_pool/kv_offload/preempt_offload/manager.py
+@@ -17,7 +17,7 @@ from vllm.v1.core.kv_cache_coordinator import (
+     KVCacheCoordinator,
+     get_kv_cache_coordinator,
+ )
+-from vllm.v1.core.kv_cache_utils import resolve_kv_cache_block_sizes
++from vllm_ascend._kv_cache_compat import resolve_kv_cache_block_sizes
+ from vllm.v1.core.sched.output import SchedulerOutput
+ from vllm.v1.kv_cache_interface import MambaSpec, SlidingWindowSpec, UniformTypeKVCacheSpecs
+ from vllm.v1.outputs import KVConnectorOutput
+@@ -32,7 +32,7 @@ from vllm_ascend.utils import get_kv_cache_tensor_layers
+ 
+ if TYPE_CHECKING:
+     from vllm.v1.core.kv_cache_manager import KVCacheBlocks
+-    from vllm.v1.core.kv_cache_utils import BlockHashWithGroupId, KVCacheBlock
++    from vllm_ascend._kv_cache_compat import BlockHashWithGroupId, KVCacheBlock
+     from vllm.v1.kv_cache_interface import KVCacheConfig
+     from vllm.v1.request import Request
+ 
+diff --git a/vllm_ascend/models/deepseek_v41/cache_config.py b/vllm_ascend/models/deepseek_v41/cache_config.py
+index ce944e7a0..ff8838846 100644
+--- a/vllm_ascend/models/deepseek_v41/cache_config.py
++++ b/vllm_ascend/models/deepseek_v41/cache_config.py
+@@ -6,7 +6,7 @@ from dataclasses import replace
+ 
+ import torch
+ from vllm.config import VllmConfig
+-from vllm.v1.core.kv_cache_utils import may_override_num_blocks
++from vllm_ascend._kv_cache_compat import may_override_num_blocks
+ from vllm.v1.kv_cache_interface import (
+     CircularBufferSpec,
+     KVCacheConfig,
+diff --git a/vllm_ascend/models/glm5next/cache_config.py b/vllm_ascend/models/glm5next/cache_config.py
+index 755a110b1..75cfc2222 100644
+--- a/vllm_ascend/models/glm5next/cache_config.py
++++ b/vllm_ascend/models/glm5next/cache_config.py
+@@ -12,7 +12,7 @@ from dataclasses import dataclass
+ 
+ from vllm.config import VllmConfig
+ from vllm.model_executor.models.utils import extract_layer_index
+-from vllm.v1.core.kv_cache_utils import (
++from vllm_ascend._kv_cache_compat import (
+     create_kv_cache_group_specs,
+     may_override_num_blocks,
+ )
+diff --git a/vllm_ascend/models/glm5next/kv_cache.py b/vllm_ascend/models/glm5next/kv_cache.py
+index 8bf43d1e8..292e00875 100644
+--- a/vllm_ascend/models/glm5next/kv_cache.py
++++ b/vllm_ascend/models/glm5next/kv_cache.py
+@@ -10,7 +10,7 @@ from torch import nn
+ from vllm.config import CacheConfig, VllmConfig, get_current_vllm_config
+ from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
+ from vllm.v1.core.block_pool import BlockPool
+-from vllm.v1.core.kv_cache_utils import BlockHashList, KVCacheBlock
++from vllm_ascend._kv_cache_compat import BlockHashList, KVCacheBlock
+ from vllm.v1.core.single_type_kv_cache_manager import FullAttentionManager
+ from vllm.v1.kv_cache_interface import KVCacheSpec
+ from vllm.v1.request import Request
+diff --git a/vllm_ascend/patch/__init__.py b/vllm_ascend/patch/__init__.py
+index 75afedbd4..9698136b7 100644
+--- a/vllm_ascend/patch/__init__.py
++++ b/vllm_ascend/patch/__init__.py
+@@ -1,3 +1,4 @@
++from vllm_ascend import _kv_cache_compat
+ #
+ # Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
+ # This file is a part of the vllm-ascend project.
+@@ -241,7 +242,7 @@
+ #       vLLM #44243 has landed in the supported upstream version, so this
+ #       override is kept only for the drop exemption of entry 2; remove it
+ #       together with entry 2 once upstream exposes the PD role.
+-#   2. `vllm.v1.core.kv_cache_utils.get_kv_cache_config_from_groups`,
++#   2. `_kv_cache_compat.kc.get_kv_cache_config_from_groups`,
+ #      `HybridKVCacheCoordinator.find_longest_cache_hit` and
+ #      `...find_longest_cache_hit_per_group`
+ #    Why:
+@@ -266,7 +267,7 @@
+ #
+ # ** 10. File: platform/patch_kv_cache_utils.py**
+ # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-#   1. `vllm.v1.core.kv_cache_utils.resolve_kv_cache_block_sizes`
++#   1. `_kv_cache_compat.kc.resolve_kv_cache_block_sizes`
+ #      `vllm.v1.engine.core.resolve_kv_cache_block_sizes`
+ #    Why:
+ #       vLLM PR #40860 added a restriction that hybrid KV cache groups with
+diff --git a/vllm_ascend/patch/platform/patch_kv_cache_coordinator.py b/vllm_ascend/patch/platform/patch_kv_cache_coordinator.py
+index 0c358b8dc..e69d612ec 100644
+--- a/vllm_ascend/patch/platform/patch_kv_cache_coordinator.py
++++ b/vllm_ascend/patch/platform/patch_kv_cache_coordinator.py
+@@ -17,7 +17,7 @@ from vllm.v1.core.kv_cache_coordinator import (
+     SpecGroup,
+ )
+ from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
+-from vllm.v1.core.kv_cache_utils import (
++from vllm_ascend._kv_cache_compat import (
+     BlockHash,
+     BlockHashList,
+     KVCacheBlock,
+diff --git a/vllm_ascend/patch/platform/patch_kv_cache_utils.py b/vllm_ascend/patch/platform/patch_kv_cache_utils.py
+index 6861fad21..cefee0b57 100644
+--- a/vllm_ascend/patch/platform/patch_kv_cache_utils.py
++++ b/vllm_ascend/patch/platform/patch_kv_cache_utils.py
+@@ -8,7 +8,7 @@ import vllm.v1.core.kv_cache_utils
+ from vllm.config import VllmConfig
+ from vllm.logger import logger
+ from vllm.utils.math_utils import cdiv, round_up
+-from vllm.v1.core.kv_cache_utils import _approximate_gcd, may_override_num_blocks
++from vllm_ascend._kv_cache_compat import _approximate_gcd, may_override_num_blocks
+ from vllm.v1.kv_cache_interface import (
+     FullAttentionSpec,
+     KVCacheConfig,
+@@ -41,16 +41,17 @@ from vllm_ascend.models.glm5next.cache_config import (
+ from vllm_ascend.models.glm5next.kv_cache import is_glm5_next_cache_spec
+ from vllm_ascend.quantization.methods.kv_cache.turboquant import TURBOQUANT_CACHE_DTYPE
+ from vllm_ascend.quantization.methods.kv_cache.turboquant import cache as tq_cache
++from vllm_ascend import _kv_cache_compat
+ 
+ _KIMI_K3_TARGET_LAYER_PREFIX = "language_model.model.layers."
+ _KIMI_K3_DRAFT_LAYER_PREFIX = "model.layers."
+-_orig_resolve_kv_cache_block_sizes = vllm.v1.core.kv_cache_utils.resolve_kv_cache_block_sizes
+-_orig_get_kv_cache_groups_uniform_page_size = vllm.v1.core.kv_cache_utils._get_kv_cache_groups_uniform_page_size
+-_orig_get_kv_cache_groups = vllm.v1.core.kv_cache_utils.get_kv_cache_groups
+-_orig_get_packed_kv_cache_groups = vllm.v1.core.kv_cache_utils._get_packed_kv_cache_groups
+-_orig_get_kv_cache_config_from_groups = vllm.v1.core.kv_cache_utils.get_kv_cache_config_from_groups
+-_orig_max_memory_usage_bytes_from_groups = vllm.v1.core.kv_cache_utils._max_memory_usage_bytes_from_groups
+-_orig_pool_bytes_per_block = vllm.v1.core.kv_cache_utils._pool_bytes_per_block
++_orig_resolve_kv_cache_block_sizes = _kv_cache_compat.kc.resolve_kv_cache_block_sizes
++_orig_get_kv_cache_groups_uniform_page_size = _kv_cache_compat.kc._get_kv_cache_groups_uniform_page_size
++_orig_get_kv_cache_groups = _kv_cache_compat.kc.get_kv_cache_groups
++_orig_get_packed_kv_cache_groups = _kv_cache_compat.kc._get_packed_kv_cache_groups
++_orig_get_kv_cache_config_from_groups = _kv_cache_compat.kc.get_kv_cache_config_from_groups
++_orig_max_memory_usage_bytes_from_groups = _kv_cache_compat.kc._max_memory_usage_bytes_from_groups
++_orig_pool_bytes_per_block = _kv_cache_compat.kc._pool_bytes_per_block
+ if UniformTypeKVCacheSpecs.max_num_blocks_per_req is KVCacheSpec.max_num_blocks_per_req:
+ 
+     def _uniform_type_max_num_blocks_per_req(
+@@ -405,7 +406,7 @@ def _ascend_get_packed_kv_cache_groups(
+         groups,
+         use_trailing_layer_fallback=cache_utils._uses_trailing_mtp_layers(vllm_config),
+     )
+-    vllm.v1.core.kv_cache_utils._warn_if_unannotated_eagle_mamba(
++    _kv_cache_compat.kc._warn_if_unannotated_eagle_mamba(
+         vllm_config,
+         groups,
+     )
+@@ -661,17 +662,17 @@ def _ascend_get_kv_cache_config_from_groups(
+     return kv_cache_config
+ 
+ 
+-vllm.v1.core.kv_cache_utils.resolve_kv_cache_block_sizes = _ascend_resolve_kv_cache_block_sizes
++_kv_cache_compat.kc.resolve_kv_cache_block_sizes = _ascend_resolve_kv_cache_block_sizes
+ assert _orig_get_packed_kv_cache_groups is not None
+-vllm.v1.core.kv_cache_utils._get_packed_kv_cache_groups = _ascend_get_packed_kv_cache_groups
+-vllm.v1.core.kv_cache_utils._get_kv_cache_groups_uniform_page_size = _get_kv_cache_groups_uniform_page_size
+-vllm.v1.core.kv_cache_utils.get_kv_cache_groups = _get_glm5_next_kv_cache_groups
++_kv_cache_compat.kc._get_packed_kv_cache_groups = _ascend_get_packed_kv_cache_groups
++_kv_cache_compat.kc._get_kv_cache_groups_uniform_page_size = _get_kv_cache_groups_uniform_page_size
++_kv_cache_compat.kc.get_kv_cache_groups = _get_glm5_next_kv_cache_groups
+ KVCacheConfig.has_mamba_layers = property(  # type: ignore[assignment]
+     _kv_cache_config_has_mamba_layers
+ )
+-vllm.v1.core.kv_cache_utils.get_kv_cache_config_from_groups = _ascend_get_kv_cache_config_from_groups
+-vllm.v1.core.kv_cache_utils._max_memory_usage_bytes_from_groups = _ascend_max_memory_usage_bytes_from_groups
+-vllm.v1.core.kv_cache_utils._pool_bytes_per_block = _ascend_pool_bytes_per_block
++_kv_cache_compat.kc.get_kv_cache_config_from_groups = _ascend_get_kv_cache_config_from_groups
++_kv_cache_compat.kc._max_memory_usage_bytes_from_groups = _ascend_max_memory_usage_bytes_from_groups
++_kv_cache_compat.kc._pool_bytes_per_block = _ascend_pool_bytes_per_block
+ 
+ # Also patch the reference used by engine/core.py which imports the function directly.
+ import vllm.v1.engine.core  # noqa: E402
+diff --git a/vllm_ascend/quantization/methods/kv_cache/turboquant/cache.py b/vllm_ascend/quantization/methods/kv_cache/turboquant/cache.py
+index 44c3bc74a..a7b45653e 100644
+--- a/vllm_ascend/quantization/methods/kv_cache/turboquant/cache.py
++++ b/vllm_ascend/quantization/methods/kv_cache/turboquant/cache.py
+@@ -11,7 +11,7 @@ import math
+ from vllm.logger import logger
+ from vllm.utils.math_utils import round_up
+ from vllm.utils.torch_utils import get_dtype_size
+-from vllm.v1.core.kv_cache_utils import may_override_num_blocks
++from vllm_ascend._kv_cache_compat import may_override_num_blocks
+ from vllm.v1.kv_cache_interface import (
+     KVCacheGroupSpec,
+     KVCacheSpec,
+diff --git a/vllm_ascend/worker/utils.py b/vllm_ascend/worker/utils.py
+index ab17d1b60..c21ded9f1 100644
+--- a/vllm_ascend/worker/utils.py
++++ b/vllm_ascend/worker/utils.py
+@@ -6,7 +6,7 @@ import torch
+ from vllm.triton_utils import tl, triton
+ from vllm.utils.math_utils import largest_power_of_2_divisor
+ from vllm.utils.torch_utils import get_dtype_size
+-from vllm.v1.core.kv_cache_utils import KVCacheBlockCopy
++from vllm_ascend._kv_cache_compat import KVCacheBlockCopy
+ from vllm.v1.kv_cache_interface import FullAttentionSpec, MLAAttentionSpec
+ from vllm.v1.worker.utils import AttentionGroup, KVBlockZeroer
+ 
+diff --git a/vllm_ascend/worker/worker.py b/vllm_ascend/worker/worker.py
+index 22cdead33..b68afb8ea 100644
+--- a/vllm_ascend/worker/worker.py
++++ b/vllm_ascend/worker/worker.py
+@@ -54,7 +54,7 @@ from vllm.tasks import SupportedTask
+ from vllm.utils.mem_constants import GiB_bytes
+ from vllm.utils.mem_utils import MemorySnapshot, format_gib, memory_profiling
+ from vllm.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE
+-from vllm.v1.core.kv_cache_utils import get_kv_cache_groups, unify_hybrid_kv_cache_specs
++from vllm_ascend._kv_cache_compat import get_kv_cache_groups, unify_hybrid_kv_cache_specs
+ from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
+ from vllm.v1.kv_cache_interface import (
+     AttentionSpec,

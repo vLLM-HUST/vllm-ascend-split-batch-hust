@@ -13,13 +13,21 @@
 
 """Split-batch planning contracts and inert runtime metadata."""
 
-from .planner import (
-    DualPadPlan,
-    SplitBatchConfig,
-    SplitSlice,
-    plan_dual_pad,
-    precheck_reason,
-)
+
+def __getattr__(name):
+    if name in {
+        "DualPadPlan",
+        "SplitBatchConfig",
+        "SplitSlice",
+        "plan_dual_pad",
+        "precheck_reason",
+    }:
+        from . import planner
+
+        value = getattr(planner, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class VllmAscendSplitBatchContractProposal:

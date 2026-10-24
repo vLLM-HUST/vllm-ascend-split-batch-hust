@@ -24,6 +24,25 @@ decode, unsupported graph modes, and unknown capture sizes. It must never lazily
 capture an unbounded key set or modify global forward context outside a scoped
 context manager.
 
+## GDN QKV unpack (scoped default-on)
+
+- The installed `.pth` arms `runtime_source_patches.scoped_gdn_source` before host
+  import, without importing torch or the host at interpreter startup.
+- Stock and recognized legacy GDN sources use `gdn_unpack.unpack` and the same
+  narrow guard. No host file is written and D4 conv packing is not required.
+- Default domain: Qwen3.5-35B-A3B, BF16, TP2, FULL graph, pure decode T=1/16,
+  contiguous input with per-rank Q/K/V channels 1024/1024/2048, head dimension128.
+  Graph eligibility is frozen during weight loading, outside traced forward.
+- Other shapes, models, graph modes, dtypes, prefill/mixed batches, quantization
+  and speculative decoding use stock. Explicit `VLLM_HUST_GDN_UNPACK_VIEWS=0`
+  disables the accepted path; explicit `1` does not widen it.
+- Stock anchor drift falls back unchanged. Unrecognized legacy helper/dispatcher
+  drift refuses module loading, rather than silently executing a wider old path.
+- Rollback requires setting the switch to 0 and restarting/recapturing graphs,
+  or reinstalling the previous published wheel and restarting. Physical legacy
+  tree patches remain a separate rollback responsibility.
+- This does not activate the QKV norm proposal below or change other plugins.
+
 ## GDN QKV norm tier-2 proposal (default-off)
 
 No `gdn-qkv-norm` plugin or bundle entry is exposed. The accepted kernel
@@ -293,3 +312,39 @@ be extrapolated to another caliber, cohort, `capture_size` or the eager path.
   `gen_patch.py --check` 只对**未打补丁的宿主/镜像 blob** 有意义（部署态见上一条回滚说明）。
 - CPU 门：`tests/test_w1r_gmm_tuning_patch.py`（补丁正/反向、生成器 byte-identical、
   fail-closed、零模块级 import/IO、白名单解析、dump schema 与 invariant）。
+
+## MoE 双门合并 router + shared_expert_gate（default-off，锚点变换）
+
+状态：**本仓载体，default-off**。安装器 `vllm_ascend_split_batch.moe_gate_merge`，
+变换表 `runtime_source_patches._GATE_MERGE_TRANSFORMS`，env 门
+`VLLM_HUST_MOE_GATE_MERGE`（仅 `=1` 生效）。
+
+- 宿主文件：`vllm/model_executor/models/qwen3_next.py`
+  （fork HEAD `5a820400f`，文件 sha256
+  `a2ccdf974d15d122283af548fa826523503d6e5283d2116f32a13fbf1e43fe7c`，点钉）。
+  基线可复现：`git -C <host repo> cat-file -p 5a820400f:vllm/model_executor/models/qwen3_next.py | sha256sum`。
+- 为什么语义成立（**这是与已 rejected 的 router-merge 的关键区别**）：同一块内
+  `self.gate`(2048→256) 与 `self.shared_expert_gate`(2048→1) 消费**同一张** MoE 输入
+  （`qwen2_moe.py` L121 `out = F.sigmoid(self.expert_gate(x)[0]) * out`）；
+  而 attention 的 `in_proj`/`qkv_proj` 吃 `input_layernorm` 输出、router 吃
+  `post_attention_layernorm` 输出，二者无公共激活。
+- 补丁点（**仅两处**，均为锚点文本替换，失配即 `AnchorError` → loader 回 stock）：
+  ① `qwen2_moe` import 行后注入安装器 import；
+  ② `Qwen3NextSparseMoeBlock.forward` 签名块后插入 `_hust_install_gate_merge(self)`。
+  安装点是 forward 开头（**必须早于该函数体内 `self.shared_expert(...)` 调用**，
+  否则 FULL 图捕获到的仍是 stock 两路）。
+- 运行时行为：一次 `F.linear(x, cat([W_router, W_shared], 0))`（257×hidden）→
+  `out[:, :256]`（router logits）与 `out[:, 256:]`（shared gate），**两路都 contiguous**
+  （logits 进 top-k、gate 进 sigmoid 前的要求）。两个消费者拿到同一张量对象时
+  **每层只跑一次**；对象身份不成立时**重算**（正确性优先，`state.recomputes` 计数）。
+- 数值边界：若宿主 gate 暴露 `weight_fp32`（`AscendUnquantizedLinearMethod` 预铸），
+  stock 路由走 fp32 → 本载体按同一判据用 fp32 合并权重、返回 fp32 logits，
+  shared 列转回输入 dtype（**不得**让 `sigmoid(gate) * out` 被提升成 fp32）。
+- fail-closed：router 与 shared 消费者**必须同时可替换**；缺任一路则不安装、
+  保持原对象，并置 `_hust_gate_merge = False`（不再重试）。
+- 回滚：`VLLM_HUST_MOE_GATE_MERGE=0`（默认）→ 变换不注册（零注入）、安装器不执行；
+  运行中已安装的实例只需重启即可复原（无持久化状态、不改 checkpoint 键、不改宿主文件）。
+- CPU 门：`tests/test_moe_gate_merge.py`（参考实现/算术等价）、
+  `tests/test_moe_gate_merge_carrier.py`（env 门、单次 GEMM、contiguous、fp32、fail-closed）、
+  `tests/test_runtime_gate_merge_patch.py`（锚点唯一性/可编译/默认关；宿主在位时核对真实源码）。
+- 未验证：设备侧收益（L0 配对 A/B）与 bf16 重结合下的数值一致（L3 + compare）。
