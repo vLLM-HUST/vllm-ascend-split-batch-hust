@@ -1409,7 +1409,7 @@ PYEOF
 # 一个 rank 可瘦身 ⟺ 同时满足:
 #   (输入) ASCEND_PROFILER_OUTPUT/{op_statistic.csv, kernel_details.csv, ascend_pytorch_profiler_*.db}
 #            —— kernel_details=all-kernel 分母/通信输入; pt db=per-shape 签名来源
-#   (产物) 存在**与该 rank 关联**的有效 opstat: load_caliber.id **已登记**(≠ unmarked),
+#   (产物) 存在与该 rank 关联、带形状事实及 model/precision 标签的 opstat，
 #           且其 asc_dir == 该 rank 的 asc_dir（或由 --opstat 显式指定）。
 # rank_inputs_ok <asc_dir>: 0=输入齐备; 1=缺输入（打印缺失项到 stderr）。
 rank_inputs_ok() {
@@ -1427,7 +1427,7 @@ rank_inputs_ok() {
 }
 
 # window_opstat_ok <asc_dir> [opstat_hint]: 找与 asc_dir 关联、范围有效的 opstat; 打印命中路径, 0/1。
-# 范围有效 = load_caliber.id 已登记且 ≠ unmarked（"仅非空字符串/占位 unmarked"不算有效）。
+# 范围有效 = 形状事实 + 非占位 model/precision 标签；口径 id 仅导航。
 # hint = 显式 --opstat 路径（仍校验范围有效; 若其自带 asc_dir 须与目标一致）。
 window_opstat_ok() {
   local asc_dir=${1:?need asc_dir} hint=${2:-}
@@ -1436,11 +1436,24 @@ import glob, json, os, sys
 asc_dir, records, hint = sys.argv[1], sys.argv[2], sys.argv[3]
 
 def caliber_ok(doc):
-    """v4：范围有效 = 自带形状事实(window_coverage/prefill_token_volume) + 权重标签(cohort.model)。"""
-    doc = doc or {}
-    wc = (doc.get("load_caliber") or {}).get("window_coverage") or doc.get("shape_facts") or {}
-    wl = doc.get("weight_label") or (doc.get("cohort") or {})
-    return bool(wc.get("schema") or wc.get("prefill_token_volume")) and bool(wl.get("model"))
+    """范围有效 = 形状事实 + 非占位 model/precision 标签。"""
+    if not isinstance(doc, dict):
+        return False
+    lc = doc.get("load_caliber") or {}
+    if not isinstance(lc, dict):
+        return False
+    wc = lc.get("window_coverage") or doc.get("shape_facts") or {}
+    wl = doc.get("weight_label") or doc.get("cohort") or {}
+    if not isinstance(wc, dict) or not isinstance(wl, dict):
+        return False
+    def labelled(value):
+        return isinstance(value, str) and value.strip().lower() not in (
+            "", "unknown", "unmarked", "unspecified", "n/a", "null", "none")
+    volume = wc.get("prefill_token_volume")
+    return (wc.get("declared") is not False
+            and isinstance(volume, (int, float)) and not isinstance(volume, bool)
+            and 0 <= volume < float("inf")
+            and labelled(wl.get("model")) and labelled(wl.get("precision")))
 
 def ok(path):
     try:
@@ -1450,6 +1463,8 @@ def ok(path):
     if not isinstance(doc, dict) or not caliber_ok(doc):
         return False
     ad = doc.get("asc_dir") or ""
+    if not isinstance(ad, str):
+        return False
     if ad:
         return os.path.realpath(ad) == os.path.realpath(asc_dir)
     return path == hint        # 无 asc_dir: 仅显式 hint 才接受匹配
@@ -1632,10 +1647,14 @@ EOF
 # 严格 no-overwrite 安全: **不原地重解析**（避免覆盖既有 csv/db）—— 只从**已有完整产物**
 # (op_statistic.csv + kernel_details.csv + pt db)重新生成一份新 opstat（独占文件名）。
 # 若输入不完整, 明确失败并说明"不完整原始需另行受控解析", 不在本命令内隐式 analyse、不写任何文件。
-# 口径必须能从**已登记窗口源**核实: 关联 opstat 的 load_caliber、或显式 --caliber/LADDER_LOAD_CALIBER;
-# 缺失/未登记/unmarked 一律失败, 让用户显式提供（不得以 unmarked 成功）。
+# 范围须有形状事实及同窗 model/precision 标签；口径 id 仅导航。
 # 用法: bench-ladder.sh recover-profile <窗目录|*_ascend_pt> [--opstat <path>] [--caliber <id>]
 cmd_recover_profile() {
+  if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+    echo '用法: opt bench recover-profile <单 rank 窗目录|ascend_pt> [ts] [--opstat <path>] [--caliber <id>]'
+    echo '多 rank 窗口须显式传 ascend_pt；只读取既有解析产物和同窗 cohort.json，不解析原始 trace。'
+    return 0
+  fi
   local target=${1:?need 窗目录或 ascend_pt 路径}; shift || true
   local ts="" opstat_hint="${LADDER_RECOVER_OPSTAT:-}" calib="${LADDER_LOAD_CALIBER:-}"
   while [ $# -gt 0 ]; do
@@ -1653,7 +1672,17 @@ cmd_recover_profile() {
   if [ -d "$target" ] && [ "${target%_ascend_pt}" != "$target" ]; then
     asc_dir=$target
   elif [ -d "$target" ]; then
-    asc_dir=$(ls -td "$target"/*_ascend_pt 2>/dev/null | head -1)
+    local rank
+    local -a ranks=()
+    for rank in "$target"/*_ascend_pt; do
+      [ -d "$rank" ] && ranks+=("$rank")
+    done
+    if [ "${#ranks[@]}" -gt 1 ]; then
+      echo "recover-profile: 多 rank 窗口须显式指定 ascend_pt，不按 mtime 选 rank: $target" >&2
+      printf '  %s\n' "${ranks[@]}" >&2
+      return 1
+    fi
+    [ "${#ranks[@]}" -eq 1 ] && asc_dir=${ranks[0]}
   fi
   if [ -z "$asc_dir" ] || [ ! -d "$asc_dir" ]; then
     echo "recover-profile: 找不到 ascend_pt 目录: $target"; return 1
@@ -1691,6 +1720,11 @@ PYEOF
   # load_caliber.window_coverage.declared=false + gaps（模型层结构仍用本机 config 交叉核对迭代数）。
   local manifest_path; manifest_path="$(dirname "$asc_dir")/load-manifest.json"
   [ -f "$manifest_path" ] || manifest_path=""
+  local cohort_path="$(dirname "$asc_dir")/cohort.json"
+  if [ ! -f "$cohort_path" ]; then
+    echo "recover-profile: 缺同窗权重标签 $cohort_path；不借用当前环境标签，不写产物。" >&2
+    return 1
+  fi
   local model_cfg="$MODEL/config.json"
   [ -f "$model_cfg" ] || model_cfg=""
   # 独占/预留文件名: 绝不覆盖既有证据（用户传入相同 ts 也不会覆盖）
@@ -1698,6 +1732,7 @@ PYEOF
     || { echo "recover-profile: 无法预留产物路径"; return 1; }
   if ! "$PY" "$SCRIPTS/ladder-opstat.py" --asc-dir "$asc_dir" --out "$out_json" \
        --load-caliber "$caliber" --load-caliber-detail "$detail" \
+       --cohort-file "$cohort_path" \
        --window-manifest "$manifest_path" --model-config "$model_cfg"; then
     echo "!! recover-profile: L4 产物生成失败（$out_json）→ 不报恢复完成, 现场保留。"
     return 1
