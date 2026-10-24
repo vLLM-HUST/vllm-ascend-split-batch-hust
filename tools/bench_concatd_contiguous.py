@@ -166,6 +166,11 @@ def main(argv=None):
         dims = bench.Dims()
         source = shape_source(args.shape_source_opstat, dims)
         product["shape_source"] = source
+        product["cohort"] = {
+            "model": source["weight_tags"]["model"],
+            "precision": source["weight_tags"]["precision"],
+            "weight_format": "not-applicable",
+        }
         device, hw = bench.resolve_device(args.device)
         product["hardware"] = hw
         runtime_source = (

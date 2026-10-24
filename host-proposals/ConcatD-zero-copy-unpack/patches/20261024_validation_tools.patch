@@ -1,0 +1,736 @@
+diff --git a/tests/test_bench_concatd_contiguous.py b/tests/test_bench_concatd_contiguous.py
+new file mode 100644
+index 0000000..1fab364
+--- /dev/null
++++ b/tests/test_bench_concatd_contiguous.py
+@@ -0,0 +1,152 @@
++# SPDX-License-Identifier: Apache-2.0
++
++import csv
++import importlib.util
++import json
++from pathlib import Path
++from types import SimpleNamespace
++
++import pytest
++
++torch = pytest.importorskip("torch")
++TOOLS = Path(__file__).resolve().parents[1] / "tools"
++
++
++@pytest.fixture
++def tool(monkeypatch):
++    monkeypatch.syspath_prepend(str(TOOLS))
++    spec = importlib.util.spec_from_file_location(
++        "contiguous_bench", TOOLS / "bench_concatd_contiguous.py"
++    )
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++@pytest.mark.parametrize("tokens", [1, 2, 8, 16, 32])
++@pytest.mark.parametrize("dtype", ["bfloat16", "float16", "float32"])
++def test_current_helper_matches_stock_without_shared_backing_assumption(
++    tool, tokens, dtype
++):
++    dims = tool.bench.Dims()
++    x = tool.bench.build_input(tokens, dims.width, dtype, 42, True, "cpu")
++    check = tool.check_outputs(x, dtype, dims)
++    assert check["ok"]
++    assert check["comparison"]["ok"]
++    assert check["contiguous"] and check["input_unmodified"]
++    if tokens > 1:
++        outputs = tool.adapter.unpack(x)
++        assert len({t.untyped_storage().data_ptr() for t in outputs}) == 3
++
++
++def write_source(tmp_path):
++    rank = tmp_path / "rank0_ascend_pt"
++    out = rank / "ASCEND_PROFILER_OUTPUT"
++    out.mkdir(parents=True)
++    with (out / "kernel_details.csv").open("w", newline="") as f:
++        w = csv.writer(f)
++        w.writerow(["Type", "Input Shapes", "Input Data Types"])
++        w.writerow(
++            [
++                "RecurrentGatedDeltaRule",
++                "16,8,128;16,8,128;16,16,128;16,16",
++                "DT_BF16;DT_BF16;DT_BF16;FLOAT",
++            ]
++        )
++    path = tmp_path / "source-opstat.json"
++    path.write_text(
++        json.dumps(
++            {
++                "asc_dir": str(rank),
++                "cohort": {"model": "Qwen3.5-35B-A3B", "precision": "bf16"},
++            }
++        )
++    )
++    return path
++
++
++def test_shape_source_requires_actual_csv_match(tool, tmp_path):
++    path = write_source(tmp_path)
++    doc = tool.shape_source(path, tool.bench.Dims())
++    assert doc["decode_calls_by_tokens"] == {16: 1}
++    assert doc["kernel_details"]["sha256"]
++    bad = json.loads(path.read_text())
++    bad["cohort"]["precision"] = "fp16"
++    path.write_text(json.dumps(bad))
++    with pytest.raises(ValueError):
++        tool.shape_source(path, tool.bench.Dims())
++
++
++def test_paired_timing_and_consumer_gate(tool, monkeypatch):
++    values = iter([100.0, 50.0, 50.0, 100.0, 100.0, 50.0])
++    monkeypatch.setattr(
++        tool.bench, "timed", lambda fn, n, device: {"us_host_total": next(values)}
++    )
++    args = SimpleNamespace(seed=42, iters=1, repeats=3, warmup=0)
++    cell = tool.run_cell(
++        16,
++        args,
++        tool.bench.Dims(),
++        {"decode_calls_by_tokens": {16: 1}},
++        "cpu",
++        lambda x: x,
++    )
++    assert cell["ok"] and cell["shape_role"] == "measured-shape"
++    assert cell["l2norm_bitwise"] == [True, True]
++    assert cell["performance"]["paired_delta_pct"] == [-50.0, -50.0, -50.0]
++
++
++def test_failed_consumer_stops_before_timing(tool, monkeypatch):
++    calls = iter([False, True, False, True])
++
++    def normalize(x):
++        return x + 1 if next(calls) else x
++
++    def timing(*args):
++        raise AssertionError("must not time a failed numerical cell")
++
++    monkeypatch.setattr(tool.bench, "timed", timing)
++    args = SimpleNamespace(seed=42, iters=1, repeats=3, warmup=0)
++    cell = tool.run_cell(
++        16,
++        args,
++        tool.bench.Dims(),
++        {"decode_calls_by_tokens": {16: 1}},
++        "cpu",
++        normalize,
++    )
++    assert not cell["ok"]
++
++
++def test_cli_emits_weight_labels_without_copying_profile_graph_config(tool, tmp_path):
++    source = write_source(tmp_path)
++    output = tmp_path / "l0.json"
++    assert (
++        tool.main(
++            [
++                "--shape-source-opstat",
++                str(source),
++                "--device",
++                "cpu",
++                "--tokens",
++                "16",
++                "--iters",
++                "1",
++                "--repeats",
++                "1",
++                "--warmup",
++                "0",
++                "--out",
++                str(output),
++            ]
++        )
++        == 0
++    )
++    doc = json.loads(output.read_text())
++    assert doc["cohort"] == {
++        "model": "Qwen3.5-35B-A3B",
++        "precision": "bf16",
++        "weight_format": "not-applicable",
++    }
++    assert doc["hardware"]["device"] == "cpu"
++    assert doc["cells"][0]["l2norm_bitwise"] is None
+diff --git a/tests/test_bench_gdn_qkv_unpack.py b/tests/test_bench_gdn_qkv_unpack.py
+index 2b4e126..90c3c41 100644
+--- a/tests/test_bench_gdn_qkv_unpack.py
++++ b/tests/test_bench_gdn_qkv_unpack.py
+@@ -669,0 +670,84 @@ def test_ladder_dispatches_gdn_qkv_unpack() -> None:
++
++
++def test_paired_changes_use_candidate_over_baseline(tool):
++    assert tool.paired_changes([100.0, 200.0, 0.0], [50.0, 300.0, 1.0]) == [
++        -50.0,
++        50.0,
++        None,
++    ]
++    with pytest.raises(ValueError):
++        tool.paired_changes([100.0], [])
++
++
++def shape_source_fixture(tmp_path, model="Qwen3.5-35B-A3B", precision="bf16"):
++    import csv
++
++    rank = tmp_path / "rank0_ascend_pt"
++    output = rank / "ASCEND_PROFILER_OUTPUT"
++    output.mkdir(parents=True)
++    kernel = output / "kernel_details.csv"
++    with kernel.open("w", newline="") as f:
++        writer = csv.writer(f)
++        writer.writerow(["Type", "Input Shapes", "Output Shapes", "Input Data Types"])
++        writer.writerow(
++            ["ConcatD", "1024;1024;2048", "4096", "DT_BF16;DT_BF16;DT_BF16"]
++        )
++        writer.writerow(
++            [
++                "RecurrentGatedDeltaRule",
++                "1,8,128;1,8,128;1,16,128;1,16",
++                "1,16,128",
++                "DT_BF16",
++            ]
++        )
++    opstat = tmp_path / "source-opstat.json"
++    opstat.write_text(
++        json.dumps(
++            {"asc_dir": str(rank), "cohort": {"model": model, "precision": precision}}
++        )
++    )
++    return opstat, kernel
++
++
++def test_shape_source_binds_new_t1_run_without_relabelling_defaults(tool, tmp_path):
++    source, _ = shape_source_fixture(tmp_path)
++    evidence = tool.decode_shape_source(str(source), tool.Dims())
++    assert evidence["matched_calls"] == 1
++    assert evidence["kernel_details"]["sha256"]
++    assert tool.shape_role(1, 4096) == tool.SHAPE_SYNTHETIC
++    assert tool.shape_role(1, 4096, evidence) == tool.SHAPE_MEASURED
++    assert tool.shape_role(1, 6176, evidence) == tool.SHAPE_SYNTHETIC
++    candidate = write_candidate(tmp_path, "bound_candidate", GOOD_CANDIDATE)
++    rc, doc = run_inprocess(
++        tool,
++        tmp_path,
++        *SMALL,
++        *PACKED,
++        "--tokens",
++        "1",
++        "--candidate",
++        candidate,
++        "--shape-source-opstat",
++        str(source),
++    )
++    assert rc == 0
++    assert doc["cells"][0]["phase"] == "decode"
++    assert doc["cells"][0]["phase_source"] == "shape_source"
++    assert doc["cells"][0]["perf"]["shape_role"] == tool.SHAPE_MEASURED
++    assert doc["shape_scope"]["measured"] == ["T1-rs4096"]
++
++
++@pytest.mark.parametrize(
++    "model,precision", [("other", "bf16"), ("Qwen3.5-35B-A3B", "fp16")]
++)
++def test_shape_source_rejects_weight_mismatch(tool, tmp_path, model, precision):
++    source, _ = shape_source_fixture(tmp_path, model, precision)
++    with pytest.raises(ValueError, match="model/precision mismatch"):
++        tool.decode_shape_source(str(source), tool.Dims())
++
++
++def test_shape_source_requires_matching_decode_and_qkv_shapes(tool, tmp_path):
++    source, kernel = shape_source_fixture(tmp_path)
++    kernel.write_text(kernel.read_text().replace("1,8,128", "16,8,128"))
++    with pytest.raises(ValueError, match="matched T1"):
++        tool.decode_shape_source(str(source), tool.Dims())
+diff --git a/tests/test_concatd_views_contiguous.py b/tests/test_concatd_views_contiguous.py
+index ede9a48..a582a2f 100644
+--- a/tests/test_concatd_views_contiguous.py
++++ b/tests/test_concatd_views_contiguous.py
+@@ -109,0 +110,46 @@ def test_runtime_patch_matches_carrier():
++
++
++@pytest.mark.parametrize("rows", [1, 2, 8, 16, 32])
++@pytest.mark.parametrize("prefills", [0, 1])
++@pytest.mark.parametrize("enabled", [False, True])
++@pytest.mark.parametrize("contiguous", [False, True])
++def test_production_dispatch_scope(rows, prefills, enabled, contiguous):
++    import textwrap
++
++    source = next(
++        new
++        for _, new, _ in rsp._VIEWS_TRANSFORMS
++        if "elif mixed_qkv_non_spec.is_contiguous()" in new
++    )
++    calls = []
++
++    def stock(x):
++        if x is None:
++            return None, None, None
++        calls.append("stock")
++        return "stock", "stock", "stock"
++
++    def views(x, layer):
++        calls.append("views")
++        return "views", "views", "views"
++
++    namespace = {"_UNPACK_VIEWS_ON": enabled, "_unpack_mixed_qkv_views": views}
++    body = textwrap.indent(textwrap.dedent(source), "    ")
++    exec(
++        "def dispatch(self, attn_metadata, mixed_qkv_spec, mixed_qkv_non_spec):\n"
++        + body
++        + "\n    return query_non_spec, key_non_spec, value_non_spec\n",
++        namespace,
++    )
++    mixed = torch.zeros(rows, 4096) if contiguous else torch.zeros(rows, 8192)[:, ::2]
++    got = namespace["dispatch"](
++        SimpleNamespace(rearrange_mixed_qkv=stock),
++        SimpleNamespace(num_prefills=prefills),
++        None,
++        mixed,
++    )
++    expected = (
++        "views" if enabled and not prefills and rows == 1 and contiguous else "stock"
++    )
++    assert calls == [expected]
++    assert got == (expected,) * 3
+diff --git a/tests/test_profile_rank_selection.py b/tests/test_profile_rank_selection.py
+new file mode 100644
+index 0000000..8174d72
+--- /dev/null
++++ b/tests/test_profile_rank_selection.py
+@@ -0,0 +1,68 @@
++# SPDX-License-Identifier: Apache-2.0
++
++import os
++import subprocess
++from pathlib import Path
++
++import pytest
++
++SCRIPT = Path(__file__).resolve().parents[1] / "tools/bench-ladder.sh"
++
++
++def select(window, rank=None):
++    args = [str(window)] + ([] if rank is None else [str(rank)])
++    return subprocess.run(
++        [
++            "bash",
++            "-c",
++            'source "$1" __src >/dev/null 2>&1; shift; profile_rank_dir "$@"',
++            "bash",
++            str(SCRIPT),
++            *args,
++        ],
++        capture_output=True,
++        text=True,
++        timeout=30,
++    )
++
++
++def test_default_is_rank_zero_not_newest(tmp_path):
++    zero = tmp_path / "tp0_rank0_123_ascend_pt"
++    one = tmp_path / "tp1_rank1_456_ascend_pt"
++    zero.mkdir()
++    one.mkdir()
++    os.utime(zero, (1, 1))
++    os.utime(one, (2, 2))
++    assert select(tmp_path).stdout.strip() == str(zero)
++    assert select(tmp_path, 1).stdout.strip() == str(one)
++
++
++@pytest.mark.parametrize("rank", ["bad", "-1", "1; echo unsafe"])
++def test_invalid_rank_refused(tmp_path, rank):
++    proc = select(tmp_path, rank)
++    assert proc.returncode == 2
++    assert not proc.stdout
++
++
++def test_missing_rank_never_falls_back(tmp_path):
++    (tmp_path / "tp1_rank1_123_ascend_pt").mkdir()
++    proc = select(tmp_path)
++    assert proc.returncode == 1
++    assert "不按 mtime 回退" in proc.stderr
++
++
++def test_duplicate_rank_is_ambiguous(tmp_path):
++    for pid in (123, 456):
++        (tmp_path / f"tp0_rank0_{pid}_ascend_pt").mkdir()
++    proc = select(tmp_path)
++    assert proc.returncode == 1
++    assert not proc.stdout
++
++
++def test_multirow_l0_dispatch_and_live_rank_wiring():
++    source = SCRIPT.read_text()
++    assert 'if [ "$op" = "ConcatDContiguous" ]' in source
++    assert '"$concat_dir/bench_concatd_contiguous.py" "$@"' in source
++    assert (
++        'asc_dir=$(profile_rank_dir "$prof_dir" "${LADDER_PROFILE_RANK:-0}")' in source
++    )
+diff --git a/tools/bench-ladder.sh b/tools/bench-ladder.sh
+index b716b8e..ddfb2ef 100755
+--- a/tools/bench-ladder.sh
++++ b/tools/bench-ladder.sh
+@@ -975,0 +976,6 @@ cmd_l0() {
++  if [ "$op" = "ConcatDContiguous" ]; then
++    local concat_dir; concat_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
++    "$PY" "$concat_dir/bench_concatd_contiguous.py" "$@" \
++      --out "$RECORDS/${ts}-l0-concatd-contiguous.json"
++    return $?
++  fi
+@@ -995,0 +1002,14 @@ cmd_l0() {
++profile_rank_dir() {
++  local window=${1:?need window} rank=${2:-0} path
++  [[ "$rank" =~ ^[0-9]+$ ]] || { echo "profile: rank 必须为非负整数" >&2; return 2; }
++  local -a matches=()
++  for path in "$window"/*_rank"$rank"_*_ascend_pt; do
++    [ -d "$path" ] && matches+=("$path")
++  done
++  if [ "${#matches[@]}" -ne 1 ]; then
++    echo "profile: rank=$rank 必须唯一匹配一个 ascend_pt，实际 ${#matches[@]}；保留原始数据，不按 mtime 回退" >&2
++    return 1
++  fi
++  printf '%s\n' "${matches[0]}"
++}
++
+@@ -1292,2 +1312,2 @@ PYEOF
+-  local asc_dir; asc_dir=$(ls -td "$prof_dir"/*_ascend_pt 2>/dev/null | head -1)
+-  [ -z "$asc_dir" ] && { echo "未找到 ascend_pt 目录"; return 1; }
++  local asc_dir
++  asc_dir=$(profile_rank_dir "$prof_dir" "${LADDER_PROFILE_RANK:-0}") || return $?
+diff --git a/tools/bench_concatd_contiguous.py b/tools/bench_concatd_contiguous.py
+new file mode 100644
+index 0000000..7095a09
+--- /dev/null
++++ b/tools/bench_concatd_contiguous.py
+@@ -0,0 +1,211 @@
++# SPDX-License-Identifier: Apache-2.0
++
++import argparse
++import csv
++import json
++import sys
++from pathlib import Path
++
++import bench_concatd_views_adapter as adapter
++import bench_gdn_qkv_unpack as bench
++import torch
++
++
++def shape_source(path, dims):
++    doc = json.loads(Path(path).read_text())
++    tags = doc.get("cohort", {})
++    if tags.get("model") != bench.MODEL or tags.get("precision") != "bf16":
++        raise ValueError("shape source model/precision mismatch")
++    kernel = Path(doc["asc_dir"]) / "ASCEND_PROFILER_OUTPUT/kernel_details.csv"
++    counts = {}
++    with kernel.open() as f:
++        for row in csv.DictReader(f):
++            if row.get("Type") != "RecurrentGatedDeltaRule":
++                continue
++            parts = row.get("Input Shapes", "").strip('"').split(";")
++            if len(parts) < 3:
++                continue
++            tokens = int(parts[0].split(",")[0])
++            expected = [
++                f"{tokens},{dim // head},{head}"
++                for dim, head in (
++                    (dims.q_dim, dims.head_k_dim),
++                    (dims.k_dim, dims.head_k_dim),
++                    (dims.v_dim, dims.head_v_dim),
++                )
++            ]
++            if parts[:3] == expected and row.get("Input Data Types", "").startswith(
++                "DT_BF16;DT_BF16;DT_BF16;"
++            ):
++                counts[tokens] = counts.get(tokens, 0) + 1
++    if not counts:
++        raise ValueError("no matching recurrent decode shape")
++    return {
++        "opstat": {"path": str(path), "sha256": bench.sha256_file(path)},
++        "kernel_details": {"path": str(kernel), "sha256": bench.sha256_file(kernel)},
++        "weight_tags": tags,
++        "decode_calls_by_tokens": counts,
++        "layout_boundary": "contiguous conv output; no cross-layout claim",
++    }
++
++
++def check_outputs(mixed, dtype, dims):
++    before = bench.int_view_cpu(mixed, dtype).clone()
++    baseline = bench.baseline_unpack(mixed, dims)
++    candidate = adapter.unpack(mixed)
++    comparison = bench.compare_arm(baseline, candidate, dtype)
++    contiguous = all(t.is_contiguous() for t in candidate)
++    unchanged = bool(torch.equal(before, bench.int_view_cpu(mixed, dtype)))
++    return {
++        "comparison": comparison,
++        "contiguous": contiguous,
++        "input_unmodified": unchanged,
++        "ok": comparison["ok"] and contiguous and unchanged,
++    }
++
++
++def run_cell(tokens, args, dims, source, device, normalize=None):
++    numerics = {}
++    for dtype in ("bfloat16", "float16", "float32"):
++        x = bench.build_input(tokens, dims.width, dtype, args.seed, True, device)
++        numerics[dtype] = check_outputs(x, dtype, dims)
++        if not numerics[dtype]["ok"]:
++            return {"tokens": tokens, "numeric": numerics, "ok": False}
++    x = bench.build_input(tokens, dims.width, "bfloat16", args.seed + 1, False, device)
++    consumer = None
++    if normalize is not None:
++        base = bench.baseline_unpack(x, dims)
++        cand = adapter.unpack(x)
++        consumer = [
++            bool(
++                torch.equal(
++                    bench.int_view_cpu(normalize(a), "bfloat16"),
++                    bench.int_view_cpu(normalize(b), "bfloat16"),
++                )
++            )
++            for a, b in zip(base[:2], cand[:2], strict=True)
++        ]
++        if not all(consumer):
++            return {
++                "tokens": tokens,
++                "numeric": numerics,
++                "l2norm_bitwise": consumer,
++                "ok": False,
++            }
++    functions = {
++        "baseline": lambda: bench.baseline_unpack(x, dims),
++        "candidate": lambda: adapter.unpack(x),
++    }
++    for fn in functions.values():
++        for _ in range(args.warmup):
++            fn()
++    rows = {name: [] for name in functions}
++    for order in bench.ab_schedule(tuple(functions), args.repeats):
++        for name in order:
++            rows[name].append(bench.timed(functions[name], args.iters, device))
++    arms = {}
++    for name in rows:
++        median, key = bench.median_metric(rows[name], device)
++        arms[name] = {"us_median": median, "metric": key, "runs": rows[name]}
++    key = arms["baseline"]["metric"]
++    paired = bench.paired_changes(
++        [r[key] for r in rows["baseline"]], [r[key] for r in rows["candidate"]]
++    )
++    return {
++        "tokens": tokens,
++        "input_shape": [tokens, dims.width],
++        "input_stride": list(x.stride()),
++        "phase": "decode",
++        "shape_role": (
++            "measured-shape"
++            if tokens in source["decode_calls_by_tokens"]
++            else "synthetic-coverage"
++        ),
++        "numeric": numerics,
++        "l2norm_bitwise": consumer,
++        "performance": {
++            "arms": arms,
++            "paired_delta_pct": paired,
++            "timer_scope": bench.TIMER_SCOPE_NPU
++            if device == "npu"
++            else bench.TIMER_SCOPE_CPU,
++        },
++        "ok": True,
++    }
++
++
++def main(argv=None):
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--shape-source-opstat", required=True)
++    parser.add_argument("--tokens", default="1,2,8,16,32")
++    parser.add_argument("--device", choices=["npu", "cpu"], default="npu")
++    parser.add_argument("--iters", type=int, default=300)
++    parser.add_argument("--repeats", type=int, default=3)
++    parser.add_argument("--warmup", type=int, default=50)
++    parser.add_argument("--seed", type=int, default=42)
++    parser.add_argument("--out", type=Path, required=True)
++    args = parser.parse_args(argv)
++    if args.out.exists() or args.iters <= 0 or args.repeats <= 0 or args.warmup < 0:
++        parser.error("new output path and positive timing parameters required")
++    tokens = [int(x) for x in args.tokens.split(",")]
++    if not tokens or any(t <= 0 for t in tokens):
++        parser.error("tokens must be positive")
++    product = {
++        "schema": "concatd-contiguous-l0.v1",
++        "status": "failed",
++        "cells": [],
++        "command": list(sys.argv if argv is None else argv),
++        "not_claimed": [
++            "No FULL graph or throughput conversion of eager timings",
++            "Separate QKV storage is permitted by this helper; each tensor must "
++            "match stock shape/stride/dtype/values exactly",
++            "Supplementary token counts without CSV matches remain synthetic",
++        ],
++    }
++    try:
++        dims = bench.Dims()
++        source = shape_source(args.shape_source_opstat, dims)
++        product["shape_source"] = source
++        product["cohort"] = {
++            "model": source["weight_tags"]["model"],
++            "precision": source["weight_tags"]["precision"],
++            "weight_format": "not-applicable",
++        }
++        device, hw = bench.resolve_device(args.device)
++        product["hardware"] = hw
++        runtime_source = (
++            Path(adapter.__file__).resolve().parents[1]
++            / "src/vllm_ascend_split_batch/runtime_source_patches.py"
++        )
++        product["source_hashes"] = [
++            {"path": str(p), "sha256": bench.sha256_file(str(p))}
++            for p in (
++                Path(__file__),
++                Path(adapter.__file__),
++                Path(bench.__file__),
++                runtime_source,
++            )
++        ]
++        normalize = None
++        if device == "npu":
++            from vllm.third_party.flash_linear_attention.ops.l2norm import l2norm_fwd
++
++            normalize = l2norm_fwd
++        for t in tokens:
++            cell = run_cell(t, args, dims, source, device, normalize)
++            product["cells"].append(cell)
++            print(json.dumps(cell), flush=True)
++            if not cell["ok"]:
++                raise ValueError(f"first failed cell T={t}")
++        product["status"] = "ok"
++    except Exception as exc:
++        product["error"] = repr(exc)
++        print(repr(exc), file=sys.stderr, flush=True)
++    with args.out.open("x") as f:
++        json.dump(product, f, indent=2, ensure_ascii=False)
++        f.write("\n")
++    return 0 if product["status"] == "ok" else 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tools/bench_gdn_qkv_unpack.py b/tools/bench_gdn_qkv_unpack.py
+index 5b16e30..170b02c 100644
+--- a/tools/bench_gdn_qkv_unpack.py
++++ b/tools/bench_gdn_qkv_unpack.py
+@@ -44,0 +45 @@ import argparse
++import csv
+@@ -94,4 +95 @@ METRIC_CPU = "us_host_total"
+-SCOPE_MEASURED = (
+-    "same-shape independent eager-chain local latency per call "
+-    "(baseline 4 launches vs candidate 1)"
+-)
++SCOPE_MEASURED = "same-shape independent eager-chain local latency per call"
+@@ -422 +420,44 @@ def _callable_file(fn) -> str:
+-def shape_role(tokens: int, row_stride: int) -> str:
++def decode_shape_source(path: str, d: Dims) -> dict:
++    with open(path) as f:
++        doc = json.load(f)
++    tags = doc.get("cohort") or {}
++    if tags.get("model") != MODEL or tags.get("precision") != "bf16":
++        raise ValueError("shape source model/precision mismatch")
++    kernel = os.path.join(doc["asc_dir"], "ASCEND_PROFILER_OUTPUT/kernel_details.csv")
++    expected = f"{d.q_dim};{d.k_dim};{d.v_dim}"
++    count = recurrent = 0
++    q_shape, k_shape, v_shape = (
++        f"1,{dim // head},{head}"
++        for dim, head in (
++            (d.q_dim, d.head_k_dim),
++            (d.k_dim, d.head_k_dim),
++            (d.v_dim, d.head_v_dim),
++        )
++    )
++    with open(kernel) as f:
++        for row in csv.DictReader(f):
++            if row.get("Type") == "RecurrentGatedDeltaRule" and row.get(
++                "Input Shapes", ""
++            ).strip('"').startswith(f"{q_shape};{k_shape};{v_shape};"):
++                recurrent += 1
++            if (
++                row.get("Type") == "ConcatD"
++                and row.get("Input Shapes", "").strip('"') == expected
++                and row.get("Output Shapes", "").strip('"') == str(d.width)
++                and row.get("Input Data Types") == "DT_BF16;DT_BF16;DT_BF16"
++            ):
++                count += 1
++    if not count or recurrent != count:
++        raise ValueError("shape source lacks matched T1 bf16 ConcatD/decode calls")
++    return {
++        "opstat": {"path": os.path.abspath(path), "sha256": sha256_file(path)},
++        "kernel_details": {"path": kernel, "sha256": sha256_file(kernel)},
++        "weight_tags": tags,
++        "matched_calls": count,
++        "tokens": 1,
++        "phase": "decode",
++        "layout_boundary": "T1 contiguous input only; row stride is degenerate at T1",
++    }
++
++
++def shape_role(tokens: int, row_stride: int, source: dict | None = None) -> str:
+@@ -424 +465,2 @@ def shape_role(tokens: int, row_stride: int) -> str:
+-    if tokens in DECLARED_PHASES and row_stride == MEASURED_ROW_STRIDE:
++    known = tokens in DECLARED_PHASES or (tokens == 1 and bool(source))
++    if known and row_stride == MEASURED_ROW_STRIDE:
+@@ -428,0 +471,7 @@ def shape_role(tokens: int, row_stride: int) -> str:
++def paired_changes(base_runs: list[float], cand_runs: list[float]) -> list:
++    return [
++        round((c / b - 1) * 100, 3) if b else None
++        for b, c in zip(base_runs, cand_runs, strict=True)
++    ]
++
++
+@@ -613 +662 @@ def run_cell(cell: dict, ctx: dict) -> dict:
+-    role = shape_role(tokens, row_stride)
++    role = shape_role(tokens, row_stride, ctx.get("shape_source"))
+@@ -698,4 +747 @@ def run_cell(cell: dict, ctx: dict) -> dict:
+-        paired = [
+-            round((c / b - 1) * 100, 3) if b else None
+-            for b, c in zip(cand_runs, base_runs, strict=True)
+-        ]
++        paired = paired_changes(base_runs, cand_runs)
+@@ -770,0 +817,5 @@ def main(argv: list[str] | None = None) -> int:
++    ap.add_argument(
++        "--shape-source-opstat",
++        default="",
++        help="以同模型 bf16 opstat 及其 kernel CSV 绑定 T1 decode 形状",
++    )
+@@ -805 +856 @@ def main(argv: list[str] | None = None) -> int:
+-            "candidate": "单次 copy（同契约）",
++            "candidate": args.candidate if not args.baseline_only else None,
+@@ -830 +881 @@ def main(argv: list[str] | None = None) -> int:
+-            "T=1/2/17 与行跨距 6176 为合成覆盖，不作生产范围、不称实测 shape 收益",
++            "未绑定 shape_source 的 T=1，以及 T=2/17、行跨距 6176 仅作合成覆盖",
+@@ -834,0 +886,7 @@ def main(argv: list[str] | None = None) -> int:
++        shape_source = (
++            decode_shape_source(args.shape_source_opstat, d)
++            if args.shape_source_opstat
++            else None
++        )
++        if shape_source:
++            product["shape_source"] = shape_source
+@@ -908,0 +967,3 @@ def main(argv: list[str] | None = None) -> int:
++        phases = dict(DECLARED_PHASES)
++        if shape_source:
++            phases[1] = "decode"
+@@ -917 +978 @@ def main(argv: list[str] | None = None) -> int:
+-                        "phase": DECLARED_PHASES.get(tokens_i),
++                        "phase": phases.get(tokens_i),
+@@ -919 +980,3 @@ def main(argv: list[str] | None = None) -> int:
+-                            "declared"
++                            "shape_source"
++                            if tokens_i == 1 and shape_source
++                            else "declared"
+@@ -923 +986 @@ def main(argv: list[str] | None = None) -> int:
+-                        "shape_role": shape_role(tokens_i, stride),
++                        "shape_role": shape_role(tokens_i, stride, shape_source),
+@@ -943,0 +1007 @@ def main(argv: list[str] | None = None) -> int:
++            "shape_source": shape_source,

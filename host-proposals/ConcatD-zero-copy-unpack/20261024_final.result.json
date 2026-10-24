@@ -1,0 +1,491 @@
+{
+  "schema": "concatd-contiguous-scoped-acceptance.v1",
+  "recorded_at": "2026-10-24T12:31:52.631611+00:00",
+  "candidate": "concatd-gdn-unpack-views",
+  "stage": "accepted",
+  "default_off": true,
+  "scope": {
+    "model": "Qwen3.5-35B-A3B",
+    "precision": "bf16",
+    "tp": 2,
+    "graph": "FULL",
+    "callsite": "contiguous pure-decode GDN QKV unpack",
+    "channels_per_rank": [
+      1024,
+      1024,
+      2048
+    ],
+    "tokens": [
+      1,
+      16
+    ],
+    "persistent_dispatcher": "T1 only",
+    "deployed_tree_dispatcher": "contiguous multirow; acceptance limited to measured T1/T16",
+    "default_off": true
+  },
+  "scope_exclusions": [
+    "No prefill/mixed-batch Cat elimination claim",
+    "T2/8: L0 dimensions matched; no optimized-callsite L4 performance acceptance",
+    "T32: synthetic L0 only",
+    "No all-T, noncontiguous-layout, MTP, other model/precision/cohort or throughput extrapolation"
+  ],
+  "git": {
+    "branch": "028/gdn-small-op",
+    "round_base": "dcf382f51547479005f2a9496779e6432523e14d",
+    "implementation_checkpoints": [
+      "d55400a3369b80bead4559f3d111895eb6cc016a",
+      "4f01758c7c0289856a1565d4b659c1bd6dbd42c4"
+    ],
+    "measured_multirow_tool_head": "4f01758c7c0289856a1565d4b659c1bd6dbd42c4"
+  },
+  "tooling": {
+    "paired_delta": "100*(candidate/baseline-1); negative means lower time",
+    "profile_rank": "Default explicit rank0; override LADDER_PROFILE_RANK; missing/duplicate rank fails closed; no mtime selection",
+    "shape_binding": "Read source model/bf16 and actual kernel CSV; absent cells remain synthetic",
+    "producer_labels": "Isolated microbench root model/precision labels; do not copy source FULL graph as actual L0 execution config",
+    "metadata_only_followup": "NPU measurement source retained verbatim; numerical functions/dependencies unchanged; root-cohort producer change tested on CPU; raw artifact not edited",
+    "rollback": {
+      "patch": "host-proposals/ConcatD-zero-copy-unpack/patches/20261024_validation_tools.patch",
+      "sha256": "02be7526e53736995cfd5dd42f54654f24d29ae0f8f36cede8efedc69d51cbef",
+      "base": "dcf382f51547479005f2a9496779e6432523e14d",
+      "forward_dry_run": true,
+      "forward_bytes_match": true,
+      "reverse_dry_run": true,
+      "reverse_restores_base_bytes": true,
+      "paths": [
+        "tools/bench-ladder.sh",
+        "tools/bench_gdn_qkv_unpack.py",
+        "tools/bench_concatd_contiguous.py",
+        "tests/test_bench_gdn_qkv_unpack.py",
+        "tests/test_concatd_views_contiguous.py",
+        "tests/test_bench_concatd_contiguous.py",
+        "tests/test_profile_rank_selection.py"
+      ]
+    }
+  },
+  "validation": {
+    "l0": {
+      "status": "PASS",
+      "repeats": 3,
+      "timer_scope": "npu_event_elapsed_eager_chain_including_host_submission_gaps",
+      "cells": [
+        {
+          "tokens": 1,
+          "shape_role": "measured-shape",
+          "numeric_pass": true,
+          "actual_l2norm_bitwise": [
+            true,
+            true
+          ],
+          "baseline_us_median": 131.733,
+          "candidate_us_median": 43.121,
+          "paired_delta_pct": [
+            -67.433,
+            -67.461,
+            -67.223
+          ],
+          "paired_delta_pct_median": -67.433
+        },
+        {
+          "tokens": 2,
+          "shape_role": "measured-shape",
+          "numeric_pass": true,
+          "actual_l2norm_bitwise": [
+            true,
+            true
+          ],
+          "baseline_us_median": 249.813,
+          "candidate_us_median": 179.41,
+          "paired_delta_pct": [
+            -29.561,
+            -28.182,
+            -28.26
+          ],
+          "paired_delta_pct_median": -28.26
+        },
+        {
+          "tokens": 8,
+          "shape_role": "measured-shape",
+          "numeric_pass": true,
+          "actual_l2norm_bitwise": [
+            true,
+            true
+          ],
+          "baseline_us_median": 246.626,
+          "candidate_us_median": 174.508,
+          "paired_delta_pct": [
+            -29.458,
+            -29.457,
+            -28.829
+          ],
+          "paired_delta_pct_median": -29.457
+        },
+        {
+          "tokens": 16,
+          "shape_role": "measured-shape",
+          "numeric_pass": true,
+          "actual_l2norm_bitwise": [
+            true,
+            true
+          ],
+          "baseline_us_median": 234.65,
+          "candidate_us_median": 166.609,
+          "paired_delta_pct": [
+            -41.76,
+            -28.834,
+            -28.947
+          ],
+          "paired_delta_pct_median": -28.947
+        },
+        {
+          "tokens": 32,
+          "shape_role": "synthetic-coverage",
+          "numeric_pass": true,
+          "actual_l2norm_bitwise": [
+            true,
+            true
+          ],
+          "baseline_us_median": 236.331,
+          "candidate_us_median": 163.872,
+          "paired_delta_pct": [
+            -59.029,
+            -30.66,
+            -29.17
+          ],
+          "paired_delta_pct_median": -30.66
+        }
+      ],
+      "t1_separate_bound_run": {
+        "baseline_us": 133.828,
+        "candidate_us": 44.086,
+        "paired_delta_pct_median": -66.948
+      }
+    },
+    "l3": {
+      "status": "PASS",
+      "sequential_identical": "8/8",
+      "batched_plain_identical": "16/16",
+      "seed": 42,
+      "max_tokens_per_prompt": 128,
+      "profile_time_performance_used": false
+    },
+    "l4": {
+      "status": "PASS",
+      "rank": 0,
+      "window_facts": {
+        "prefill_token_volume": 5286,
+        "window_iterations": 32,
+        "captured_request_count": 16,
+        "prefill_iterations": 5.0,
+        "decoded_iterations": 27.0
+      },
+      "checks": {
+        "cohort_model": true,
+        "cohort_precision": true,
+        "cohort_carriers": true,
+        "cohort_host": true,
+        "cohort_serve": true,
+        "cohort_graph": true,
+        "window_prefill_token_volume": true,
+        "window_window_iterations": true,
+        "window_captured_request_count": true,
+        "window_prefill_iterations": true,
+        "window_decoded_iterations": true,
+        "rank0_both": true,
+        "anchor_shape_histogram": true,
+        "target_calls_810_to_zero": true,
+        "target_time_down": true,
+        "all_concat_count_time_down": true,
+        "csv_matches_opstat_counts": true,
+        "flags_single_variable": true,
+        "plain_l3_compare_16": true,
+        "l0_numerics_and_consumer": true,
+        "l0_t16_measured_and_faster": true,
+        "compute_stop_not_triggered": true
+      },
+      "observations": [
+        {
+          "arm": "off",
+          "all_concat": {
+            "count": 1200,
+            "total_ms": 19.370755000000003
+          },
+          "target_static_t16_qkv_concat": {
+            "count": 810,
+            "total_ms": 13.612478999999999
+          },
+          "all_kernel_ms": 2357.478,
+          "compute_ms": 878.22,
+          "all_concat_share_all_kernel_pct": 0.8216727791309189,
+          "target_share_all_kernel_pct": 0.5774170108904515
+        },
+        {
+          "arm": "on",
+          "all_concat": {
+            "count": 390,
+            "total_ms": 5.629819
+          },
+          "target_static_t16_qkv_concat": {
+            "count": 0,
+            "total_ms": 0.0
+          },
+          "all_kernel_ms": 1983.907,
+          "compute_ms": 859.576,
+          "all_concat_share_all_kernel_pct": 0.28377434022864984,
+          "target_share_all_kernel_pct": 0.0
+        }
+      ],
+      "compute_stop_condition": {
+        "triggered": false,
+        "delta_ms": -18.644000000000005,
+        "note": "Existing stop condition only; not the operator acceptance metric."
+      },
+      "prior_t1_scope": {
+        "baseline": "/root/包体恢复/records/ladder/1024-075552-opstat.json",
+        "candidate": "/root/包体恢复/records/ladder/1024-1120-rank0-labelled-opstat.json",
+        "concatd_counts": [
+          960,
+          30
+        ],
+        "prefill_token_volume": 353,
+        "window_iterations": 32,
+        "captured_request_lower_bound": 1,
+        "not_subtracted_against_conc16": true
+      }
+    },
+    "targeted_tests": [
+      {
+        "passed": 54,
+        "evidence": {
+          "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/pytest-l0.log",
+          "sha256": "47547ada41cc99514c068e57175768853647631140a00fd630564c15d68c1c2b"
+        }
+      },
+      {
+        "passed": 40,
+        "evidence": {
+          "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/pytest-dispatch.log",
+          "sha256": "5759b61ad7d8f05e89dda21d55864232c297a3ee39086451abe36716c4b065dd"
+        }
+      },
+      {
+        "passed": 18,
+        "evidence": {
+          "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/pytest-multirow.log",
+          "sha256": "2258092479dc9f2bce3311ed647b41bf78d83a4e80753b6662fcadb35d21277a"
+        }
+      },
+      {
+        "passed": 69,
+        "evidence": {
+          "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/pytest-profile.log",
+          "sha256": "dbea543bcb0902ce4ff9f430cfff8d04a14bfa566141b5f77dfb8d8b5b22f028"
+        }
+      },
+      {
+        "passed": 1,
+        "evidence": {
+          "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/pytest-producer-labels.log",
+          "sha256": "433eda84e19291ba03c8e7bd7e083e0deef52746d25444336e625ff63c3400a7"
+        }
+      }
+    ],
+    "distinct_targeted_cases": 182,
+    "full_repo_pytest_run": false,
+    "full_repo_pytest_reason": "Changes confined to benchmark/profile tooling and directed tests; no dependency, packaging or model numerical-path change.",
+    "coverage": {
+      "exit_code": 0,
+      "fail": 0,
+      "warn": 75,
+      "evidence": {
+        "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/coverage-final.log",
+        "sha256": "4ea18fe495e79236f547ad0585ebe58c928d039ec448bdaff18f601c3bf6cb32"
+      }
+    }
+  },
+  "limitations": [
+    "One matched light L4 window per arm; no confidence interval or throughput claim.",
+    "T1 and conc16 windows have different shape facts and are not numerically subtracted.",
+    "Persistent dispatcher remains T1-only; deployed-tree helper permits multirow. No claim of generic all-T or all-layout acceptance.",
+    "T32 is synthetic L0 coverage only. Measured dimensions T2/8 do not establish an optimized pure-decode callsite benefit.",
+    "Residual prefill/mixed-batch/output-merge Cats are outside the pure-decode T16 callsite; old T1 total-count threshold is not transferred to unequal window facts.",
+    "Runtime/deployed numerical sources unchanged this round. Persisted T1-only dispatcher and deployed multirow dispatcher are not represented as identical scope.",
+    "No default activation, main merge, tag or PyPI release. User authorized push of this work branch only.",
+    "Original measurements remain external L2; this repository contains reviewed results, hashes and rollback material, not copied raw traces."
+  ],
+  "operations": {
+    "serve_starts_this_round": 2,
+    "light_windows_this_round": 2,
+    "services_stopped": true,
+    "repeat_collect_gate_failure_retained": true,
+    "repeat_collect_gate_resolution": "Explicit first-ON-conc16 reason; prior refused invocation did not start a profile; no gate bypass."
+  },
+  "source_files": [
+    {
+      "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/tools/bench-ladder.sh",
+      "sha256": "09269c2eaa43f2303d84458f8d432407974a05d5f29076bc468d40002e64fb4b"
+    },
+    {
+      "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/tools/bench_gdn_qkv_unpack.py",
+      "sha256": "6fd215ddeb8cb41462fc8d04264bc78c15b8e395279addea173a0ddd36bc10ea"
+    },
+    {
+      "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/tools/bench_concatd_contiguous.py",
+      "sha256": "53bfa3e815bc0fe40f8d496269f98640abb55e732274941f6d9b7a7cc88bfbe9"
+    },
+    {
+      "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/tests/test_bench_gdn_qkv_unpack.py",
+      "sha256": "c40f4832213fe7d487078e24213839fe2de51d61d8fe5e3dc27b21b0cb5c2137"
+    },
+    {
+      "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/tests/test_concatd_views_contiguous.py",
+      "sha256": "0a293ece92a340293064f289f8dd93a385af6189dce09c606d652f18e2c224cb"
+    },
+    {
+      "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/tests/test_bench_concatd_contiguous.py",
+      "sha256": "8222536e0f66d5ddbfffdf80e5776c087b75c525f8cef5bbc8eafe68a43cc432"
+    },
+    {
+      "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/tests/test_profile_rank_selection.py",
+      "sha256": "c29086cfa19773e7f0bbfcd27df2bc5c171ffb5949e274e5407e8400a4ed1021"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "/root/包体恢复/records/ladder/1024-115012-l0-gdn-qkv-unpack.json",
+      "sha256": "9672aa1c55c770b35508396cb3c216ace88068d7fde64e21071e3ba03b60d056"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-121121-l0-concatd-contiguous.json",
+      "sha256": "d128e4387e9ec062c7957200ff26c029d26eaa2fb682c034bc62dabfc25612f0"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/121121-l0-concatd-contiguous-labelled.json",
+      "sha256": "a924875fe2ee73f5a6bac774d2d806dcd2943d6770e54b62380dd2c765f595f5"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-120701-gdn16-l3.json",
+      "sha256": "312b5644dbdd52df5bde61e757563c31a63a939a8c1771c3bdda8341b0a0a1c3"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-122059-gdn16-l3.json",
+      "sha256": "312b5644dbdd52df5bde61e757563c31a63a939a8c1771c3bdda8341b0a0a1c3"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/gdn16-compare.log",
+      "sha256": "06d6ad679db0a961b38f0e86850203945ac647dbad73d26efff73a3c6f4fac9a"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/l3-compare.log",
+      "sha256": "a077f1b23b093a4ed12e90d74d6306f82ffce795dbdee8a969cef3a016691dc2"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-120748-opstat.json",
+      "sha256": "fde344c4ccd9b4c448cd953568930293023cb600b132e66b6c1bf1bd39661720"
+    },
+    {
+      "path": "/root/包体恢复/records/ladder/1024-122249-opstat.json",
+      "sha256": "1a484eb6c07b6ab496414dd5d8d569664fd7fbb269d7903d9f0016baccb98124"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/audit-final.json",
+      "sha256": "a7c2d4cb035300f83caf2e368248ef5fbc13e34453d3da16734cf78607ee85b4"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/audit_final_v2.py",
+      "sha256": "ad2b461d700bc7a0e5dee6487383f4650854b24bc193bbbdd67527ffc93d5698"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/tooling-rollback.json",
+      "sha256": "eeb8f4bd3ffff1d4361c4578cc2c1ba4386543f1271d8454834304b837116642"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/producer-labels-proof.json",
+      "sha256": "0940627c2041ca63482612029ba226ac03f9793975d13f1a3f60805ca4304329"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/bench_concatd_contiguous.measured.py",
+      "sha256": "433d41cb93a80c933a31f55fd3cac7fdcbc2f2fc673f5ca80c15efd04653ef39"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/source-final-verification.json",
+      "sha256": "ce3a7e20cb1e45d31da10aae90940d508c14ff795fc2316f03edb3380e08db96"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/coverage-final.log",
+      "sha256": "4ea18fe495e79236f547ad0585ebe58c928d039ec448bdaff18f601c3bf6cb32"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/candidate-final.json",
+      "sha256": "a01a91e039db5db1342630ab8c9e38f9e240c8ac6f34b59a0457a032ac445ec3"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/candidate-final.log",
+      "sha256": "af9b5f0d034066d6103b90fa5b575db21fe45bb703faac82ba406138c0fb1125"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/baseline-serve-config.json",
+      "sha256": "12bdf8641e43ae7c6d2fc4afb3c2502a571cc702ca340567a4b4f51d4eb89441"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/candidate-serve-config.json",
+      "sha256": "05f83a61f51beed685b63979d38b9839523a4313a96b3f3f9738a59bf6dcc19f"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/candidate-profile.log",
+      "sha256": "b6b5b5a4c7092c84e6d7b21f8f30b655fcfb66996dac257b0e04338f9035a266"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/candidate-profile-authorized.log",
+      "sha256": "59d4b809760755fb766c482e7705679312f6f1f95771d63ae8cf55e48891e025"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/bash-syntax-final.log",
+      "sha256": "16d81f48123e2086ebd7722d829c5092db3f7164073cc415dee201d737957f89"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/pytest-l0.log",
+      "sha256": "47547ada41cc99514c068e57175768853647631140a00fd630564c15d68c1c2b"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/pytest-dispatch.log",
+      "sha256": "5759b61ad7d8f05e89dda21d55864232c297a3ee39086451abe36716c4b065dd"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/pytest-multirow.log",
+      "sha256": "2258092479dc9f2bce3311ed647b41bf78d83a4e80753b6662fcadb35d21277a"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/pytest-profile.log",
+      "sha256": "dbea543bcb0902ce4ff9f430cfff8d04a14bfa566141b5f77dfb8d8b5b22f028"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/pytest-producer-labels.log",
+      "sha256": "433eda84e19291ba03c8e7bd7e083e0deef52746d25444336e625ff63c3400a7"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/ruff.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/ruff-multirow.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "path": "/root/包体恢复/records/probes/20261024T1150Z_concatd_final/ruff-producer-labels.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "path": "/root/prof/ladder-1024-115825/dp0_pp0_tp0_dcp0_ep0_rank0_2297078_20261024120749077_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+      "sha256": "485d0a1e7236483325bce61377aa71c2cc374034ca835fdbe344215d5052ba79"
+    },
+    {
+      "path": "/root/prof/ladder-1024-121337/dp0_pp0_tp0_dcp0_ep0_rank0_2326272_20261024122250149_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+      "sha256": "60069bf8fb9bd2107d26c56dccf627b299f91fc510aa85c161bd90592aed05ce"
+    }
+  ],
+  "candidate_snapshot": {
+    "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/host-proposals/ConcatD-zero-copy-unpack/20261024_final.candidate.json",
+    "sha256": "a01a91e039db5db1342630ab8c9e38f9e240c8ac6f34b59a0457a032ac445ec3"
+  }
+}

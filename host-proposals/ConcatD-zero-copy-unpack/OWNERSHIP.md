@@ -1,4 +1,4 @@
-# ConcatD 零拷贝解包 — decode T=1 视图路径（runtime-tree 快照）
+# ConcatD 连续解包 — T=1 零拷贝与运行树多行路径
 - 路由 028/D4-const-hoist | env VLLM_HUST_GDN_UNPACK_VIEWS=1 default-off
 - 回滚: 恢复链 = 先回 D4 site2 patch 前的 orig（patches/*.orig），或整体覆盖 patches/*.orig + 逐段反向
 - 守卫: `tests/test_concatd_views_contiguous.py`、`tests/test_runtime_source_patches.py`。
@@ -6,4 +6,10 @@
 - 连续化增量: `patches/20261024_contiguous.gdn.py.patch`；在已含 views 的树上 `patch -p1 < <patch>`，用 `patch -R -p1 < <patch>` 回滚。部署前保留该树的 `.orig`，不覆盖其它层。
 - 持久化入口: `src/vllm_ascend_split_batch/runtime_source_patches.py`；树内已有载体时由树内实现执行，stock 树由锚点变换生成。两条路径的 helper 必须一致。持久化调用点仍限定连续 T=1，已有树内调用点允许连续多行；本补丁不扩大调用范围。
 - L0 适配器: `tools/bench_concatd_views_adapter.py:unpack`，从持久化变换提取同一 helper；调用现有 `opt bench l0 GdnQkvUnpack --candidate tools/bench_concatd_views_adapter.py:unpack --candidate-arg-style packed --tokens 1 --row-strides 4096`，并显式设置 `PYTHONPATH=$PWD/src`。该微基准仅覆盖单行，不证明多行性能或端到端收益。
-- 相邻已拒: gdn-qkv-unpack-single-pass（单拷贝）——本候选为零拷贝不同机制, 用户 2026-10-21 授权重开
+- 形状绑定: 单行 L0 追加 `--shape-source-opstat <baseline-opstat.json>`，从原始 CSV 核对 QKV 分段、decode 调用与模型精度，保留来源哈希；无绑定的旧合成结果不得改标。
+- 多行 L0: `opt bench l0 ConcatDContiguous --shape-source-opstat <baseline-opstat.json>`；与 stock 逐位核对每个输出的值、shape、stride、dtype、连续性及输入不变，并对拍实际 `l2norm_fwd` 消费者。不要求三段共用 backing；未在 CSV 中匹配的 token 档仅为合成补充。
+- L0 根节点 `cohort` 只标模型、精度与不适用的权重格式；不得继承形状来源的 FULL graph 配置冒充 eager 微基准的执行配置。计时包含 host submission gaps，不作 kernel-only 或吞吐收益。
+- L4 固定选 rank0；`LADDER_PROFILE_RANK` 可显式选择其它 rank。A/B 须同 rank、同形状事实与权重标签，多 rank 不得按 mtime 隐式切换。
+- 目标 callsite 为连续输入的纯 decode 解包；prefill、混合批与输出合并的 Cat 须分开归因。总次数阈值不得迁移到不同形状与 prefill 体积的窗口，多行 helper 不等于全形状验收。
+- 工具链回滚: `patches/20261024_validation_tools.patch` 基于 `dcf382f51547479005f2a9496779e6432523e14d`，仅含工具与测试；在对应源码上 `patch -p1` 应用、`patch -R -p1` 回退，不用于运行树补丁链。
+- 相邻已拒: gdn-qkv-unpack-single-pass（单拷贝）——本候选为不同机制, 用户 2026-10-21 授权重开

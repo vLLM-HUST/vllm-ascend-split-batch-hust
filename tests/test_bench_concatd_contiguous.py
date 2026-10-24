@@ -116,3 +116,37 @@ def test_failed_consumer_stops_before_timing(tool, monkeypatch):
         normalize,
     )
     assert not cell["ok"]
+
+
+def test_cli_emits_weight_labels_without_copying_profile_graph_config(tool, tmp_path):
+    source = write_source(tmp_path)
+    output = tmp_path / "l0.json"
+    assert (
+        tool.main(
+            [
+                "--shape-source-opstat",
+                str(source),
+                "--device",
+                "cpu",
+                "--tokens",
+                "16",
+                "--iters",
+                "1",
+                "--repeats",
+                "1",
+                "--warmup",
+                "0",
+                "--out",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    doc = json.loads(output.read_text())
+    assert doc["cohort"] == {
+        "model": "Qwen3.5-35B-A3B",
+        "precision": "bf16",
+        "weight_format": "not-applicable",
+    }
+    assert doc["hardware"]["device"] == "cpu"
+    assert doc["cells"][0]["l2norm_bitwise"] is None
