@@ -306,3 +306,16 @@ triton-ascend 后需重验。
 - **残留**(不在构建路径,单独改):`tools/bench-ladder.sh` 的 ATB 默认值(已可用
   `LADDER_ATB_HOME` 覆盖)、`tools/repair-ascend-login-env.sh` 的旧登录环境修复。
   两者及其守护测试在 `tests/test_stack_versions_contract.py` 里显式登记豁免。
+
+### 3.8 ConcatD zero-copy 载体的切片 `.view()` 在图捕获期必崩(2026-10-24 复核)
+
+- **症状**:`VLLM_HUST_GDN_UNPACK_VIEWS=1` 起服时在 `capture_model` 抛
+  `view size is not compatible with input tensor's size and stride (... spans across two
+  contiguous subspaces)`;表面像"组合冲突",实际单开也崩。
+- **根因**:`gdn.py` 的 `_unpack_mixed_qkv_views` 对 `mixed` 做列切片后直接 `.view(...)`。
+  切片在 dim1 上非连续,`view` 不合法;调用点 `mixed_qkv_non_spec.is_contiguous()` 只查**输入**,
+  不覆盖切片结果。D4、W3-F2 合并均无关(关掉仍崩)。
+- **姿势**:不要把这个开关当"可用态"直接开。要启用须先改切片为 `.contiguous().view(...)`
+  或 `.reshape(...)`,再验 capture 通过 + `ConcatD` 归零 + L3 8/8;若拷贝开销吃掉收益则判 rejected。
+- **连带**:起服预检的 seam 断言不覆盖"图捕获期才暴露"的不兼容,预检放行 ≠ 能起服。
+  证据:`records/probes/20261024T0950Z_remeasure_round/summary.md` §三。
