@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _deployment import deployed_file
 
 REPO = Path(__file__).resolve().parent.parent
 CANDIDATE = Path(
@@ -43,7 +44,7 @@ def _run(code, check=True):
 
 
 requires_candidate = pytest.mark.skipif(
-    not CANDIDATE.is_file(), reason=f"candidate interpreter absent: {CANDIDATE}"
+    not deployed_file(CANDIDATE), reason=f"candidate interpreter absent: {CANDIDATE}"
 )
 
 

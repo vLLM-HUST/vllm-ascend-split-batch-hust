@@ -18,7 +18,7 @@ vllm 0.28.1.post1.dev143 / vllm_ascend 0.25.1rc2），设备 Ascend910B2。
 
 ## 2. 标尺口径修正（ruler v2）
 
-旧判读量用 **eager 提交地板**（实测 34.6–36.6µs）做分母，而同一批桶在 FULL 图内的
+旧判读量用 **eager 提交地板**（实测数值存工作台回执）做分母，而同一批桶在 FULL 图内的
 per-call 只有 **11.97–26.11µs** —— 地板大于被测对象，等于测不到；同时 `copy_` 的
 读+写合计带宽被当单向用，`bw_floor` 恰好小一半（gdn_inproj 11.532µs 应为 23.064µs）。
 故旧规则「>4MB 桶 headroom<20% → 无 kernel 杠杆」作废（`tools/bench_matmul_m1_ruler.py`

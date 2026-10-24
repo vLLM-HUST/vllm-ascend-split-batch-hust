@@ -16,6 +16,7 @@ import os
 import pathlib
 
 import pytest
+from _deployment import deployed_file
 
 HERE = pathlib.Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location(
@@ -87,7 +88,7 @@ def test_anchor_mismatch_raises_anchor_error():
 
 def _host_source():
     for path in HOST_CANDIDATES:
-        if path.is_file():
+        if deployed_file(path):
             return path
     return None
 

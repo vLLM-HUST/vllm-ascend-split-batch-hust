@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _deployment import deployed_file
 
 REPO = Path(__file__).resolve().parent.parent
 RESOLVER = REPO / "tools" / "stack_versions.py"
@@ -209,7 +210,7 @@ def test_env_exports_cover_build_inputs(sv, manifest):
 
 def test_cmake_args_cover_build_inputs(sv, manifest):
     venv_python = Path(manifest["locations"]["venv"]) / "bin" / "python"
-    if not venv_python.is_file():
+    if not deployed_file(venv_python):
         pytest.skip("declared build venv is not installed on this host")
     joined = " ".join(sv.cmake_args(manifest))
     for flag in (
@@ -226,7 +227,7 @@ def test_cmake_args_cover_build_inputs(sv, manifest):
 def test_resolver_emits_no_capability_probe_flags(sv, manifest):
     """Probes ask what the headers support; they must not be pinned here."""
     venv_python = Path(manifest["locations"]["venv"]) / "bin" / "python"
-    if not venv_python.is_file():
+    if not deployed_file(venv_python):
         pytest.skip("declared build venv is not installed on this host")
     joined = " ".join(sv.cmake_args(manifest))
     assert "HAVE_" not in joined

@@ -11,7 +11,7 @@
 
 | 度量 | 命令 | 噪声界（本机实测） | 判据 |
 |---|---|---|---|
-| L1 延迟 | `bench-ladder.sh l1` | 会话间 **±5%**（同配置 OFF 的 TPOT 出现过 13.41 / 14.14） | 仅当 Δ > 5% 才算收益或回归 |
+| L1 时延 | `bench-ladder.sh l1` | 会话间漂移为个位数百分比（同配置 OFF 的逐 token 时延样例存工作台回执） | 漂移范围内的 Δ 不算收益或回归 |
 | light L4 | `serve --profile light` + `profile --tier light` | `hcom_allReduce` 跨窗抖动可达 4.8×（346 / 120 / 72 ms，调用次数相同） | **只比 `computing` 与算子级 total**（>1% 且可复现）；stage/free 仅参考 |
 | L3 对拍 | `l3` + `compare A B` | 确定性（跨天 8/8 一致） | 用于漂移标注：`identical=k/8` + 首差样例 |
 
@@ -23,7 +23,7 @@ smoke 只在候选进基线前跑**一次 ≥200 题**的终局基准，与同�
 ```
 # OFF 段
 VLLM_HUST_<CARRIER>=0 bash tools/bench-ladder.sh serve
-bash tools/bench-ladder.sh l1        # 记录 ttft/tpot/e2e 中位
+bash tools/bench-ladder.sh l1        # 记录 ttft 等时延中位（逐 token、端到端）
 bash tools/bench-ladder.sh l3        # 记录产物的 l3.json 路径
 bash tools/bench-ladder.sh stop
 
@@ -48,7 +48,7 @@ bash tools/bench-ladder.sh stop
 | 结论 | 条件 |
 |---|---|
 | `accepted` | 收益超噪声（L1 >5% 或 computing/算子级 >1% 可复现）**且** L3 漂移可归因、已在候选 `reason` 中标注 |
-| `rejected` | 出现超出噪声的回归（如 TPOT 恶化 >5%），或收益不成立而漂移成立 |
+| `rejected` | 出现超出噪声的回归（如 TPOT 明显恶化），或收益不成立而漂移成立 |
 | `inconclusive` | 收益与漂移都落在噪声内；保持 default-off，写明复测前置条件 |
 
 任何结论都必须附带：OFF/ON 两段的 l1/l3 产物路径、L4 opstat 路径、engage 证据（日志 marker）。
