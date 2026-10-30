@@ -55,6 +55,28 @@ def test_installation_consumers_and_boundary_are_retained():
     assert "must not be crossed" in readme
 
 
+def test_delivery_inventory_contract():
+    inventory = (ROOT / "docs/delivery-inventory.md").read_text()
+    assert "vllm-ascend-hust" in inventory
+    assert "work/issue20-w3f2-host" in inventory
+    assert "W3F2" in inventory
+    assert "D4" in inventory
+    assert "两层架构分工" in inventory
+
+
+def test_delivery_inventory_lists_each_published_general_plugin():
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    plugins = pyproject["project"]["entry-points"]["vllm.general_plugins"]
+    inventory = (ROOT / "docs/delivery-inventory.md").read_text()
+    for name in plugins:
+        assert f"`{name}`" in inventory
+
+
 def test_recovered_consumers_link_originals_without_requalifying():
     source = json.loads((ROOT / "EVIDENCE_AVAILABILITY.json").read_text())
     recovery = source["recovery_audit"]
