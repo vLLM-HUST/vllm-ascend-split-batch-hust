@@ -44,7 +44,8 @@ coverage、吞吐或其他通过项抵消；失败证据保留，能力保持 de
 或结果复用将未验证源码声明为三腿全绿。缺有效快照时补齐准入要求。
 
 L1/L2 screen、服务 smoke、包加载 smoke 各须回答独立问题；无打包/注册/加载变化
-不重复包加载 smoke。`opt bench run` 仅作显式端到端入口，不是算子循环默认步骤。
+不重复包加载 smoke。`tools/bench-ladder.sh` 仅在满足其目标 serving 主机前置条件时作为端到端入口，
+不是 clean-checkout CPU 测试，也不是算子循环默认步骤。
 保留 `/health`、`99255c0` 启动 PID 归属守卫与回归。graph/system 的完整 screen
 采集门不变，不得伪装 operator 路由绕过。历史数据不得为新流程重采。
 

@@ -1,0 +1,152 @@
+{
+  "schema": "external-workbench-archive/v1",
+  "owner": "external-workbench-maintainers",
+  "status": "archived-not-part-of-plugin-delivery",
+  "source_commit": "185f48f3ac845833beb41bf2b8d34f7f82388128",
+  "source_repository": "vLLM-HUST/vllm-ascend-split-batch-hust",
+  "restore": "git archive <source_commit> <files[].path> | tar -x -C <external-workbench-directory>",
+  "archive_sha256": "003a5a296604c15585d4041395c41d8f8d6c935adb11221f27b3c6cfa2a269f7",
+  "tests_policy": "Original helper code and its tests are preserved with hashes; they are not plugin tests and are not reported as passing. External deployments were not modified.",
+  "files": [
+    {
+      "path": "host-proposals/OPT-delivery-workflow/patch.diff",
+      "sha256": "2758217056272c5cd61e51da9d8d1192926c05dc54548df81ef7574106c74c1a",
+      "bytes": 11888
+    },
+    {
+      "path": "host-proposals/OPT-delivery-workflow/proposal_meta.json",
+      "sha256": "1c36c2badb3ca68edd48ef7ba0183079619a6336eaf608e07fdf1f09a326466d",
+      "bytes": 2853
+    },
+    {
+      "path": "host-proposals/OPT-delivery-workflow/validation.json",
+      "sha256": "b88b4aab72a64cf5c89a0cfe5ff1abd925e432d0adc532d9708bd822d1161162",
+      "bytes": 1143
+    },
+    {
+      "path": "host-proposals/OPT-operator-lean-profile/patch.diff",
+      "sha256": "443deab5e5802bf6751d533a80d998cacc4d44cfeac50cc68ad0cd3d7b394065",
+      "bytes": 21384
+    },
+    {
+      "path": "host-proposals/OPT-operator-lean-profile/proposal_meta.json",
+      "sha256": "fc04ec7fd6545b0e2ca5a39f4472e27bfbb57759e3e9d9f29a87ac18bacc4c97",
+      "bytes": 2593
+    },
+    {
+      "path": "host-proposals/OPT-operator-lean-profile/validation.json",
+      "sha256": "6e79a6040a6e03d13686e5e968f322893e040a2df88908e8346996337d614e90",
+      "bytes": 1147
+    },
+    {
+      "path": "host-proposals/OPT-toolchain-repair/candidate.json",
+      "sha256": "f08b13eb069a3139328668300c315d391a9f3afc1ffec8f9235dd15e96ba5ff1",
+      "bytes": 2062
+    },
+    {
+      "path": "host-proposals/OPT-toolchain-repair/patch.diff",
+      "sha256": "5a19498f95972e6cc8d39a2c39fa6901bf15fb7e6555b6723f2778f824c3f5d9",
+      "bytes": 7217
+    },
+    {
+      "path": "host-proposals/OPT-toolchain-repair/proposal_meta.json",
+      "sha256": "33eec4b4dd5a2eec74bd68a19a3a4568231a85695e090bc05b91f9f85d7f920b",
+      "bytes": 2024
+    },
+    {
+      "path": "host-proposals/OPT-toolchain-repair/validation.json",
+      "sha256": "ba67ebca68d941a15132b1170dbc213a349fa65c942901ef06c2760229a2c640",
+      "bytes": 867
+    },
+    {
+      "path": "host-proposals/OPT-truth-gaps-json-stdout/candidate.json",
+      "sha256": "94a241e4774d50fc605095e3e07eab87d7ef4f97f0f8ac12432564f4b644c430",
+      "bytes": 2087
+    },
+    {
+      "path": "host-proposals/OPT-truth-gaps-json-stdout/opttruth.py.orig",
+      "sha256": "a1d52b0912f8d9abac17fe2e7c7c08d10347f70e97b73e46cc7cfad726a843a0",
+      "bytes": 28701
+    },
+    {
+      "path": "host-proposals/OPT-truth-gaps-json-stdout/patch.diff",
+      "sha256": "3664f98afd934cb114c013c1db3385e5f6caabcb8795559f5ddb966eb43ea234",
+      "bytes": 783
+    },
+    {
+      "path": "host-proposals/OPT-truth-gaps-json-stdout/proposal_meta.json",
+      "sha256": "4d12c75a07b7ffe9640e8eb4a9c19a472c1d3df3f2257df772aba08522af9f03",
+      "bytes": 1006
+    },
+    {
+      "path": "host-proposals/OPT-truth-gaps-json-stdout/validation.json",
+      "sha256": "2194ba5c7dfb11a3f0ffd708ce838d49b37929493d3e751ba75628fca8d850f3",
+      "bytes": 1214
+    },
+    {
+      "path": "tests/test_npu_idle_keeper.py",
+      "sha256": "0cc4dd696f6d2a0c816127c62d650a5a98a719afdff7c7b6eaf999c97c3f323d",
+      "bytes": 8507
+    },
+    {
+      "path": "tests/test_operator_delivery.py",
+      "sha256": "768d78b2c4085b2a698e22c77e7bd73963d615509a1d9bd03cfaf437b80707c8",
+      "bytes": 6510
+    },
+    {
+      "path": "tests/test_operator_profile_contract.py",
+      "sha256": "4a857ac2ad2a776222afc077efa2ff0ef464e36fa2b12d6e2578d10f1f88fe67",
+      "bytes": 6400
+    },
+    {
+      "path": "tests/test_opt_delivery_integration.py",
+      "sha256": "d74b5ebcb24bc61b9a83667be9e7212ec55b798c4f03aef50aa8f1b3a9443f3e",
+      "bytes": 3734
+    },
+    {
+      "path": "tests/test_opt_toolchain_repair.py",
+      "sha256": "5b7215a8ec7f14abe8b2a1d851e94777a63edc6f9b2ba9d181d2692ecd3b54d1",
+      "bytes": 4121
+    },
+    {
+      "path": "tests/test_repair_ascend_login_env.py",
+      "sha256": "976c87c2ae89127eaa3eb06510b94d8e74bce33af66f05580dc9a9ffd9f5c074",
+      "bytes": 2883
+    },
+    {
+      "path": "tools/npu_idle_keeper.py",
+      "sha256": "05de85e937ca3fab26f3aab1db126c51d38ddb9f34c44e57202273d3aee7e944",
+      "bytes": 11066
+    },
+    {
+      "path": "tools/operator_delivery.py",
+      "sha256": "e82d45994557e9cec5c0fe5aedefa52346fb1bc9e503bf9caa5bf755aa4cf0a7",
+      "bytes": 8739
+    },
+    {
+      "path": "tools/repair-ascend-login-env.sh",
+      "sha256": "8e2d7883a4a98f31ab0d9e32c673d0c3e06b110a0dbd048d24bd5b6d91dc36bf",
+      "bytes": 3139
+    },
+    {
+      "path": "tools/start-sshd-npu-keeper.patch",
+      "sha256": "ce1f801c0446c6038707c142e4ed39e3fd61d1ad5ea4d711a825061513204175",
+      "bytes": 799
+    },
+    {
+      "path": "tools/validation-policy/external-constraints.json",
+      "sha256": "8a23b0610baabe1b9912cdadcbbb1b40ca176719e9f465d757e619e9beb9495b",
+      "bytes": 414
+    },
+    {
+      "path": "tools/validation-policy/external-constraints.patch",
+      "sha256": "efc773555548307aacadd0371cc2677755c5185d7c472b2524a0bc423edd9c2f",
+      "bytes": 1943
+    },
+    {
+      "path": "tools/validation-policy/receipt.json",
+      "sha256": "40931bb5a2271fba8dbd4f56038589f0e9ae60af67e71e29d4190b14fd6c81a3",
+      "bytes": 7465
+    }
+  ]
+}
