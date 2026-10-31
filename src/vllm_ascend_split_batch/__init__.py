@@ -13,17 +13,37 @@
 
 """Split-batch planning contracts and inert runtime metadata."""
 
-from .planner import (
-    DualPadPlan,
-    SplitBatchConfig,
-    SplitSlice,
-    plan_dual_pad,
-    precheck_reason,
-)
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .planner import (
+        DualPadPlan,
+        SplitBatchConfig,
+        SplitSlice,
+        plan_dual_pad,
+        precheck_reason,
+    )
 
 
 class VllmAscendSplitBatchContractProposal:
     """Metadata-only proposal; this class performs no runtime activation."""
+
+
+_EXPORTS = {
+    "DualPadPlan",
+    "SplitBatchConfig",
+    "SplitSlice",
+    "plan_dual_pad",
+    "precheck_reason",
+}
+
+
+def __getattr__(name: str):
+    if name in _EXPORTS:
+        from . import planner
+
+        return getattr(planner, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [

@@ -1,27 +1,28 @@
-# host-proposals/ — 宿主私有面的提案载体目录（PURPOSE v3 §8 档2）
+# 宿主修改提案（host-proposals）
 
-本目录是**合法的档2 载体**：当某个杠杆只能通过宿主私有面（方法体内部的调用点、
-无公开配置开关）表达时，按 `/root/PURPOSE.md`（v3，2026-10-16）§8 的三档归宿，
-把 **patch 原件 + 生成脚本 + CPU 测试 + 归属记录** 放在这里，运行树只接收部署副本。
+本目录记录在宿主底层（vLLM / vLLM-Ascend）修改代码的技术方案与原型。
 
-规则（本目录**只冻结自身**）：
+## 1. 为什么需要宿主提案
 
-1. 每个提案一个子目录（`<id>/`），互不牵连；冻结/废弃只作用于该子目录自身，
-   **不构成对 `upstream/`、`vllm-ascend` 或任何上游仓的冻结或追认**。
-2. 必须含：`host_orig/`（宿主基线原件 + sha256）、`gen_patch.py`（确定性生成、
-   对宿主 sha fail-closed）、`patch.diff`、`tests/`（仓内 CPU 门）、`OWNERSHIP.md`
-   （责任人 / 何时可删 / 上游状态 / 后续动作）、`proposal_meta.json`（机器可读）。
-3. `upstream_status` 必须如实：未提交就写「未提交（proposal snapshot）」并留
-   `issue_or_pr=null`；**不得**表述为「上游已接受/已合入」。
-4. `host.version_range` 点钉（`==`），禁止 `>=0` 或区间。
-5. 默认关闭：未设 env 时零 import / 零 IO / 零 shape 读取、无设备差异；
-   仍存在**既定数量的早退 Python 调用**（当前 W1R = 每次 GMM 两次），文档须据实写明，
-   **不得声称宿主行为字节等价**（宿主文件文本必然不同）。
-6. 运行树只放部署副本，进 `apply-runtime-patches.sh` 分层链；不得只手改运行树。
-7. 证据（fixture / 采集物 / receipt）只进 `/root/包体恢复/records`，不可变、只追加。
+在 LLM 推理优化中，部分能力无法通过官方公开的插件入口（如 `vllm.general_plugins`、命令行参数等）直接接入：
+- 例如：需要拦截私有方法内部的算子调用、在模型权重加载后执行特定的合并或打包逻辑、或者修复底层 C++ 运行时的线程安全缺陷。
+- 按照仓库的两层架构原则：对于这类能力，本仓库不再在运行时使用脚本动态修改容器环境，而是将其作为**宿主源码修改清单**，下沉并合入我们维护的宿主 Fork 仓库（`vllm-ascend-hust`），随镜像原生发布。
 
-## 现有提案
+## 2. 提案目录说明
 
-| 子目录 | 能力 | 状态 |
+每个子目录代表一项具体的宿主修改技术方案，主要包含：
+1. **技术说明（README.md / OWNERSHIP.md）**：用直白的语言记录修改目的、涉及的宿主文件、环境变量开关、为什么必须改宿主源码以及当前验证状态。
+2. **修改对比（patch.diff 或源码快照）**：清晰展示相对于官方宿主基线所做的改动代码。
+3. **结构化元数据（proposal_meta.json）**：记录宿主文件路径、哈希校验及上游状态。
+
+## 3. 现有提案状态索引
+
+| 提案子目录 | 涉及功能 | 当前状态与归宿 |
 |---|---|---|
-| `W1R-gmm-tuning-config/` | GMM `tuning_config` + counts dump（default-off） | P0 全门 PASS；**blocked**：blocker `fixture-unreachable-fullgraph-decode`（active FULL graph 拿不到 M=128 真实 counts）；运行树已回滚、自动补丁链已移除 |
+| `GDN-qkv-norm/` | GDN 算子的 Q/K/V 融合归一化（default-off） | 算子本身在仓内保留；宿主修改已撤回公开入口，仅作为技术参考与原型记录 |
+| `comm-trace-stop-gil/` | 修复 torch_npu 性能分析工具中 GIL 释放导致的崩溃 | C++ 底层缺陷定位与补丁验证；待上游修复或在自定义构建中合入 |
+| `comm-mechanism/` | 通信重叠与分析机制链路 | 保留离线通信归因与测试逻辑 |
+| `W1R-gmm-tuning-config/` | GMM 算子参数调优与频次采样 | 方案冻结（因在计算图解码模式下无法通过 Python 层统计真实频次） |
+| `D4-conv-hoist-site2/` | GDN 卷积权重转置外提与连续打包 | **已下沉至宿主 Fork 源码**（`vllm-ascend-hust`），独立算子报告见 `ops/gdn_conv_pack/` |
+| `W3F2-runtime-tree/` | GDN 输入投影权重合并 | **已下沉至宿主 Fork 源码**（`vllm-ascend-hust`），此处仅保留历史参考快照 |
+| `ConcatD-zero-copy-unpack/` | GDN 解包零拷贝视图 | 探索性实验原型，已由 D4 连续打包路径替代 |

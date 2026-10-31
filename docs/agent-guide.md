@@ -14,13 +14,13 @@
    env-gated、默认缺省,patch 方法未开启时逐字委托原实现。
 4. **manifest 纪律**:bundle 保持 `import_only`,直到三项证据齐备
    (default-off 零回归冒烟、正确性对齐、性能对比);`host.version_range`
-   钉住已验证区间,禁止写 `>=0`。
+   明确锁定已验证区间,禁止写 `>=0`。
 5. **provenance/ 只读**:提取历史代码必须保留原版权头(Huawei, Apache-2.0)
    与 commit 溯源。
 6. **不做上游 PR(2026-09-11 定)**:改动只在本地落地(本仓 + 本地 clone/PYTHONPATH
    覆盖),不向上游(vllm / vllm-ascend 社区)提补丁,也不做"推动宿主提供 typed
    contract"这类上游化动作。与上游的关系只有一条:**跟随 `vllm-hust` release
-   节奏做版本同步**(重钉锚点与 `host.version_range`,见 release.md §4)。
+   节奏做版本同步**(重新锁定基线与 `host.version_range`,见 release.md §4)。
    `docs/upstream/` 素材冻结留档,不再维护、不提交。
 
 ## 2. 开发工作流

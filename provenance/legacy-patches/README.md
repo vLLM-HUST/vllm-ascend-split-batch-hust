@@ -1,8 +1,13 @@
-# Legacy patch archive
+# 历史补丁归档（只读溯源证据）
 
-This directory preserves original commits from core PRs #263 and #273 and
-Ascend PRs #280-#283 as unmodified `git format-patch` exports. Author metadata,
-messages, trailers, and exact diffs are retained.
+本目录保存早期开发过程中通过 `git format-patch` 导出的 14 个历史提交记录（来自 core PR #263、#273 以及 Ascend PR #280-#283）。
 
-The code must be separated into extension-owned modules and explicit host
-contracts before activation. These are evidence, not current-host patches.
+## 1. 为什么保留这些文件
+
+1. **开源协议合规与署名**：保留原始提交的作者信息、提交日志、说明文本及代码差异，满足 Apache-2.0 许可证的合规溯源要求；
+2. **机械测试校验**：仓内的 `tests/test_provenance_hashes.py` 测试会对这些文件的散列值（SHA256）与提交 ID 进行一致性校验，确保历史审计证据未被非法篡改。
+
+## 2. 极其重要的使用边界
+
+- **绝对不是当前运行补丁**：**这些文件是只读归档证据，绝不是当前环境需要执行或应用的补丁！**
+- **不可迁移**：当前仓库的所有插件能力均已重构为遵循官方规范的独立插件或下沉到宿主 Fork 源码，禁止在运行时对任何环境应用本目录中的历史补丁。
