@@ -58,3 +58,13 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
 - 算子结论与端到端服务结论分开；服务指标明确给出 TTFT/TPOT/吞吐或任务质量、负载长度和统计方式。
 
 字段缺失时标记“未证明”或“仅方向”，不得补造条件；负收益和失败记录保留。不得跨模型、权重、算子形状或 cohort 直接比较数字。
+
+## 6. 整体验收与分批验证矩阵（PR-E）
+
+| PR | 目标与范围 | 依赖前置 | 验收命令与结果 | 边界与声明 |
+|---|---|---|---|---|
+| PR-A (`cleanup/pr-a-delivery-inventory`) | 交付清单与单一事实源导航；确立两层架构分工 | 起点 `185f48f` (`origin/main`) | `pytest tests/test_document_custody.py` (5 passed)；Ruff PASS | 不升级任何历史收益主张；entry point 逐项对应 |
+| PR-B (`cleanup/pr-b-host-fork-migration`) | 废除仓内运行时打补丁工具；下沉 W3F2/D4 至宿主 Fork | PR-A | `pytest tests/test_runtime_patch_manifest_guard.py tests/test_runtime_tree_seams.py` (9 passed, 1 deselected)；`check-tree-seams.py --selftest` PASS | 宿主 Fork 分支 `work/issue20-w3f2-host` 已推送；插件仓零运行时打补丁脚本 |
+| PR-C (`cleanup/pr-c-capability-docs`) | 支持表、README、release/architecture/pitfalls/progress 过时操作清扫与 planner 边界 | PR-B | `pytest tests/test_document_custody.py` (6 passed)；Ruff PASS | Cascade 彻底撤除且无执行指南；root planner 明确不可激活 |
+| PR-D (`cleanup/pr-d-workbench-strip`) | 剥离 opt 搜索与外部工作台 helpers，保留归档索引 `workbench-archive.json` | PR-C | `pytest -q -m "not host_tree"` (401 passed, 23 skipped, 15 deselected)；tar sha256 逐项核验 PASS | 归档外部维护；测试不依赖 `/root/opt-ops` 与本地数据库 |
+| PR-E (`cleanup/pr-e-integration-audit`) | 整体构建分发清单、打包与整体验收固化 | PR-D | `build` + `tools/check_distribution.py` + `twine check` 全部 PASS；全量 CPU 套件 401 passed | 当前环境无昇腾卡；不据此声称 NPU dispatch、正确性或服务收益通过 |
