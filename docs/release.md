@@ -80,7 +80,7 @@ python -m venv <新的仓外venv>
 
 ## 4. 宿主升级核对清单
 
-- [ ] 按 [HOST_CONTRACT.md](../HOST_CONTRACT.md) 核对当前组件实际消费的 seam。
+- [ ] 按 [HOST_CONTRACT.md](HOST_CONTRACT.md) 核对当前组件实际消费的 seam。
 - [ ] `vllm.general_plugins` 加载顺序、冲突处理及关闭态零修改。
 - [ ] fi_gelu：`CustomOp.register_oot` 的 `GeluAndMul` 建键、实例化消费、all/none 与 `+/-gelu_and_mul`、图回放和 fallback。
 - [ ] fi_sampling：sampler 构造点和 forward 签名、generator/logprobs/batch-invariant/reduce/async fallback。
@@ -132,4 +132,4 @@ python -m pip uninstall vllm-ascend-split-batch
 | 0.1.3 | [PyPI](https://pypi.org/project/vllm-ascend-split-batch/0.1.3/) | [v0.1.3](https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/releases/tag/v0.1.3) |
 | 0.2.0 | [PyPI](https://pypi.org/project/vllm-ascend-split-batch/0.2.0/) | [v0.2.0](https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/releases/tag/v0.2.0) |
 
-[固定版本发布原始记录](https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/blob/185f48f3ac845833beb41bf2b8d34f7f82388128/docs/release.md)。保留其中的失败和字节差异，不以本机重建代替已发布资产。原始结果保管规则见 [EVIDENCE.md](../EVIDENCE.md)。
+[固定版本发布原始记录](https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/blob/185f48f3ac845833beb41bf2b8d34f7f82388128/docs/release.md)。保留其中的失败和字节差异，不以本机重建代替已发布资产。原始结果保管规则见 [EVIDENCE.md](EVIDENCE.md)。

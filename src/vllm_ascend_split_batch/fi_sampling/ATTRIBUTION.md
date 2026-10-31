@@ -34,7 +34,7 @@ The four vendored files carry **no in-file copyright header**, because the W2 so
 files carry none either, and byte-identity with the reviewed snapshot is a hard
 requirement (`PROVENANCE.md`): the hashes above are the provenance receipt, and an
 in-file header would invalidate them. Attribution therefore lives in this file and in
-[`PROVENANCE.md`](../../../PROVENANCE.md) instead of in the copied bytes.
+[`PROVENANCE.md`](../../../docs/PROVENANCE.md) instead of in the copied bytes.
 
 > If the W2 source later gains headers, re-sync the copy and update the hashes rather
 > than editing the vendored files in place.
