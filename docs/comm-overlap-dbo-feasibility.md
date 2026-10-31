@@ -48,7 +48,7 @@
   仅存在于 DeepEP 系 EP-MoE 内核（deepep_ht/ll/nixl/modular_kernel）——
   TP allReduce 无钩子层，重叠编排完全依赖 UBatchWrapper 自身双流循环。
 - 收益天花板：12.4ms/step 的重叠份额。
-- 单变量控制：测试 DBO 时不开启 D4 卷积权重预打包等其他优化选项。
+- 单变量控制：测试 DBO 时不开启卷积权重加载期预打包等其他优化选项。
 
 ## 技术可行性结论：不可行（已结题，2026-10-22）
 

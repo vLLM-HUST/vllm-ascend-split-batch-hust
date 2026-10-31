@@ -167,7 +167,7 @@ so `stats()` matches the log.
 
 ## GDN in_proj merge component (implemented, default-off, fail-closed)
 
-`gdn_merge_inproj_plugin.py` is the plugin-library home of the accepted **F2**
+`gdn_merge_inproj_plugin.py` is the plugin-library home of the accepted in_proj weight merge
 mechanism (load-time `in_proj_ba` -> `in_proj_qkvz` weight merge, one
 `[6176, 2048]` `MatMulV2` per GDN layer instead of two). It rides ONLY:
 
@@ -247,7 +247,7 @@ L3/L4 acceptance.
 
 Statistics scope: 早期历史评估记录曾参考过部分特定测试流量，但属于历史已废弃的口径，且绑定于旧运行时补丁。当前仓内已废弃该类历史流量。任何现行性能数字必须严格依据 docs/npu-benchmark-execution-guide.md 规定的标准受控评测负载重新采集，严禁跨条件混用。
 
-## W1R GMM `tuning_config` / counts dump (宿主侧提案，default-off)
+## GMM `tuning_config` 调优配置注入与 counts dump 宿主侧提案 (default-off)
 
 状态：**提案补丁，未提交上游**（承载目录 `host-proposals/W1R-gmm-tuning-config/`，
 `proposal_meta.json` 记录 `upstream_status` 与后续动作）。不是本仓插件 entry，

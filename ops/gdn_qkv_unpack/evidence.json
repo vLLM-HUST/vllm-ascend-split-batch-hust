@@ -52,7 +52,7 @@
   "l4_attribution": {
     "call_count_expected": 0,
     "call_count_actual": 0,
-    "note": "not wired into production model execution; GDN performance addressed by host-level D4 conv-pack"
+    "note": "not wired into production model execution; GDN performance addressed by host-level conv-weight pre-pack"
   },
   "serving_end_to_end": {
     "tested": false,

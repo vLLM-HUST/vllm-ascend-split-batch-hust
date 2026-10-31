@@ -51,7 +51,7 @@
 | vllm core | `0.28.1.post1.dev143+gf18cf803c`（0.28 镜像默认栈配对） | 同上 |
 | 底座 / 设备 | Ubuntu 22.04.5 + CANN 9.1.0 + Python 3.12.13；2×910B2（**TP=2**） | 同上 |
 | 模型 | **Qwen3.5-35B-A3B**（40 层：30 GDN + 10 MoE），hybrid **TP2** | 同上 + [evidence/d4-gate-fp32-cohort.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/d4-gate-fp32-cohort.md) |
-| 请求形态 | chunked prefill **on**；APC **off**；max_model_len 8192 | D4 serve 固定协议 |
+| 请求形态 | chunked prefill **on**；APC **off**；max_model_len 8192 | 卷积权重预打包服务固定协议 |
 | 调度 / 图 | `cudagraph_mode=NONE`（仅限该证据 cohort；详见原始报告） | d4-gate-fp32-cohort.md |
 | 精度档 | bf16 | 同上 |
 

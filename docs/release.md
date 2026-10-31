@@ -88,7 +88,7 @@ python -m venv <新的仓外venv>
 - [ ] tier-2 patch：基线/补丁/产物 SHA256、依赖顺序、完整回滚；漂移拒绝，不模糊套补丁。
 - [ ] 实际设备数值、dispatch、graph 与性能，缺一项即保留缺口。
 
-`tools/seam_diff.py --selftest` 及两棵源码树对拍仅证明静态面，不证明生产图与设备行为。W3F2/D4 的暂存树重放见[交付清单](delivery-inventory.md#运行树补丁)，不得直接修改只读宿主树。
+`tools/seam_diff.py --selftest` 及两棵源码树对拍仅证明静态面，不证明生产图与设备行为。输入投影权重合并与卷积权重预打包的暂存树重放见[交付清单](delivery-inventory.md#运行树补丁)，不得直接修改只读宿主树。
 
 ## 5. 发布检查表
 

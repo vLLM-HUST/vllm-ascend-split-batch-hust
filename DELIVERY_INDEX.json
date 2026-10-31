@@ -28,7 +28,7 @@
   "operators": [
     {
       "id": "gdn_conv_pack",
-      "display_name": "GDN Conv1d Weight Pre-pack (D4)",
+      "display_name": "GDN Conv1d Weight Pre-pack (加载期卷积权重预打包)",
       "layer": "host_fork",
       "directory": "ops/gdn_conv_pack",
       "readme": "ops/gdn_conv_pack/README.md",
