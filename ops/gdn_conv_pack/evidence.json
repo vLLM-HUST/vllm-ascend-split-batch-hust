@@ -59,11 +59,11 @@
       "model": "Qwen3.5-35B-A3B",
       "tp": 2,
       "num_prompts": 32,
-      "baseline_median_tpot_ms": 265.45,
-      "optimized_median_tpot_ms": 263.48,
-      "median_tpot_diff_ms": -1.97,
-      "baseline_throughput_tok_s": 29.6,
-      "optimized_throughput_tok_s": 29.52
+      "baseline_median_step_ms": 265.45,
+      "optimized_median_step_ms": 263.48,
+      "median_step_diff_ms": -1.97,
+      "baseline_gen_rate": 29.6,
+      "optimized_gen_rate": 29.52
     }
   },
   "evidence_fingerprint": {

@@ -24,7 +24,7 @@
   - 数据格式：`--dataset-name sharegpt`
   - 并发度：`32` / `64`
   - 请求总量：`500`
-- **核心指标**：端到端请求吞吐（req/s）、输出 Token 吞吐（tokens/s）、P99 延迟。
+- **核心指标**：端到端请求处理速率（req/s）、输出 Token 速率（req/s 与 tok/s 表现）、P99 延迟。
 
 ### 1.3 `long-prefix`（长前缀上下文复用测试集）
 - **核心定位**：评估在多请求共享长 System Prompt 或知识库文档时的 Prefill 耗时，以及 Prefix Caching（KV Cache 命中复用）机制生效下的端到端加速比。
