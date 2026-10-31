@@ -17,27 +17,16 @@ vLLM / vllm-ascend（只读）
 本仓 Python / Triton 实现，或独立交付的编译型算子
 ```
 
-> 图中的版本号只是层级示意,**现行验证域以 [release.md](release.md) §0.1 为准**:
-> vllm `0.28.1.post1.dev143+gf18cf803c`(vllm-hust release v1)/ vllm-ascend
-> `0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27`。旧基线 `vllm 0.23.0` /
-> `vllm-ascend 0.23.0rc1` 仅在 [docs/evidence/cascade/EVIDENCE.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/EVIDENCE.md) §8 留档,
-> 其参考源码树已删,只作历史数字对照,不继承。
+> 验证域随具体组件和证据而异，不能由架构图推断。当前兼容声明及 cohort 边界见 [release.md](release.md) 与 [cohort-and-ownership.md](cohort-and-ownership.md)。
 
 加载入口不等于稳定执行接口。对私有方法的运行时包装仍是宿主耦合，
 不得称为宿主主动调用的公开 Backend 契约。新增替换必须证明真实 callsite 可达，
 不能以注册成功或复制整个 forward 代替。
 
 
-## 2. Cascade 接入边界
+## 2. 已撤除实现
 
-- 不发布 `cascade-attention` general plugin，不注入 cascade 环境变量。
-- 不声明 `[kernels]` extra，不依赖或自动安装外部 cascade kernel wheel。
-- `cascade-merge-op` / `Raing5Days/vllm-hust-cascade-kernel` 不属于当前安装依赖。
-- cascade 实现模块、Runner 包装、图孪生、gate 子进程与专属测试不保留在源码树或包中。
-  历史证据、版权和只读溯源保留；它们不属于可导入的插件实现。
-- 已运行的进程和已捕获的图不能靠移除入口热撤销；升级必须重新安装并重启、重捕获。
-- 回滚本轮仅恢复源码，上轮已停用的入口和依赖不自动恢复；重新安装后重启并重捕获。
-  重新启用须恢复对应注册并独立验证。
+Cascade 不属于当前包：无源码、注册入口、执行路径或 kernel-wheel 依赖。保留的历史报告只用于溯源，不代表当前能力或收益。安装/升级及进程重启边界见 [release.md](release.md)。
 
 ## 3. Extension Bundle 语义
 
@@ -45,7 +34,7 @@ vLLM / vllm-ascend（只读）
 |---|---|
 | `vllm_hust.extension_bundles` | 保留 6 个 bundle 的发现入口；发现只读元数据，不导入执行实现 |
 | `org.vllm-hust.split-batch-full-graph` | 仅保留 `dual-pad-planner`，`import_only`，activation environment 为空，管理器不得激活 |
-| 其他 bundle | 各自的状态、环境变量与 host 范围不受 cascade 停用影响 |
+| 其他 bundle | 按自身 manifest 状态、环境变量与 host 范围判定 |
 | `implementation[].status` | 未具备三项验收证据的载体保持 `import_only` |
 | `activation.environment` | enable 时注入的真实值，不是说明文本 |
 | `host.version_range` | 保持有界的宿主声明，不得写 `>=0`；范围与验证域见 release.md |
@@ -73,7 +62,5 @@ split-executor 提案，不得通过翻转 manifest 状态绕过。
   独立实现不得反向依赖插件壳或 vLLM 内部对象。
 - `op_selector.py` 是 CPU 可测的选择骨架，尚未接线真实算子路径；不能将其存在
   当作 Backend 已集成。接口见 `design/operator-dispatch.md`。
-- 正确性与性能声明必须绑定形状事实、权重标签、宿主版本及 cohort，
-  不继承归档 cascade 或其他接入方式的验收结论。
-- 自动注册隔离探针为 `tools/probe_cascade_retirement.py`；只验证已安装 wheel 的
-  元数据与关闭态导入边界，不替代 NPU 起服、L3 数值、graph replay 或性能验收。
+- 正确性与性能声明必须绑定形状事实、权重标签、宿主版本及 cohort；不同载体和历史域的验收不能互相继承。
+- `tests/test_plugin_registration.py` 覆盖当前安装包的入口面及已撤除模块隔离；该回归不替代 NPU dispatch、数值、graph replay 或服务性能验证。
