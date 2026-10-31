@@ -1,0 +1,67 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "gdn_qkv_unpack",
+  "callsite": "vllm_ascend_split_batch.gdn_qkv_unpack:rearrange_mixed_qkv",
+  "environment": {
+    "device": "Ascend910B2",
+    "cann_version": "9.1.0",
+    "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+    "vllm_ascend_version": "0.25.1rc2.dev125+hust",
+    "model": "Qwen3.5-35B-A3B",
+    "dtype": "bf16"
+  },
+  "shape_facts": {
+    "phase": "decode",
+    "batch_size": 1,
+    "prompt_tokens": 64,
+    "decode_tokens": 16,
+    "q_dim": 1024,
+    "k_dim": 1024,
+    "v_dim": 2048,
+    "row_stride": 4096
+  },
+  "l0_microbenchmark": {
+    "status": "completed_negative_speedup",
+    "conclusion": "single-pass triton unpack kernel measured slower than native split+cat chain (291.04us vs 147.51us at T=1, 303.45us vs 286.69us at T=16, 292.04us vs 283.58us at T=64) due to ~110-140us triton host launch overhead",
+    "speedup": 0.94,
+    "native_median_us": 286.69,
+    "optimized_median_us": 303.45,
+    "raw_measurements": {
+      "T1": {
+        "native_us": 147.51,
+        "candidate_us": 291.04,
+        "paired_median_pct": -49.32
+      },
+      "T16": {
+        "native_us": 286.69,
+        "candidate_us": 303.45,
+        "paired_median_pct": -5.55
+      },
+      "T64": {
+        "native_us": 283.58,
+        "candidate_us": 292.04,
+        "paired_median_pct": -3.14
+      }
+    }
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "metric": "exact_bitwise_equal",
+    "probe_script": "tests/test_gdn_qkv_unpack.py"
+  },
+  "l4_attribution": {
+    "call_count_expected": 0,
+    "call_count_actual": 0,
+    "note": "not wired into production model execution; GDN performance addressed by host-level D4 conv-pack"
+  },
+  "serving_end_to_end": {
+    "tested": false,
+    "concurrency": 0,
+    "speedup": null,
+    "conclusion": "not deployed due to negative operator-level microbenchmark"
+  },
+  "evidence_fingerprint": {
+    "benchmark_script": "tools/bench_gdn_qkv_unpack.py",
+    "test_script": "tests/test_gdn_qkv_unpack.py"
+  }
+}

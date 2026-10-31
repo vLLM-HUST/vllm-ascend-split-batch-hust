@@ -138,7 +138,7 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
 ```
 
 ### Step 2：更新各算子的 `REPORT.md`
-在 `ops/<operator>/REPORT.md` 中填入实测结果表格，包含微基准对比、数值误差判定、L4 消除次数及最终的端到端吞吐/时延提升百分比。
+在 `ops/<operator>/REPORT.md` 中填入规范结果表格，包含微基准对比、数值误差判定、L4 消除次数及端到端服务状态。
 
 ### Step 3：更新根目录索引 `DELIVERY_INDEX.json`
 将各算子的 `serving_status` 从 `pending_npu_refresh` 调整为 `measured_speedup`、`within_noise` 或 `negative_speedup`，并运行合规测试校验：

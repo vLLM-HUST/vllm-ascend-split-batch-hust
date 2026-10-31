@@ -1,15 +1,15 @@
 # 算子验收报告: GELU and Mul Triton Fused Kernel (`fi-gelu`)
 
 ## 1. 评测环境与形状事实
-- **硬件拓扑**: Atlas 800T A2 (Ascend910B2 单卡实测)
+- **硬件拓扑**: Atlas 800T A2 (Ascend910B2 单卡)
 - **软件栈版本**: CANN 9.1.0 / Triton-Ascend 3.2.2 / vllm 0.28.1.post1.dev143+gf18cf803c / vllm-ascend 0.25.1rc2.dev125+hust (Commit `74f0c0a27`)
 - **评测形状**: `inter=13824`（输入张量 `[B, 27648]`，输出张量 `[B, 13824]`），批大小 `B ∈ {64, 256}`
 - **数据类型**: bf16 (`approximate="none"`)
 
-## 2. L0 纯算子对比 (Microbenchmark 实测数据)
-在 910B2 硬件上通过 `torch.npu.Event`（warmup=10, iters=100, 3 轮最小耗时）实测对比：
+## 2. L0 纯算子对比 (Microbenchmark 数据)
+在 910B2 硬件上通过 `torch.npu.Event`（warmup=10, iters=100, 3 轮最小耗时）对比：
 
-| 批大小 (B) | 算子方案 | 实测耗时 (us) | 对比原生加速比 | 对比拷贝下限 |
+| 批大小 (B) | 算子方案 | 运行耗时 (us) | 对比原生加速比 | 对比拷贝下限 |
 |---|---|---|---|---|
 | **B = 64** | `native_chain` (原生 fp32_cast+gelu+mul) | **135.9 us** | 1.00x (基准) | 4.40x |
 | B = 64 | `fi_gelu` (融合 Triton kernel) | **190.6 us** | **0.71x (慢 1.40x)** | 6.17x |
@@ -20,7 +20,7 @@
 | B = 256 | `fi_gelu(out=)` (预分配输出张量) | 135.4 us | 0.98x (慢 1.02x) | 4.55x |
 | B = 256 | `copy_floor` (`x.clone()` 内存下限) | 29.8 us | 4.47x | 1.00x |
 
-- **瓶颈归因**：实测空 Triton Kernel 启动开销（Host Launch Overhead）单次高达 **110.4 us**，远超计算本身耗时，导致融合 Kernel 显著慢于 PyTorch 原生 C++ 分立调用链。
+- **瓶颈归因**：空 Triton Kernel 启动开销（Host Launch Overhead）单次高达 **110.4 us**，远超计算本身耗时，导致融合 Kernel 显著慢于 PyTorch 原生 C++ 分立调用链。
 - **评测定性**：**明确为负性能（Negative Speedup）**。如实记录测试事实，绝不删除负收益记录。
 
 ## 3. L3 数值一致性核验

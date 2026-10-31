@@ -19,6 +19,12 @@
    - 仓内仅沉淀标准化的算子技术文档、结构化验收报告及权威索引清单。
 5. **执行环境路径隔离纪律**：
    - 严禁在可能遮蔽已安装依赖的顶层或未隔离目录中执行命令，确保执行环境与依赖包路径清晰解耦。
+6. **宿主 Fork 必须定死基线分支（严禁在 main 上提 PR）**：
+   - 两个宿主仓库在当前容器运行时中的基线分支定死为 **`based/image-baseline`**，严禁以追新脱节的 `main` 为 Base：
+     - `vLLM-HUST/vllm-ascend-hust`：Base 定死为 `based/image-baseline`（锚定 `74f0c0a27`）；
+     - `vLLM-HUST/vllm-hust`：Base 定死为 `based/image-baseline`（锚定 `f18cf803c`）；
+   - 任何针对宿主源码的修改必须基于 `based/image-baseline` 切分支，发起 PR 时的 Target / Base 分支必须指定为 `based/image-baseline`；
+   - 宿主侧算子的修改与收益必须在当前插件仓的 `ops/<operator>/` 与 `DELIVERY_INDEX.json`（标记 `layer: host_fork`）中登记验收报告与证据，实现全生命周期可追溯。
 
 ---
 

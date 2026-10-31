@@ -114,13 +114,19 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 ```
 
 ### 3.2 宿主 Fork 层边界与沉淀清单
-- **代码位置**：`/root/host-trees/vllm-ascend`
-- **上游远端**：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
-- **基线锚点**：`based/image-baseline`（精确锁定容器运行时镜像 Commit `74f0c0a27`）
-- **开发分支**：`work/issue20-w3f2-host`
-- **已沉淀算子**：
-  - **W3F2**（Commit `ce807cd`）：实现 `process_weights_after_loading` Hook，在加载模型权重后合并 `in_proj_ba` 与 `in_proj_qkv`；
-  - **D4**（Commit `deb5ff`）：在模型加载期物化 `conv1d.weight` 为连续 `[4, 4096]` 格式，消除前向传播中的 `transpose(0, 1)`。
+针对模型私有前向、底层 C++ 算子和权重生命周期的修改，统一由宿主 Fork 承载：
+- **昇腾适配宿主 (`vllm-ascend-hust`)**：
+  - 本地路径：`/root/host-trees/vllm-ascend`
+  - 远端仓库：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
+  - **基线分支（Base Branch）**：**`based/image-baseline`**（精确锁定容器运行时镜像 Commit `74f0c0a27` / `0.25.1rc2.dev125+hust`）
+  - 开发分支：`work/issue20-w3f2-host`
+  - 已沉淀算子：
+    - **W3F2**（Commit `ce807cd`）：实现 `process_weights_after_loading` Hook，在加载模型权重后合并 `in_proj_ba` 与 `in_proj_qkv`；
+    - **D4**（Commit `deb5ff`）：在模型加载期物化 `conv1d.weight` 为连续 `[4, 4096]` 格式，消除前向传播中的 `transpose(0, 1)`（消除每步冗余动态转置）。
+- **vLLM 核心宿主 (`vllm-hust`)**：
+  - 本地路径：`/root/host-trees/vllm-hust`
+  - 远端仓库：`git@github.com:vLLM-HUST/vllm-hust.git`
+  - **基线分支（Base Branch）**：**`based/image-baseline`**（精确锁定容器运行时镜像 Commit `f18cf803c` / `0.28.1.post1.dev143+gf18cf803c`）
 
 ### 3.3 插件载体层边界与标准公开接口
 - **代码位置**：`/root/vllm-workspace/vllm-ascend-split-batch-hust`
@@ -138,6 +144,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
   def __getattr__(name: str):
       if name in _EXPORTS:
           from . import planner
+
           return getattr(planner, name)
       raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
   ```
@@ -146,6 +153,25 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 ### 3.5 彻底废除运行时补丁链条的硬性约束
 - 仓库内**严禁**再引入任何类似 `apply-runtime-patches.sh`、`patch_*.py` 等试图在容器运行树上就地修改 Python/C++ 文件的自动化脚本。
 - 如发现新的必须改动宿主代码的场景，统一按《宿主提案（Host Proposal）》标准在宿主 Fork 分支实现并提交 PR，严禁在插件仓私开补丁打入逻辑。
+
+### 3.6 宿主 Fork 分支与 PR 协同铁律（严禁在 main 上切分支或提 PR）
+由于社区 `main` 分支走在非常靠前的上游（已领先本地镜像 260+ commits），底层 API、CANN 驱动要求及模型架构均与当前 910B2 镜像运行时严重脱节。因此确立以下分支管理与 PR 铁律：
+1. **基线定死为 `based/image-baseline`**：
+   - `vllm-ascend-hust` 与 `vllm-hust` 的祖先分支必须严格锁定在本地与远端的 `based/image-baseline`；
+   - 严禁从 `main` 切特性分支；
+2. **提 PR 时的 Base 分支定死为 `based/image-baseline`**：
+   - GitHub 创建 PR 时必须显式把 Base Branch 切换为 `based/image-baseline`，严禁向 `main` 发起 PR；
+   - 这样保证 PR Diff 仅包含宿主侧必须修改的几处核心改动（如 D4 权重连续化、W3F2 钩子），零上游污染；
+3. **长期维护双轨机制**：
+   - 镜像冻结轨（`based/image-baseline`）：负责当前镜像运行时环境的稳定复现与算子交付；
+   - 上游跟踪轨（`main`）：仅负责持续追踪社区最新演进，不直接作为当前镜像评测基准。
+
+### 3.7 插件仓如何体现宿主 Fork 的收益与证据追溯
+宿主侧下沉的算子变更（如 D4 与 W3F2），其价值与收益直接体现在本插件仓中，统一履约规范如下：
+1. **独立三件套目录跟踪**：在插件仓的 `ops/` 目录下为宿主算子建立同等规格的独立子目录（如 `ops/gdn_conv_pack/`），包含完整的 `README.md`、`REPORT.md` 与 `evidence.json`；
+2. **总索引明确标记层级**：在根目录 `DELIVERY_INDEX.json` 中标记 `"layer": "host_fork"`，明确其属于宿主层原生优化；
+3. **明确记录机理与消除开销**：在报告中必须列清该优化为何必须下沉至宿主、消除了宿主内部多少次冗余计算/拷贝（如 D4 单步消除 30 层 GDN 的 308 us 转置开销，全模型净省 9.25 ms），并记录基线与优化后的 L0 实测数字；
+4. **绑定宿主分支与 Commit 证据指纹**：在 `evidence.json` 中完整绑定宿主远端仓库、Base 分支（`based/image-baseline`）、开发分支及具体 Commit Hash，实现代码到证据的闭环双向追溯。
 
 ---
 
