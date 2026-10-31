@@ -18,6 +18,7 @@ ALLOWED_ROOT_JSONS = {
     "EVIDENCE_AVAILABILITY.json",
     "EVIDENCE_SOURCES.json",
     "MOD_METADATA.json",
+    "DELIVERY_INDEX.json",
 }
 
 
@@ -32,6 +33,7 @@ def test_all_repository_jsons_belong_to_governed_categories():
     """仓内全部 .json 文件必须属于清晰的分类目录。"""
     valid_prefixes = (
         "src/",
+        "ops/",
         "tools/runtime-tree/",
         "tools/workbench-archive.json",
         "host-proposals/",
@@ -54,6 +56,20 @@ def test_all_repository_jsons_belong_to_governed_categories():
         assert any(rel.startswith(prefix) for prefix in valid_prefixes), (
             f"未分类的 JSON 文件: {rel}"
         )
+
+
+def test_delivery_index_matches_operator_directories():
+    """验证 DELIVERY_INDEX.json 中的算子子目录、文档与证据全部真实存在。"""
+    index_path = ROOT / "DELIVERY_INDEX.json"
+    assert index_path.exists(), "根目录缺少 DELIVERY_INDEX.json"
+    data = json.loads(index_path.read_text(encoding="utf-8"))
+    assert data["schema"] == "operator-delivery-index/v1"
+    for op in data["operators"]:
+        op_dir = ROOT / op["directory"]
+        assert op_dir.is_dir(), f"算子子目录不存在: {op['directory']}"
+        assert (ROOT / op["readme"]).is_file(), f"算子缺少 README: {op['readme']}"
+        assert (ROOT / op["report"]).is_file(), f"算子缺少 REPORT: {op['report']}"
+        assert (ROOT / op["evidence"]).is_file(), f"算子缺少 evidence: {op['evidence']}"
 
 
 def test_packaging_extension_manifests_are_valid():

@@ -1,0 +1,47 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "gdn_conv_pack",
+  "callsite": "vllm_ascend/ops/gdn.py:AscendGatedDeltaNetAttention.forward",
+  "environment": {
+    "device": "910B2",
+    "world_size": 2,
+    "cann_version": "9.1.0",
+    "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+    "vllm_ascend_version": "0.25.1rc2.dev125+hust",
+    "model": "Qwen3.5-35B-A3B",
+    "dtype": "bf16",
+    "cudagraph_mode": "NONE"
+  },
+  "shape_facts": {
+    "phase": "decode",
+    "batch_size": 16,
+    "prompt_tokens": 1024,
+    "decode_tokens": 1,
+    "conv_weight_shape_orig": [4096, 1, 4],
+    "conv_weight_shape_packed": [4, 4096]
+  },
+  "l0_microbenchmark": {
+    "status": "pending_npu_refresh",
+    "native_median_us": null,
+    "optimized_median_us": null,
+    "speedup": null
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "metric": "torch.equal",
+    "max_abs_diff": 0.0
+  },
+  "l4_attribution": {
+    "call_count_expected": 30,
+    "call_count_actual": 30,
+    "verified": true
+  },
+  "serving_end_to_end": {
+    "tested": false,
+    "status": "pending_npu_refresh"
+  },
+  "evidence_fingerprint": {
+    "host_fork_branch": "work/issue20-w3f2-host",
+    "host_commit": "deb5ffefe32b53c61ae6193ff4ee4368cf1889ba"
+  }
+}

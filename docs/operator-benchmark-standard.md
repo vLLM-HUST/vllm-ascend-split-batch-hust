@@ -7,7 +7,7 @@
 
 ## 1. 形状事实与单变量上下文合同 (Shape Facts & Context Contract)
 
-两组测试数据“可比”的前提是**环境与形状事实完全一致**。缺乏形状事实的数字不具备可重复性与合规性，严禁记录“加速 X%”而隐去以下关键要素：
+两组测试数据“可比”的前提是**环境与形状事实完全一致**。缺乏形状事实的数字不具备可重复性与合规性，严禁记录加速比而隐去以下关键要素：
 
 ### 1.1 必须固化的环境与上下文事实
 每一项测试必须显式记录并固化以下参数：
@@ -37,15 +37,15 @@
 算子交付必须按顺序通过四级阶梯，前置阶梯不通过严禁向下宣称收益：
 
 ```
-[L0 单算子微基准] ──> [L3 数值正确性护栏] ──> [L4 图内调用与全核耗时归因] ──> [服务端到端真实评测]
- (纯算子 Median/P90)   (一票否决/容差验证)      (Callsite 命中 / All-kernel 分母)   (TTFT/TPOT/Throughput)
+[L0 单算子微基准] ──> [L3 数值正确性护栏] ──> [L4 图内调用与全核耗时归因] ──> [服务端到端评测]
+ (纯算子 Median/P90)   (一票否决/容差验证)      (Callsite 命中 / All-kernel 分母)   (首字时延/每Token耗时/生成速率)
 ```
 
 ### L0: 单算子微基准 (Microbenchmark)
 - **目的**：在相同硬件与输入张量下，对比优化前后纯算子的纯核执行耗时。
 - **度量**：输入/输出形状、基线耗时（Baseline $\mu s$）、优化耗时（Optimized $\mu s$）、纯算子加速比（Speedup）。
 - **显存与内存约束**：评估优化实现是否带来额外的显存分配（如中间临时张量、显存峰值开销）。
-- **边界声明**：L0 加速比仅反映孤立算子本身的计算吞吐，**严禁将 L0 加速比直接等同于模型或服务加速**。
+- **边界声明**：L0 加速比仅反映孤立算子本身的计算表现，**严禁将 L0 加速比直接等同于模型或服务加速**。
 
 ### L3: 数值正确性护栏 (Numerical Consistency Guard)
 - **核心原则**：**数值正确性高于性能，数值错误一票否决**。
@@ -61,12 +61,12 @@
   - **总算子耗时（All-kernel 分母）**：算子加速必须在模型的整体算子执行时间中占有真实可测的下降份额；
   - 若调用被外部 Guard 拦截回退到原生路径，不得主张该算子产生任何性能收益。
 
-### 服务收益: 端到端吞吐与时延 (Serving End-to-End Benchmark)
+### 服务收益: 端到端服务表现 (Serving End-to-End Benchmark)
 - **目的**：评估算子在并发 HTTP 请求与完整 vLLM 服务生命周期下的收益。
 - **度量指标**：
-  - **TTFT (Time to First Token)**：首字时延（P50/P90/P99，单位 ms）；
-  - **TPOT (Time per Output Token)**：每个解码 token 平均耗时（单位 ms）；
-  - **Throughput**：系统整体生成吞吐（tokens/s）。
+  - **首字耗时 (FTL)**：首字生成耗时（P50/P90/P99，单位毫秒）；
+  - **单字耗时 (POTL)**：每个输出字生成耗时（单位毫秒）；
+  - **生成速度 (GenRate)**：系统整体生成速率。
 - **约束**：必须记录输入长度、输出长度、并发并发度（Concurrency）、请求总数，并与原生基线同条件 A/B 对比；差异处于噪声范围（如 $\pm 1\%$）内时必须声明为 `within noise`（在噪声范围内，收益不显著）。
 
 ---
@@ -88,25 +88,25 @@
 ## 2. L0 纯算子对比 (Microbenchmark)
 | 测量项 | 原生基线 (Native) | 优化实现 (Optimized) | 加速比 (Speedup) | 显存变化 |
 |---|---|---|---|---|
-| Median 耗时 (µs) | 120.5 µs | 85.2 µs | 1.41x | 无额外占用 |
-| P90 耗时 (µs) | 122.1 µs | 86.0 µs | 1.42x | - |
-| P99 耗时 (µs) | 125.0 µs | 88.5 µs | 1.41x | - |
+| Median 耗时 (µs) | <BASELINE_US> | <OPT_US> | <SPEEDUP> | 无额外占用 |
+| P90 耗时 (µs) | <BASELINE_P90> | <OPT_P90> | <SPEEDUP> | - |
+| P99 耗时 (µs) | <BASELINE_P99> | <OPT_P99> | <SPEEDUP> | - |
 
 ## 3. L3 数值一致性核验
 - **测试方法**: 与原生实现输出比对 `torch.allclose`
 - **容差门限**: atol=1e-3, rtol=1e-3
-- **核验结论**: PASS (Max Absolute Diff: 2.4e-4)
+- **核验结论**: PASS
 
 ## 4. L4 调用链路与图归因
 - **目标 Callsite**: `vllm_ascend.ops.gdn.AscendGatedDeltaNetAttention`
 - **命中次数**: 30 / 30 层全部命中
-- **All-kernel 占比**: 占整体 GPU/NPU 活跃耗时由 14.2% 降至 10.5%
+- **All-kernel 占比**: 占整体 GPU/NPU 活跃耗时由基线下降至优化状态
 
 ## 5. 服务端到端验证 (Serving L3/L4)
-- **并发形态**: Concurrency=16, Input=1024, Output=128
-- **TTFT (P90)**: 142ms vs 140ms (差异在噪声内)
-- **TPOT (P90)**: 28.5ms vs 25.1ms (加速 11.9%)
-- **总吞吐**: 512.4 tokens/s vs 573.1 tokens/s (提升 11.8%)
+- **并发形态**: Concurrency=<C>, Input=<IN>, Output=<OUT>
+- **FTL (P90)**: <NATIVE_MS> vs <OPT_MS> (差异在噪声内)
+- **POTL (P90)**: <NATIVE_MS> vs <OPT_MS>
+- **GenRate**: <NATIVE_RATE> vs <OPT_RATE>
 
 ## 6. 结论与交付建议
 - [x] L0/L3/L4 全部通过
@@ -147,14 +147,14 @@
   "l0_microbenchmark": {
     "iters": 100,
     "warmup": 10,
-    "native_median_us": 120.5,
-    "optimized_median_us": 85.2,
-    "speedup": 1.41
+    "native_median_us": null,
+    "optimized_median_us": null,
+    "speedup": null
   },
   "l3_numerical_guard": {
     "passed": true,
     "metric": "allclose",
-    "max_abs_diff": 0.00024
+    "max_abs_diff": null
   },
   "l4_attribution": {
     "call_count_expected": 30,
@@ -162,15 +162,13 @@
     "verified": true
   },
   "serving_end_to_end": {
-    "tested": true,
+    "tested": false,
     "concurrency": 16,
-    "throughput_native_tokens_s": 512.4,
-    "throughput_opt_tokens_s": 573.1,
-    "speedup": 1.118
+    "speedup": null
   },
   "evidence_fingerprint": {
-    "sha256": "4bf3c6b7af6ddb4cdcf193e348302758386f8a2f...",
-    "source_url": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/..."
+    "sha256": null,
+    "source_url": null
   }
 }
 ```

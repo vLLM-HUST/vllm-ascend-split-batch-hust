@@ -15,7 +15,7 @@ def test_operator_benchmark_standard_document_structure():
     assert "L0: 单算子微基准" in doc
     assert "L3: 数值正确性护栏" in doc
     assert "L4: 图内调用与链路归因" in doc
-    assert "服务收益: 端到端吞吐与时延" in doc
+    assert "服务收益: 端到端服务表现" in doc
     assert "operator-benchmark-evidence/v1" in doc
 
 
@@ -55,5 +55,4 @@ def test_standard_evidence_schema_example():
 
     serving = data["serving_end_to_end"]
     assert "concurrency" in serving
-    assert "throughput_native_tokens_s" in serving
-    assert "throughput_opt_tokens_s" in serving
+    assert "speedup" in serving

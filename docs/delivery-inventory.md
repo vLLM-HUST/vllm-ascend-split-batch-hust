@@ -7,23 +7,27 @@
 - **宿主层（宿主 Fork，`vllm-ascend-hust`）**：负责模型架构、Runner 生命周期、执行图及底层基础设施修复。在插件侧无法介入的位置（如内联算子逻辑、权重加载后处理 hook），直接在宿主 Fork 源码中实现，随宿主镜像原生发布。
 - **插件层（本仓，`vllm-ascend-split-batch-hust`）**：作为标准的 `vllm.general_plugins`，仅负责纯 Python / Triton 算子实现、default-off 门控策略、算子调度与边界验证。插件仓不承载任何运行时打补丁工具。
 
-## 2. 插件发布面
+## 2. 插件发布面与独立算子索引
 
-入口来自 `pyproject.toml` 的 entry points；源码模块、探针和测试不计作插件。
+入口来自 `pyproject.toml` 的 entry points；源码模块、探针和测试不计作插件。全仓各算子的独立实现、专属文档与详细报告结构索引见 [DELIVERY_INDEX.json](../DELIVERY_INDEX.json) 及 [ops/ 模块目录](../ops/)。
 
-| 名称 | 可发现 | 可激活 | 真实调用 | 算子收益 | 服务收益 |
-|---|---|---|---|---|---|
-| `fia-demask` | 是，general plugin + bundle | active，默认关闭 | 仅纯 decode 且 Q_S=1/请求 | A/B inconclusive；不主张收益 | 未证明 |
-| `rope-fix` | 是，general plugin + bundle | import_only | 无正式启用路径 | 未证明；不主张性能收益 | 未证明 |
-| `zerocost-wiring` | 是，general plugin + bundle | active，双开关默认关闭 | 依赖运行时门控 | A/B inconclusive | 未证明 |
-| `gate-fp32` | 是，general plugin + bundle | active，默认关闭 | 受支持权重加载/执行路径 | 有历史局部 Cast 外提记录；只适用于原形状与权重 | 未证明当前端到端服务收益 |
-| `gdn-merge-inproj` | 是，general plugin + bundle | import_only，fail-closed | 插件载体没有安全消费 seam；不合并权重 | 插件自身无收益；实际权重合并由宿主层承载 | 未证明 |
-| `split-batch-full-graph` planner | 是，bundle | import_only，不可激活 | 仅纯规划函数；没有宿主执行面 | 不适用 | 未证明 |
-| `fi-sampling` | 是，general plugin | 无 bundle | 依赖运行时路由 | 历史 Qwen2.5/0.25 证据仅方向；当前域未证明 | 历史端到端差异在噪声内；不得外推 |
-| `fi-gelu` | 是，general plugin | 无 bundle，默认关闭 | OOT provider 受形状/类型门控；当前主模型不走 GELU | probed 独立形状慢于原生链 | L3/L4 未完成 |
-| `aot-cache-guard` | 是，general plugin | 无 bundle | 宿主修复后 no-op | 不主张稳态收益 | 仅冷启动问题另行评估 |
-| `mlp-chunk` | 是，general plugin | 无 bundle，默认 chunks=1 | 仅配置启用时 | 目标是内存控制，不主张延迟收益 | 未证明容量/并发收益 |
-| `runtime_source_patches` 源码变换 | 随包模块，由 `gate-fp32:load` 调用 install；不是独立 entry point | 四个 env 默认关闭 | 锚点精确匹配且模块尚未导入才安装；漂移回原生 | 独立旧快照不自动验收当前变换载体；未证明完整 L0/L3/L4 配对 | 未证明 |
+| 名称 | 可发现 | 可激活 | 真实调用 | 算子收益 | 服务收益 | 独立子目录与报告 |
+|---|---|---|---|---|---|---|
+| `fia-demask` | 是，general plugin + bundle | active，默认关闭 | 仅纯 decode 且 Q_S=1/请求 | A/B inconclusive；不主张收益 | 未证明 | [ops/fia_demask](../ops/fia_demask/REPORT.md) |
+| `rope-fix` | 是，general plugin + bundle | import_only | 无正式启用路径 | 未证明；不主张性能收益 | 未证明 | - |
+| `zerocost-wiring` | 是，general plugin + bundle | active，双开关默认关闭 | 依赖运行时门控 | A/B inconclusive | 未证明 | - |
+| `gate-fp32` | 是，general plugin + bundle | active，默认关闭 | 受支持权重加载/执行路径 | 有历史局部 Cast 外提记录；只适用于原形状与权重 | 未证明当前端到端服务收益 | - |
+| `gdn-merge-inproj` | 是，general plugin + bundle | import_only，fail-closed | 插件载体没有安全消费 seam；不合并权重 | 插件自身无收益；实际权重合并由宿主层承载 | 未证明 | - |
+| `split-batch-full-graph` planner | 是，bundle | import_only，不可激活 | 仅纯规划函数；没有宿主执行面 | 不适用 | 未证明 | - |
+| `fi-sampling` | 是，general plugin | 无 bundle | 依赖运行时路由 | 历史 Qwen2.5/0.25 证据仅方向；当前域未证明 | 历史端到端差异在噪声内；不得外推 | [ops/fi_sampling](../ops/fi_sampling/REPORT.md) |
+| `fi-gelu` | 是，general plugin | 无 bundle，默认关闭 | OOT provider 受形状/类型门控；当前主模型不走 GELU | probed 独立形状慢于原生链 | L3/L4 未完成 | [ops/fi_gelu](../ops/fi_gelu/REPORT.md) |
+| `aot-cache-guard` | 是，general plugin | 无 bundle | 宿主修复后 no-op | 不主张稳态收益 | 仅冷启动问题另行评估 | - |
+| `mlp-chunk` | 是，general plugin | 无 bundle，默认 chunks=1 | 仅配置启用时 | 目标是内存控制，不主张延迟收益 | 未证明容量/并发收益 | - |
+| `runtime_source_patches` 源码变换 | 随包模块，由 `gate-fp32:load` 调用 install；不是独立 entry point | 四个 env 默认关闭 | 锚点精确匹配且模块尚未导入才安装；漂移回原生 | 独立旧快照不自动验收当前变换载体；未证明完整 L0/L3/L4 配对 | 未证明 | - |
+
+宿主侧下沉算子索引：
+- **D4 (GDN conv-weight 转置外提与连续打包)**：专属报告与证据结构见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。
+
 
 Cascade 不属于当前发布组件：没有源码、注册入口或可执行路径。历史报告不代表当前能力。
 

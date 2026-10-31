@@ -1,0 +1,70 @@
+{
+  "schema": "operator-delivery-index/v1",
+  "project": "vllm-ascend-split-batch-hust",
+  "baseline": {
+    "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
+    "host_fork_baseline_branch": "based/image-baseline",
+    "host_fork_dev_branch": "work/issue20-w3f2-host",
+    "cann": "9.1.0",
+    "device": "2x910B2 TP2",
+    "target_model": "Qwen3.5-35B-A3B"
+  },
+  "operators": [
+    {
+      "id": "gdn_conv_pack",
+      "display_name": "GDN Conv1d Weight Pre-pack (D4)",
+      "layer": "host_fork",
+      "directory": "ops/gdn_conv_pack",
+      "readme": "ops/gdn_conv_pack/README.md",
+      "report": "ops/gdn_conv_pack/REPORT.md",
+      "evidence": "ops/gdn_conv_pack/evidence.json",
+      "status": "integrated_host_fork",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_D4_CONV_PACK=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "pending_npu_refresh"
+    },
+    {
+      "id": "fi_gelu",
+      "display_name": "GELU and Mul Triton Fused Kernel",
+      "layer": "plugin_carrier",
+      "directory": "ops/fi_gelu",
+      "readme": "ops/fi_gelu/README.md",
+      "report": "ops/fi_gelu/REPORT.md",
+      "evidence": "ops/fi_gelu/evidence.json",
+      "status": "default_off_negative_speedup",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_FI_GELU=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "negative_or_pending"
+    },
+    {
+      "id": "fia_demask",
+      "display_name": "FlashInfer Attention Demask",
+      "layer": "plugin_carrier",
+      "directory": "ops/fia_demask",
+      "readme": "ops/fia_demask/README.md",
+      "report": "ops/fia_demask/REPORT.md",
+      "evidence": "ops/fia_demask/evidence.json",
+      "status": "default_off_inconclusive",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_FIA_DEMASK=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "within_noise"
+    },
+    {
+      "id": "fi_sampling",
+      "display_name": "FlashInfer Sampling Triton Port",
+      "layer": "plugin_carrier",
+      "directory": "ops/fi_sampling",
+      "readme": "ops/fi_sampling/README.md",
+      "report": "ops/fi_sampling/REPORT.md",
+      "evidence": "ops/fi_sampling/evidence.json",
+      "status": "default_off_historical_direction",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_FI_SAMPLING=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "pending_npu_refresh"
+    }
+  ]
+}
