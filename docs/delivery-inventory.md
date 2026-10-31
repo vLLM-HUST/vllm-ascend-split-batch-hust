@@ -47,8 +47,9 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
 - **交付验证**：`tests/`、必要的算子基准 `tools/bench_*.py` 与宿主接口静态校验 `tools/runtime-tree/check-tree-seams.py`。
 - **外部工作台，不属于插件交付面**：opt 搜索/候选台账、一次性迁移工具、工作区 keeper 等已剥离至仓外归档 `/root/operator-cleanup-workbench-185f48f3.tar`，由 `tools/workbench-archive.json` 保留索引。
 
-## 5. 性能证据最小字段
+## 5. 性能证据最小字段与评测阶梯
 
+算子性能评测与收益主张必须全面遵守 [docs/operator-benchmark-standard.md](operator-benchmark-standard.md) 中定义的四级验证阶梯（L0 纯算子微基准 -> L3 数值正确性护栏 -> L4 调用链路归因 -> 服务端到端实测）。
 每一项性能主张必须关联固定原始结果和 SHA256，至少记录：
 
 - 算子、callsite、phase、目标调用数/耗时以及 all-kernel 分母；shape（M/K/N 或输入/输出张量尺寸）。
