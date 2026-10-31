@@ -8,14 +8,15 @@
 |---|---|---|
 | 1 | [../README.md](../README.md) | 这个仓库是什么、装完怎么验证 |
 | 2 | [architecture.md](architecture.md) | 插件壳/kernel 库/宿主三者什么关系,manifest 各字段什么语义 |
-| 3 | [agent-guide.md](agent-guide.md) | 在这个仓库写代码必须遵守什么(人机通用) |
-| 4 | [support-matrix.md](support-matrix.md) | 能力的激活边界和宿主条件 |
-| 5 | [delivery-inventory.md](delivery-inventory.md) | 当前组件、补丁、工具归属和收益证据状态 |
-| 6 | [operator-benchmark-standard.md](operator-benchmark-standard.md) | 算子优化评测四级阶梯、形状事实合同与报告标准 |
-| 7 | [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) | NPU 实测执行步骤、各算子测试命令与结果回填流程 |
-| 8 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
-| 9 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
-| 10 | [progress.md](progress.md) | 项目当前状态 |
+| 3 | [container-and-plugin-boundary-spec.md](container-and-plugin-boundary-spec.md) | 容器存储与生命周期、宿主Fork与插件边界、知识库隔离规范（权威 Spec） |
+| 4 | [agent-guide.md](agent-guide.md) | 在这个仓库写代码必须遵守什么(人机通用) |
+| 5 | [support-matrix.md](support-matrix.md) | 能力的激活边界和宿主条件 |
+| 6 | [delivery-inventory.md](delivery-inventory.md) | 当前组件、补丁、工具归属和收益证据状态 |
+| 7 | [operator-benchmark-standard.md](operator-benchmark-standard.md) | 算子优化评测四级阶梯、形状事实合同与报告标准 |
+| 8 | [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) | NPU 实测执行步骤、各算子测试命令与结果回填流程 |
+| 9 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
+| 10 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
+| 11 | [progress.md](progress.md) | 项目当前状态 |
 
 ## 单一事实源分工
 
@@ -24,6 +25,7 @@
 | 主题 | 权威位置 |
 |---|---|
 | 使用方法、env 开关、验证证据 | [../README.md](../README.md) |
+| **容器运行时分层、宿主Fork边界与证据隔离规范** | [container-and-plugin-boundary-spec.md](container-and-plugin-boundary-spec.md) |
 | 能力激活边界 × 代码位置 | [support-matrix.md](support-matrix.md) |
 | 组件、补丁、工具与收益状态 | [delivery-inventory.md](delivery-inventory.md) |
 | 算子测试标准、形状合同与验收报告 | [operator-benchmark-standard.md](operator-benchmark-standard.md) |
