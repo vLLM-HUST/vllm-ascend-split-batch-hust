@@ -118,6 +118,8 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
   ```
 - **数据回填**：保持其负收益与适用边界的客观记录，不强行主张性能加速。
 
+仓内已建立标准 Workload 目录 `workloads/`，包含 `random-input`、`sharegpt` 和 `long-prefix`。当前阶段主要使用受控 `random-input`；后续扩展压测可通过 `bash workloads/run_workload.sh <workload>` 直接执行。
+
 ---
 
 ## 4. 评测成果回填与闭环更新流程

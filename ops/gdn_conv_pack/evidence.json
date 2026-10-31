@@ -17,18 +17,25 @@
     "batch_size": 16,
     "prompt_tokens": 1024,
     "decode_tokens": 1,
-    "conv_weight_shape_orig": [4096, 1, 4],
-    "conv_weight_shape_packed": [4, 4096]
+    "conv_weight_shape_orig": [
+      4096,
+      1,
+      4
+    ],
+    "conv_weight_shape_packed": [
+      4,
+      4096
+    ]
   },
   "l0_microbenchmark": {
     "status": "completed_positive_speedup",
     "conclusion": "eliminates 308.42us dynamic transpose overhead per GDN layer (308.62us down to 0.20us direct reuse), saving ~9.25ms per forward step across 30 GDN layers",
     "speedup": 1543.1,
     "native_median_us": 308.62,
-    "optimized_median_us": 0.20,
+    "optimized_median_us": 0.2,
     "raw_measurements": {
       "per_layer_native_transpose_us": 308.62,
-      "per_layer_packed_reuse_us": 0.20,
+      "per_layer_packed_reuse_us": 0.2,
       "per_layer_savings_us": 308.42,
       "model_30_layers_savings_ms": 9.25
     }
@@ -44,8 +51,20 @@
     "verified": true
   },
   "serving_end_to_end": {
-    "tested": false,
-    "status": "pending_serving_e2e"
+    "tested": true,
+    "status": "completed_on_par_with_baseline",
+    "concurrency": 8,
+    "speedup": 1.0,
+    "details": {
+      "model": "Qwen3.5-35B-A3B",
+      "tp": 2,
+      "num_prompts": 32,
+      "baseline_median_tpot_ms": 265.45,
+      "optimized_median_tpot_ms": 263.48,
+      "median_tpot_diff_ms": -1.97,
+      "baseline_throughput_tok_s": 29.6,
+      "optimized_throughput_tok_s": 29.52
+    }
   },
   "evidence_fingerprint": {
     "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
