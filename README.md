@@ -8,7 +8,7 @@ Technical ownership belongs to @Raing5Days, @ilnnfover. Source extraction must
 preserve exact authorship, license, tests, constraints, and evidence before
 activation is considered.
 
-See [MAINTAINERS.md](MAINTAINERS.md) and [PROVENANCE.md](PROVENANCE.md).
+See [.github/MAINTAINERS.md](.github/MAINTAINERS.md) and [docs/PROVENANCE.md](docs/PROVENANCE.md).
 
 ## Install
 
@@ -86,7 +86,7 @@ instances; it does not change existing instances or captured graphs.
 
 
 Registration checks and remaining-plugin migration boundaries are in
-[HOST_CONTRACT.md](HOST_CONTRACT.md). Device gates (real host import, real
+[docs/HOST_CONTRACT.md](docs/HOST_CONTRACT.md). Device gates (real host import, real
 constructor dispatch, kernel numeric gate, ACL graph replay bit-exactness,
 fallback delegation) are closed by `tools/probe_gelu_device.py` and
 `tests/test_npu_w31_gelu_plugin.py`; results:
@@ -120,7 +120,7 @@ historical** set and must not be crossed with the numbers below.
 
 Historical Qwen2.5/0.25 split-batch/Cascade results are archived outside this
 repository and are not current support or performance claims. See
-[EVIDENCE.md](EVIDENCE.md) for evidence custody and cohort boundaries. They must
+[docs/EVIDENCE.md](docs/EVIDENCE.md) for evidence custody and cohort boundaries. They must
 not be combined with the current 0.28/Qwen3.5 evidence.
 
 

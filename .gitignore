@@ -10,3 +10,4 @@ build/
 /host-proposals/*/validation/
 kernel_meta/
 fusion_result.json
+.openbitfun/

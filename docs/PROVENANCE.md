@@ -100,7 +100,7 @@
    其 sha256 **精确命中**记录值 `902884d6…`（2026-09-26 实测）。这一命中同时证明了两件事：
    **记录值为真**，且 **api.py 的搬运改动只有那两行**（没有夹带其它编辑、没有把 W3 代码带进来）。
 3. 可执行版本：`tests/test_provenance_hashes.py::test_api_py_source_hash_is_recoverable`。
-4. **活源包已漂移**（2026-09-09 之后加了 W3 renorm/mask 家族；实测 api.py 现为 `4e3ce156…`、
+4. **活源包已漂移**（2026-09-09 之后加了 W3 renorm/mask 家族；核对 api.py 现为 `4e3ce156…`、
    pure.py 现为 `8a8bba61…`，与 vendored 相差 91/112 行），所以：
    **"与源包 diff 仍有意义"只在对照 W2 冻结快照时成立**；对照今天的活源包会把 W3 的新增
    算成"搬运差异"。复核请用上表的 hash + 逆变换，不要用裸 `diff`。
@@ -129,7 +129,7 @@ pytest -q tests/test_provenance_hashes.py     # 机械守卫（离线）
   （`docs/evidence/fi-sampling-frozen-20260909/`）：`cd` 该目录后 `sha256sum -c FROZEN.sha256`
   即得 4 行 OK，**不需要**自己推逆变换。快照 id、逐件记录值与边界见
   [归档说明](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/fi-sampling-frozen-20260909/README.md)。
-- **"打 tag 冻结"已被实测排除**（2026-09-26）：W2 源包是活工作区，且工作区仓的 git 历史里
+- **"打 tag 冻结"已被排查排除**（2026-09-26）：W2 源包是活工作区，且工作区仓的 git 历史里
   没有那一版（`git log --format=%H -- knowledge/surveys/sampling/fi_sampling/api.py` 只返回
   `9e98559`，其内容即漂移后的 `4e3ce156…`）⇒ 快照只能由 §4.1 的逆变换重建，这也是
   `docs/evidence/fi-sampling-frozen-20260909/make_snapshot.py` 的做法（重建命中不了记录值即拒绝写入）。

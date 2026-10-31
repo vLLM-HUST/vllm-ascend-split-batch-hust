@@ -24,4 +24,4 @@
 - 本仓 CPU 测试、patch replay、包构建不能证明 NPU 数值、真实 dispatch、图回放或 serving 收益。对应证据尚缺时明确标记未证明，不从历史结果外推。
 - 历史探针原件（如 [multibuffer-graph.json](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/multibuffer-determinism-20261018/multibuffer-graph.json)）已通过 SHA256 固化审计；两份 separate-graph 崩溃日志仍未找回，不得把其调用或收益归因给插件。
 
-历史运行记录仅作原始证据和溯源，不作为当前操作手册；证据位置与散列规则见 [EVIDENCE.md](../EVIDENCE.md)。
+历史运行记录仅作原始证据和溯源，不作为当前操作手册；证据位置与散列规则见 [EVIDENCE.md](EVIDENCE.md)。

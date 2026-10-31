@@ -109,7 +109,7 @@ def test_every_python_module_declares_a_license() -> None:
 
 
 def test_provenance_lists_every_archived_commit() -> None:
-    provenance = (REPO_ROOT / "PROVENANCE.md").read_text(encoding="utf-8")
+    provenance = (REPO_ROOT / "docs" / "PROVENANCE.md").read_text(encoding="utf-8")
     patches = sorted((REPO_ROOT / "provenance" / "legacy-patches").rglob("*.patch"))
     assert patches, "legacy patch archive is empty"
     missing = []
@@ -128,7 +128,7 @@ def test_vendored_attribution_notes_the_source_drift() -> None:
     """源包已漂移这件事必须在文档里写明，不能沉默；且核对方法要写清。"""
     text = (FIS / "ATTRIBUTION.md").read_text(encoding="utf-8")
     assert "Revision anchor caveat" in text
-    provenance = (REPO_ROOT / "PROVENANCE.md").read_text(encoding="utf-8")
+    provenance = (REPO_ROOT / "docs" / "PROVENANCE.md").read_text(encoding="utf-8")
     assert "逆变换复核命中" in provenance, (
         "PROVENANCE.md must record that api.py's source hash is verified by the "
         "inverse import transform (not by a plain sha256 of the live source)"

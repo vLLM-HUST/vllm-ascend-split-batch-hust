@@ -2,7 +2,7 @@
 
 Raw measurements, reports, failed runs and their original context are now held
 by [vllm-hust-benchmark](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git).
-The exact source and per-file digests are pinned in [EVIDENCE_SOURCES.json](EVIDENCE_SOURCES.json).
+The exact source and per-file digests are pinned in [EVIDENCE_SOURCES.json](../EVIDENCE_SOURCES.json).
 This is a storage/reference migration, not new performance or correctness
 qualification. Historical eager/graph cohorts and negative results remain
 separate. Runtime code, default-off behavior and host integration are unchanged.

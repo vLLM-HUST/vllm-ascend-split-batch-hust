@@ -66,7 +66,7 @@ include = [
     "/pyproject.toml",
     "/README.md",
     "/LICENSE",
-    "/PROVENANCE.md",
+    "/docs/PROVENANCE.md",
 ]
 
 [tool.pytest.ini_options]

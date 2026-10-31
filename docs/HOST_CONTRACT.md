@@ -1,4 +1,4 @@
-# Split-batch host contract proposal
+# Split-batch 宿主契约规范 (Host Contract Specification)
 
 ## Cascade 接入边界
 

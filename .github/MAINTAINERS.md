@@ -1,6 +1,6 @@
-# Maintainers
+# Maintainers and Governance
 
-Primary project owners:
+Primary project owners and technical directors:
 
 - @Raing5Days
 - @ilnnfover
