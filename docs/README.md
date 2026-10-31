@@ -27,7 +27,7 @@
 | 组件、补丁、工具与收益状态 | [delivery-inventory.md](delivery-inventory.md) |
 | 算子测试标准、形状合同与验收报告 | [operator-benchmark-standard.md](operator-benchmark-standard.md) |
 | **cohort 边界（我们能声称什么）× 四项归属** | [cohort-and-ownership.md](cohort-and-ownership.md)（约束入口 [../AGENTS.md](../AGENTS.md) 硬约束 6） |
-| 宿主提案补丁（tier-2，未提交上游） | [`host-proposals/README.md`](../host-proposals/README.md)（章程）+ `host-proposals/<id>/`（`proposal_meta.json` = env 语法/哈希/版本点钉/上游状态）；`docs/upstream/` 只是路径消歧 stub |
+| 宿主提案补丁（tier-2，未提交上游） | [`host-proposals/README.md`](../host-proposals/README.md)（章程）+ `host-proposals/<id>/`（`proposal_meta.json` = env 语法/哈希/版本精确锁定/上游状态）；`docs/upstream/` 只是路径消歧 stub |
 | 宿主 seam 与 monkeypatch 面清单 | [../HOST_CONTRACT.md](../HOST_CONTRACT.md) |
 | 历史实现溯源（索引 + 逐条核对结论） | [../PROVENANCE.md](../PROVENANCE.md) / [provenance-verification.md](provenance-verification.md) / [../provenance/](../provenance/)(只读) |
 | 算子交付形态：编译型实现独立交付；**Triton/纯 Python 载体在本仓** | [architecture.md](architecture.md) §2/§5 + 本仓 `src/vllm_ascend_split_batch/` |

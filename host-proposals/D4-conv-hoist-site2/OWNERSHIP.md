@@ -1,10 +1,17 @@
-# D4 conv-weight 转置第二落点外提（runtime-tree 长期例外快照）
+# D4: GDN 卷积权重转置外提与连续打包（已下沉至宿主 Fork）
 
-- 路由: 028/D4-const-hoist | 候选: d4-conv-transpose-second-site
-- 领地: /vllm-workspace/vllm-ascend/vllm_ascend/ops/gdn.py（W3F2 同文件族, PURPOSE §8 例外已批）
-- 载波: VLLM_HUST_D4_CONV_PACK=1（default-off; pack 挂层自身 process_weights_after_loading,
-  经 model_runner_v1 W3F2 块在 VLLM_HUST_GDN_MERGE_INPROJ=1 时调用）
-- 判据: L3 8/8 identical（1021-140043 vs 1021-140814）; light L4 Transpose 960→0
-  （1021-140924-opstat）; 单变量逐项不变（MatMulV2/GroupedMatmul/MoeInitRoutingV3）
-- 回滚: patches/*.orig 覆盖回运行树即可（无其他文件依赖）
-- 施加记录: 20261021T1415Z_applied.note.md; 原件守卫: tests/test_d4_site2_runtime_patch_replay.py
+## 1. 方案目标
+
+- **修改文件**：宿主 `vllm_ascend/ops/gdn.py`。
+- **核心机制**：在模型加载期将卷积权重 `conv1d.weight`（形状 `[4096, 1, 4]`）直接预打包为内存连续的 `[4, 4096]` 格式，由环境变量 `VLLM_HUST_D4_CONV_PACK=1` 门控（默认关闭）。
+- **优化收益**：消除推理前向传播中每一步反复执行的 `transpose(0, 1)` 转置开销（在测试窗口中消除 960 次转置调用）。未开启时自动回退为原生逐步转置。
+
+## 2. 最终归宿与交付状态
+
+- **已下沉至宿主 Fork 源码**：
+  - 宿主仓库：`vLLM-HUST/vllm-ascend-hust`
+  - 所在分支：`work/issue20-w3f2-host`（基于基线 `based/image-baseline` / Commit `74f0c0a`，Commit `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`）
+- **独立算子报告与索引**：
+  - 本优化算子的专属报告与证据已按新标准归档至 [ops/gdn_conv_pack/](computer:///root/vllm-workspace/vllm-ascend-split-batch-hust/ops/gdn_conv_pack)。
+- **本目录性质**：
+  - 仅作为该优化的原始修改记录快照备查，插件仓内不执行任何运行时补丁操作。
