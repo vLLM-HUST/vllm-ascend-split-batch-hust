@@ -2,7 +2,7 @@
 
 ## 1. 插件边界
 
-本仓是 vllm-ascend 的插件壳与算子载体，不是宿主 fork。
+本仓是 vllm-ascend 的插件与算子实现仓，不是宿主 fork。
 宿主源码只读；接入仅使用 `vllm.general_plugins`、`--additional-config`、
 `--worker-cls`、官方 CLI/env。不注册 `vllm.platform_plugins`，不向上游提 PR；
 版本同步跟随 vllm-hust release。
@@ -35,7 +35,7 @@ Cascade 不属于当前包：无源码、注册入口、执行路径或 kernel-w
 | `vllm_hust.extension_bundles` | 保留 6 个 bundle 的发现入口；发现只读元数据，不导入执行实现 |
 | `org.vllm-hust.split-batch-full-graph` | 仅保留 `dual-pad-planner`，`import_only`，activation environment 为空，管理器不得激活 |
 | 其他 bundle | 按自身 manifest 状态、环境变量与 host 范围判定 |
-| `implementation[].status` | 未具备三项验收证据的载体保持 `import_only` |
+| `implementation[].status` | 未具备三项验收证据的组件保持 `import_only` |
 | `activation.environment` | enable 时注入的真实值，不是说明文本 |
 | `host.version_range` | 保持有界的宿主声明，不得写 `>=0`；范围与验证域见 release.md |
 | `protocols[].version_range` | 四项 split-batch 提案协议为 `null`，不是宿主已实现的独立版本化接口 |
@@ -57,10 +57,10 @@ split-executor 提案，不得通过翻转 manifest 状态绕过。
 
 ## 5. 算子实现与证据
 
-- Python / Triton 载体在本仓；Triton lazy import，关闭时不引入设备实现。
+- Python / Triton 算子实现在本仓；Triton lazy import，关闭时不引入设备实现。
 - CCE / Ascend C / CATLASS 等编译型实现独立交付，不在本仓增加 C/C++ 构建。
   独立实现不得反向依赖插件壳或 vLLM 内部对象。
 - `op_selector.py` 是 CPU 可测的选择骨架，尚未接线真实算子路径；不能将其存在
   当作 Backend 已集成。接口见 `design/operator-dispatch.md`。
-- 正确性与性能声明必须绑定形状事实、权重标签、宿主版本及 cohort；不同载体和历史域的验收不能互相继承。
+- 正确性与性能声明必须绑定形状事实、权重标签、宿主版本及评测环境；不同组件和历史环境的验收不能互相继承。
 - `tests/test_plugin_registration.py` 覆盖当前安装包的入口面及已撤除模块隔离；该回归不替代 NPU dispatch、数值、graph replay 或服务性能验证。

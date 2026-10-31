@@ -28,7 +28,7 @@
   "operators": [
     {
       "id": "gdn_conv_pack",
-      "display_name": "GDN Conv1d Weight Pre-pack (D4)",
+      "display_name": "GDN Conv1d Weight Pre-pack (加载期卷积权重预打包)",
       "layer": "host_fork",
       "directory": "ops/gdn_conv_pack",
       "readme": "ops/gdn_conv_pack/README.md",
@@ -38,7 +38,7 @@
       "default_enabled": false,
       "gate_env": "VLLM_HUST_D4_CONV_PACK=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "positive_speedup_per_step_9_25ms"
+      "serving_status": "verified_on_par_with_baseline"
     },
     {
       "id": "fi_gelu",

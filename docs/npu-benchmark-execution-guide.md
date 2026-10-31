@@ -52,9 +52,9 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
 
 测试时，请在独立目录（如 `/tmp`）执行，避免在 `/vllm-workspace` 下直接运行造成包遮蔽。
 
-### 算子 1：GDN 卷积权重转置外提 (D4)
+### 算子 1：GDN 卷积权重加载期预打包
 - **目录位置**：`ops/gdn_conv_pack/`
-- **核心优化**：将 `conv1d.weight` `[4096, 1, 4]` 预打包为连续 `[4, 4096]`，消除 Decode 每步的 `transpose(0, 1)` 开销。
+- **核心优化**：将 `conv1d.weight` `[4096, 1, 4]` 在加载期预打包为连续 `[4, 4096]`，消除 Decode 每步的 `transpose(0, 1)` 重复转置开销。
 - **评测命令**：
   ```bash
   # 1. 运行 L3 数值核验与布局基准
@@ -117,6 +117,8 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
   cd /tmp && bash /root/vllm-workspace/vllm-ascend-split-batch-hust/bench/bench_w31_e2e.sh
   ```
 - **数据回填**：保持其负收益与适用边界的客观记录，不强行主张性能加速。
+
+仓内已建立标准 Workload 目录 `workloads/`，包含 `random-input`、`sharegpt` 和 `long-prefix`。当前阶段主要使用受控 `random-input`；后续扩展压测可通过 `bash workloads/run_workload.sh <workload>` 直接执行。
 
 ---
 

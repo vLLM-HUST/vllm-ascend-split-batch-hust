@@ -1,7 +1,7 @@
 {
  "schema": "vllm-hust-host-proposal.v1",
  "id": "W1R-gmm-tuning-config",
- "kind": "tier-2 host proposal patch (PURPOSE sec.8 mode 2)",
+ "kind": "host fork proposal patch",
  "upstream_status": {
   "state": "未提交（proposal snapshot；本仓自持）",
   "issue_or_pr": null,
@@ -15,7 +15,7 @@
  "follow_up_actions": [
   "向上游提交 issue/PR 并回填 upstream_status.issue_or_pr",
   "等待 capture-safe 的真实 per-expert count 机制（当前 hook 在 FULL graph capture 内必须跳过，拿不到 M=128 真实 decode counts）",
-  "若上游拒绝，记录原因并把候选记 blocked（载体不可达），不得改判 rejected"
+  "若上游拒绝，记录原因并把候选记 blocked（宿主依赖不可达），不得改判 rejected"
  ],
  "host": {
   "file": "vllm_ascend/ops/fused_moe/routed_experts.py",
