@@ -15,7 +15,12 @@ def test_historical_reports_are_references_not_metric_copies():
         + source["snapshot"]
         + "/"
     )
+    archive = json.loads((ROOT / "tools/workbench-archive.json").read_text())
+    archived = {row["path"] for row in archive["files"]}
     for name in source["report_reference_files"]:
+        if name in archived:
+            assert not (ROOT / name).exists()
+            continue
         data = json.loads((ROOT / name).read_text())
         assert data["schema"] == "benchmark-document-reference/v1"
         assert data["historical_document"] == prefix + name
@@ -37,8 +42,10 @@ def test_unrecovered_probes_are_explicit_and_not_successful_urls():
     assert closure["evidence"] is None
     assert closure["bundle_registration"] == "withdrawn"
     assert "null is not a passing result" in closure["evidence_availability"]["status"]
+    archive = json.loads((ROOT / "tools/workbench-archive.json").read_text())
+    archived = {row["path"] for row in archive["files"]}
     for name in source["reviewed_files"]:
-        if name.endswith(".json"):
+        if name.endswith(".json") and name not in archived:
             text = (ROOT / name).read_text()
             assert "/root/包体恢复/records/probes/" not in text
             assert "/root/包体恢复/records/ladder/" not in text
@@ -93,12 +100,21 @@ def test_recovered_consumers_link_originals_without_requalifying():
         assert url.startswith("https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/")
         assert url.endswith("/" + name)
     assert "withdrawn bundle registration" in gdn["decision"]
-    delivery = json.loads(
-        (ROOT / "host-proposals/OPT-delivery-workflow/proposal_meta.json").read_text()
+    archive = json.loads((ROOT / "tools/workbench-archive.json").read_text())
+    assert archive["source_commit"] == "185f48f3ac845833beb41bf2b8d34f7f82388128"
+    assert (
+        archive["archive_sha256"]
+        == "003a5a296604c15585d4041395c41d8f8d6c935adb11221f27b3c6cfa2a269f7"
     )
-    assert delivery["motivation_evidence"].endswith(
-        "/model-validation/20261018T145800Z_gdn_model_receipt.json"
-    )
+    for path in (
+        "host-proposals/OPT-delivery-workflow/proposal_meta.json",
+        "tools/operator_delivery.py",
+        "tests/test_operator_delivery.py",
+    ):
+        assert any(
+            row["path"] == path and re.fullmatch(r"[a-f0-9]{64}", row["sha256"])
+            for row in archive["files"]
+        )
     pitfalls = (ROOT / "docs/pitfalls.md").read_text()
     assert "multibuffer-graph.json" in pitfalls
     assert "两份 separate-graph 崩溃日志仍未找回" in pitfalls
