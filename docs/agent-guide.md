@@ -66,7 +66,7 @@ JSON/TXT/LOG 结果；混合源码改动、测试、workflow、依赖或打包�
   (见 `pyproject.toml`,受影响路径的 `ruff check` 必须通过；发布保留全仓检查)。
 - 纯逻辑与设备路径分离:shape 推导、gate 判定、planner 等写成 CPU 可测的
   纯函数;设备路径用 mock 测 + 真机冒烟。
-- patch/包装代码集中放对应插件载体,不要散落新文件;
+- patch/包装代码集中放在对应插件模块目录中，不要散落新文件；
   新 monkeypatch 点必须同步更新 `HOST_CONTRACT.md` 与 `docs/release.md` 第 4 节。
 - 不引入新三方依赖;确需引入时先在 PR 里说明理由并更新 `pyproject.toml`。
 

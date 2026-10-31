@@ -56,7 +56,7 @@
 | **Step 2: 恢复系统依赖** | 还原 `libwrap.so.0` 并创建 `sshd` privsep 系统用户 | 解决基础镜像中缺失底层库的 127 错误 |
 | **Step 3: 恢复主机密钥与权限** | 还原稳定的 host key，并将用户私钥权限严格纠正为 `600` | 解决平台每次重建容器将私钥误重置为 660 导致 git 权限被拒 |
 | **Step 4: 启动 SSHD** | 启动守护进程并在 22 端口监听 | 完成基础网络连接恢复 |
-| **Step 5: 插件载体挂载** | 使用 `pip install -e /root/vllm-workspace/vllm-ascend-split-batch-hust --no-deps` 重新注册入口点 | 恢复 `vllm.general_plugins` 入口，防止新容器将环境变量判定为未知变量 |
+| **Step 5: 插件包挂载** | 使用 `pip install -e /root/vllm-workspace/vllm-ascend-split-batch-hust --no-deps` 重新注册入口点 | 恢复 `vllm.general_plugins` 入口，防止新容器将环境变量判定为未知变量 |
 | **Step 6: 宿主层状态确认** | 声明宿主修改由宿主 Fork（`vllm-ascend-hust`）源码承载，进行只读检查 | **绝不**运行旧式的 `apply-runtime-patches.sh`；不自动拉起模型服务（避免占用 NPU 资源） |
 
 ### 2.3 执行工作目录规范 (CWD 隔离与遮蔽防护)
@@ -76,7 +76,7 @@
 
 ---
 
-## 3. 插件内外边界规范 (Plugin Carrier vs Host Fork Boundary)
+## 3. 插件内外边界规范 (Plugin vs Host Fork Boundary)
 
 ### 3.1 架构分工：为什么必须两层分立
 vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通过外置插件直接实现。
@@ -128,7 +128,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
   - 远端仓库：`git@github.com:vLLM-HUST/vllm-hust.git`
   - **基线分支（Base Branch）**：**`based/image-baseline`**（精确锁定容器运行时镜像 Commit `f18cf803c` / `0.28.1.post1.dev143+gf18cf803c`）
 
-### 3.3 插件载体层边界与标准公开接口
+### 3.3 插件层边界与标准公开接口
 - **代码位置**：`/root/vllm-workspace/vllm-ascend-split-batch-hust`
 - **注册入口**：严格且仅使用 `pyproject.toml` 中的 `[project.entry-points."vllm.general_plugins"]`；
 - **禁止项**：
