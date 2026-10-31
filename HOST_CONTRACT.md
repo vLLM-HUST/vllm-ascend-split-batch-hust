@@ -24,7 +24,7 @@ decode, unsupported graph modes, and unknown capture sizes. It must never lazily
 capture an unbounded key set or modify global forward context outside a scoped
 context manager.
 
-## GDN QKV norm tier-2 proposal (default-off)
+## GDN QKV norm 宿主侧提案 (default-off)
 
 No `gdn-qkv-norm` plugin or bundle entry is exposed. The accepted kernel
 requires the separately reviewed reversible host proposal; the package does
@@ -110,7 +110,7 @@ signature and the `AscendSampler` construction site.
 
 ## rope_fix component (implemented, default-off, `import_only`)
 
-The RoPE variant defect carrier (`rope_fix_plugin.py`) fixes three *fork* defects
+The RoPE variant defect plugin component (`rope_fix_plugin.py`) fixes three *fork* defects
 plugin-side (design note `docs/design/rope-variant-defects.md`). It rides ONLY:
 
 - `vllm.model_executor.custom_op.op_registry_oot` — the out-of-tree registry read
@@ -139,7 +139,7 @@ plugin-side (design note `docs/design/rope-variant-defects.md`). It rides ONLY:
 
 ### Anchor map (baseline `main@74f0c0a27`)
 
-| Anchor | Host reality (verified) | Carrier | Status |
+| Anchor | Host reality (verified) | Component | Status |
 | --- | --- | --- | --- |
 | `REGISTERED_ASCEND_OPS` (utils.py:735-765) | `RotaryEmbedding` / `MRotaryEmbedding` / `YaRNScalingRotaryEmbedding` / `DeepseekScalingRotaryEmbedding`, **no `Llama3RotaryEmbedding`** | creates `op_registry_oot["Llama3RotaryEmbedding"]` | defect ① (coverage gap) |
 | `op_registry_oot["RotaryEmbedding"]` (set by the same pass; 310P swaps in `AscendRotaryEmbedding310`) | the implementation the build actually uses for the base rope | resolved at construction and delegated to by the llama3 override | compatibility-build contract |
@@ -165,7 +165,7 @@ and logs nothing. Fail-open: a missing/renamed seam, a foreign registry entry
 implementation in place; a failure *after* the wrapper was installed rolls it back
 so `stats()` matches the log.
 
-## GDN in_proj merge carrier (implemented, default-off, fail-closed)
+## GDN in_proj merge component (implemented, default-off, fail-closed)
 
 `gdn_merge_inproj_plugin.py` is the plugin-library home of the accepted **F2**
 mechanism (load-time `in_proj_ba` -> `in_proj_qkvz` weight merge, one
@@ -247,19 +247,19 @@ L3/L4 acceptance.
 
 Statistics scope: 早期历史评估记录曾参考过部分特定测试流量，但属于历史已废弃的口径，且绑定于旧运行时补丁。当前仓内已废弃该类历史流量。任何现行性能数字必须严格依据 docs/npu-benchmark-execution-guide.md 规定的标准受控评测负载重新采集，严禁跨条件混用。
 
-## W1R GMM `tuning_config` / counts dump (tier-2 upstream proposal, default-off)
+## W1R GMM `tuning_config` / counts dump (宿主侧提案，default-off)
 
 状态：**提案补丁，未提交上游**（承载目录 `host-proposals/W1R-gmm-tuning-config/`，
 `proposal_meta.json` 记录 `upstream_status` 与后续动作）。不是本仓插件 entry，
 因此**不出现在** manifest / `vllm.general_plugins` 列表里。
 
 - 宿主文件：`vllm_ascend/ops/fused_moe/routed_experts.py`
-  （sha256 `b17e5a10…`，`host.version_range == 0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27.d20260909`，点钉）。
+  （sha256 `b17e5a10…`，`host.version_range == 0.25.1rc2.dev125+hust.20260903.4.g74f0c0a27.d20260909`，严格锁定版本）。
   基线可复现：`git -C <host repo> cat-file -p 74f0c0a27:vllm_ascend/ops/fused_moe/routed_experts.py | sha256sum`
   → `b17e5a105d59fc280f244bdc4036b4cb41efd1d5a2ff1accca4b56620cc91ab7`。
 - 补丁点（**仅两处**，均为宿主私有方法体内部的 `npu_grouped_matmul` 调用）：
   `AscendUnquantizedFusedMoEMethod.apply_gmm1` / `apply_gmm2`。
-- 为什么必需 tier-2：宿主没有 `tuning_config` 的公开配置面；插件侧若复制方法体
+- 为什么必须在宿主侧修改：宿主没有 `tuning_config` 的公开配置面；插件侧若复制方法体
   （host private source）违反本仓契约；全局 monkeypatch
   `torch_npu.npu_grouped_matmul` 不是已列公开面，且会波及所有 GMM 调用方。
 - 开关（均 default-off；两者未设时**零 import / 零 IO / 零 shape 读取 / 无设备差异**，
