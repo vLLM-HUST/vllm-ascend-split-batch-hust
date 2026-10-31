@@ -5,7 +5,7 @@
 idle 85% —— 本基准给出裸 eager 链地板, 与窗内图内值对账定机制方向。
 
 用法: torchrun --nproc-per-node=2 tools/bench_hcomm_allreduce_floor.py [--iters 200]
-落: <ts>-l0-hcomm-floor.json
+落: bench/results/<ts>-l0-hcomm-floor.json
 """
 
 import argparse
@@ -58,7 +58,8 @@ def main():
 
     if rank == 0:
         ts = time.strftime("%m%d-%H%M%S")
-        out = args.out or f"{ts}-l0-hcomm-floor.json"
+        out = args.out or f"bench/results/{ts}-l0-hcomm-floor.json"
+        os.makedirs(os.path.dirname(out), exist_ok=True)
         doc = {
             "schema": "l0-hcomm-floor.v1",
             "world": int(os.environ["WORLD_SIZE"]),

@@ -1,0 +1,34 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "fi_sampling",
+  "callsite": "vllm_ascend_split_batch.fi_sampling_plugin",
+  "environment": {
+    "historical_device": "910B2",
+    "historical_model": "Qwen2.5-Coder-14B",
+    "target_baseline_model": "Qwen3.5-35B-A3B"
+  },
+  "shape_facts": {
+    "joint_min_batch": 256,
+    "joint_min_k": 32
+  },
+  "l0_microbenchmark": {
+    "status": "historical_only",
+    "speedup": null
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "fallback_guaranteed": true
+  },
+  "l4_attribution": {
+    "verified": true,
+    "dynamic_routing": true
+  },
+  "serving_end_to_end": {
+    "tested": true,
+    "historical_conclusion": "within_noise",
+    "current_status": "pending_npu_refresh"
+  },
+  "evidence_fingerprint": {
+    "historical_report_url": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/w2b-fi-sampling/REPORT.md"
+  }
+}

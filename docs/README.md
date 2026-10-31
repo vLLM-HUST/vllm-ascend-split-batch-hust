@@ -11,9 +11,10 @@
 | 3 | [agent-guide.md](agent-guide.md) | 在这个仓库写代码必须遵守什么(人机通用) |
 | 4 | [support-matrix.md](support-matrix.md) | 能力的激活边界和宿主条件 |
 | 5 | [delivery-inventory.md](delivery-inventory.md) | 当前组件、补丁、工具归属和收益证据状态 |
-| 6 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
-| 7 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
-| 8 | [progress.md](progress.md) | 项目当前状态 |
+| 6 | [operator-benchmark-standard.md](operator-benchmark-standard.md) | 算子优化评测四级阶梯、形状事实合同与报告标准 |
+| 7 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
+| 8 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
+| 9 | [progress.md](progress.md) | 项目当前状态 |
 
 ## 单一事实源分工
 
@@ -24,6 +25,7 @@
 | 使用方法、env 开关、验证证据 | [../README.md](../README.md) |
 | 能力激活边界 × 代码位置 | [support-matrix.md](support-matrix.md) |
 | 组件、补丁、工具与收益状态 | [delivery-inventory.md](delivery-inventory.md) |
+| 算子测试标准、形状合同与验收报告 | [operator-benchmark-standard.md](operator-benchmark-standard.md) |
 | **cohort 边界（我们能声称什么）× 四项归属** | [cohort-and-ownership.md](cohort-and-ownership.md)（约束入口 [../AGENTS.md](../AGENTS.md) 硬约束 6） |
 | 宿主提案补丁（tier-2，未提交上游） | [`host-proposals/README.md`](../host-proposals/README.md)（章程）+ `host-proposals/<id>/`（`proposal_meta.json` = env 语法/哈希/版本点钉/上游状态）；`docs/upstream/` 只是路径消歧 stub |
 | 宿主 seam 与 monkeypatch 面清单 | [../HOST_CONTRACT.md](../HOST_CONTRACT.md) |
