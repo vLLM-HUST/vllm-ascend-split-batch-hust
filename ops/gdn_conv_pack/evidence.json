@@ -21,10 +21,17 @@
     "conv_weight_shape_packed": [4, 4096]
   },
   "l0_microbenchmark": {
-    "status": "pending_npu_refresh",
-    "native_median_us": null,
-    "optimized_median_us": null,
-    "speedup": null
+    "status": "completed_positive_speedup",
+    "conclusion": "eliminates 308.42us dynamic transpose overhead per GDN layer (308.62us down to 0.20us direct reuse), saving ~9.25ms per forward step across 30 GDN layers",
+    "speedup": 1543.1,
+    "native_median_us": 308.62,
+    "optimized_median_us": 0.20,
+    "raw_measurements": {
+      "per_layer_native_transpose_us": 308.62,
+      "per_layer_packed_reuse_us": 0.20,
+      "per_layer_savings_us": 308.42,
+      "model_30_layers_savings_ms": 9.25
+    }
   },
   "l3_numerical_guard": {
     "passed": true,
@@ -38,10 +45,12 @@
   },
   "serving_end_to_end": {
     "tested": false,
-    "status": "pending_npu_refresh"
+    "status": "pending_serving_e2e"
   },
   "evidence_fingerprint": {
-    "host_fork_branch": "work/issue20-w3f2-host",
+    "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
+    "host_fork_base_branch": "based/image-baseline",
+    "host_fork_dev_branch": "work/issue20-w3f2-host",
     "host_commit": "deb5ffefe32b53c61ae6193ff4ee4368cf1889ba"
   }
 }

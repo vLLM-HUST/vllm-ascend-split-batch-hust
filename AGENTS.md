@@ -1,67 +1,83 @@
-# AGENTS.md — vllm-ascend-split-batch-hust
+# AGENTS.md — 开发规范与工作约束
 
-vllm-ascend 宿主的插件壳与 split-batch 规划契约；cascade 实现源码已删除，仅保留历史证据与只读溯源。
+本文件是面向开发者与 Agent 的最高工作契约。只保留必要的架构约束、开发规则与言行准则，不记录历史沿革、实现叙事或具体环境路径。
 
-**算子落点按形态分(2026-10-13 明确)**:
-- **CCE / Ascend C / CATLASS(编译成 `.so`)**:在**仓库外**独立 wheel；本仓不引入 C/C++ kernel 构建，
-  不声明 cascade 的 `[kernels]` extra 或外部 kernel wheel 依赖。
-- **Triton / 纯 Python kernel 载体**:**在仓内**。形态=default-off 插件,
-  靠 `vllm.general_plugins` 入口点注入;`triton` 必须 lazy import(关闭时零
-  import)。先例:W3.1 `fi_gelu`(gelu_and_mul triton 融合)、
-  `fi_sampling/kernels.py`。宿主只读的 `vllm_ascend/ops/triton/` 不得改。
+---
 
-## 硬约束
+## 1. 核心架构与边界约束
 
-1. 宿主 `/vllm-workspace/vllm-hust`、`/vllm-workspace/vllm-ascend-hust` **只读**;
-   宿主能力只走官方公开面(general_plugins entry / `--additional-config` /
-   `--worker-cls` / 官方 CLI+env)。不注册 `vllm.platform_plugins`。
-   (旧基线 `/vllm-workspace/vllm`、`/vllm-workspace/vllm-ascend` 已于 2026-09-10 删除。)
-2. default-off:新能力必须 env-gated 且默认与原生行为零差异。
-3. bundle 保持 `import_only` 直到三项证据齐(default-off 冒烟/正确性/性能);
-   `host.version_range` 禁止写 `>=0`。
-4. `provenance/` 只读;提取代码保留 Huawei 版权头与溯源。
-5. **不要以 `/vllm-workspace` 为 CWD 跑任何 python/vllm 命令**(目录会遮蔽
-   真实 vllm 包)。
-6. **注释**:代码只写必须写的注释,不写解释性段落/改动沿革/"为什么这样改";需要解释的写进提交信息或 `docs/`。文档只写约束与判据,不写沿革。
-7. **可比性口径**:两组数字可比只看**算子形状事实**(M/K/N、专家 counts、相位、callsite)+**权重标签**(model/precision/权重格式);不同则只比方向。
-8. **cohort 与归属(2026-09-28/29 上游裁定,长期核心约束)**——详见
-   [docs/cohort-and-ownership.md](docs/cohort-and-ownership.md):
-   - 中央团队只保留"分类与发布边界";**下列四项由本仓 owner 负责**:
-     ① independent cohort definition;② kernel-wheel licensing/distribution;
-     ③ NPU evidence;④ performance claims。
-   - 任何正确性/性能声明**必须带 cohort 边界**(2026-10-13 基准切换):
-     **0.28 镜像栈**(vllm `0.28.1.post1.dev143+gf18cf803c` + vllm-ascend
-     `0.25.1rc2.dev125+hust` 构建, CANN 9.1.0, 2×910B2 TP=2) + **Qwen3.5-35B-A3B**
-     hybrid TP2 + chunked prefill on / APC off / `cudagraph_mode=NONE`。
-     **不得跨域外推**:Qwen2.5/0.25 的历史证据(独立专项)不适用于该基准,反之亦然。
-   - MTP 是**边界不是支持**:任何 `speculative_config` fail-closed;该配置下
-     "开 cascade"跑的是原生路径,不构成 cascade 效果。
-   - "进统一 cohort"需先有 k+1 verification rows 的 dual-pad/graph bucket 合同
-     + 该配置真实 replay correctness;**当前未立项**,未经裁定不得绕过上述守卫。
+1. **宿主与插件两层分工**（详见 [docs/container-and-plugin-boundary-spec.md](docs/container-and-plugin-boundary-spec.md)）：
+   - **宿主层**：承载模型私有前向拦截、权重加载后处理钩子与底层运行时修复，随宿主镜像原生发布；
+   - **插件层**：仅通过官方公开插件接口接入，承载纯 Python / Triton 算子实现与调度策略；
+   - **严禁运行时打补丁**：严禁在仓内维护任何就地修改宿主运行环境的动态补丁脚本。
+2. **默认关闭（default-off）**：
+   - 所有算子与优化能力必须由环境变量明确门控，未启用时与原生行为严格一致、零开销、零副作用。
+3. **元数据发现延迟导入（Lazy Import）**：
+   - 插件对外暴露必须采用惰性加载机制，保证在包元数据发现和生命周期扫描期间，绝不触发重型实现模块的导入。
+4. **外部数据与知识库物理隔离**：
+   - 原始采集数据、大体积性能分析 Trace、调试数据库及外部参考资料库一律在仓外物理隔离管理，严禁提交进 Git 仓库；
+   - 仓内仅沉淀标准化的算子技术文档、结构化验收报告及权威索引清单。
+5. **执行环境路径隔离纪律**：
+   - 严禁在可能遮蔽已安装依赖的顶层或未隔离目录中执行命令，确保执行环境与依赖包路径清晰解耦。
+6. **宿主 Fork 必须定死基线分支（严禁在 main 上提 PR）**：
+   - 两个宿主仓库在当前容器运行时中的基线分支定死为 **`based/image-baseline`**，严禁以追新脱节的 `main` 为 Base：
+     - `vLLM-HUST/vllm-ascend-hust`：Base 定死为 `based/image-baseline`（锚定 `74f0c0a27`）；
+     - `vLLM-HUST/vllm-hust`：Base 定死为 `based/image-baseline`（锚定 `f18cf803c`）；
+   - 任何针对宿主源码的修改必须基于 `based/image-baseline` 切分支，发起 PR 时的 Target / Base 分支必须指定为 `based/image-baseline`；
+   - 宿主侧算子的修改与收益必须在当前插件仓的 `ops/<operator>/` 与 `DELIVERY_INDEX.json`（标记 `layer: host_fork`）中登记验收报告与证据，实现全生命周期可追溯。
 
-## 算子交付检查点
+---
 
-- 本仓是交付目标，不是实验附件。开工记录分支、起点 HEAD、本轮路径和已有 dirty 文件；任务句与动作约束见 `/root/AGENTS.md`「算子任务执行合同」。
-- 分支口径：`main` 只承接"可发布且 Extension CI 三条腿全绿"的改动，开发默认留在 `版本/方向` 分支。判据是这次改动动的是哪一侧：只影响"能不能验证"的（CI/测试基建、只读文档与证据、让红腿转绿的修复）可直推 `main`；影响"被验证的东西是什么"的（载体实现、注册面 entry points、默认值或行为变更、host proposal、任何改 kernel/数值的提交）必须走分支后合入。合入前先同步 `origin/main`；`main` 已启用可信 benchmark-only 必需检查；全部 CI 通过后走 PR 合并，不绕过保护。
-- 已推送的 `版本/方向` 分支用 `merge origin/main` 同步，不改写历史：分支 commit sha 被 [docs/evidence/](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/) 与 L2 回执引用，`rebase` 会让这些引用指空。
-- 算子默认执行 L0 → plain L3 + compare → light L4；不强制 L1/L2 screen。端到端问题显式跑完整 screen；无 screen 的采集条件遵循 benchmark owner 批准的采集合同，该合同与外部工作台工具不属于本仓交付。历史报告保留，不为新流程重采旧数据。
-- 最小实现可测后、完整验证或明确阻塞后，各检查一次是否应提交。实现、测试、接入与回滚材料留本仓；结果原件、报告和 trace 统一归档 benchmark，本仓保留固定引用、解析入口和哈希，见 [EVIDENCE.md](EVIDENCE.md)。
-- 数值失败保持 default-off，失败复现和证据同样归档 benchmark；不得将失败项从报告删除，或将局部收益写成已验收。Git 提交与优化验收是两个状态。
-- 先跑测试，再审查 `git diff` 与 staged diff，仅 `git add <本轮明确路径>`。不提交无关 dirty 文件，不改正在执行的脚本。
+## 2. 算子开发与评测约束
 
-- 提交前按本合同记录起点 HEAD 与本轮路径，审查 `git diff` 和 staged diff，只暂存明确路径；无范围不算通过。push 另需授权及远端 hash 核验。
+1. **四级验证阶梯**（详见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) 与 [docs/npu-benchmark-execution-guide.md](docs/npu-benchmark-execution-guide.md)）：
+   - 严格遵循 `L0 纯算子微基准 -> L3 数值正确性护栏 -> L4 调用链路归因 -> 服务端到端实测` 阶梯；
+   - 数值失败（L3 未过）一票否决，严格保持 default-off；
+   - 负收益或在噪声范围内的结论必须如实记录，绝不夸大或伪造加速比。
+2. **可比性事实口径**：
+   - 算子对比只认**形状事实**（张量维度、专家分布、执行相位、调用点）与**权重标签**（模型、精度格式），条件不同只比方向，不混算数字。
+3. **注释与文档原则**：
+   - 代码只写必需注释，不写解释性叙事或改动沿革；
+   - 文档只写技术规范、判据与约束，不写心路历程。
 
-## 常用命令
+---
+
+## 3. Agent 交互与输出规范（言行准则）
+
+1. **一律使用通俗大白话**：
+   - 无论是进度汇报、技术分析、方案梳理、PR 描述还是执行回执，必须一律使用简明平实、逻辑严密的**工程大白话**；
+   - 严禁把用于内部记录的比喻、缩写或黑话代入对外交流，不说让人费解的行话。
+2. **坚决杜绝隐晦黑话与内部暗语**：
+   - 严禁使用诸如“载波”、“领地”、“点钉”、“husk”、“档2 载体”、“短跑”、“活守卫”等隐晦暗语；
+   - 一律直接指出具体的物理实体：如具体环境变量名、涉及的代码文件相对路径、确切的分支名称或具体的测试命令。
+3. **实事求是与如实汇报**：
+   - 测试通过就是通过、未测试就是未测试、负收益或在噪声范围内就据实记录；
+   - 绝不夸大局部微基准收益，严禁将算子耗时直接外推为服务端到端收益，不掩盖任何发现的问题。
+4. **直奔主题、拒绝废话**：
+   - 汇报直击核心结论与关键依据，给出清晰明确的下一步行动，不写冗长虚泛的铺垫、感叹或毫无意义的沿革叙事。
+
+---
+
+## 4. 常用验证命令
 
 ```bash
-cd /vllm-workspace/vllm-ascend-split-batch-hust
-pytest -q tests/test_planner.py  # 示例：仅 planner 改动
-ruff check src/vllm_ascend_split_batch/planner.py tests/test_planner.py
-python -m pip install -e ".[test]"
-vllm-hust-ext extension inspect org.vllm-hust.split-batch-full-graph
+# 代码风格检查
+ruff check .
+ruff format --check .
+
+# 仓内关键契约与规范测试
+pytest -q tests/test_benchmark_standard.py tests/test_json_hygiene.py tests/test_document_custody.py
+
+# 快速运行单算子测试
+pytest -q tests/test_gate_fp32_plugin.py
+pytest -q tests/test_fia_demask.py
+
+# 全量 CPU 门禁套件
+pytest -q -m "not host_tree"
 ```
 
-## 知识库
+---
 
-规范、架构、发布、踩坑、进度全部在 [docs/README.md](docs/README.md),
-按其阅读顺序走;改行为必须同步对应权威文档(分工表在 docs/README.md)。
+## 5. 权威文档导航
+
+详细技术规范与权威文档均位于 [docs/README.md](docs/README.md)，请按单一事实源原则查阅与维护。

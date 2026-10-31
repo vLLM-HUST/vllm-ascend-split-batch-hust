@@ -28,22 +28,37 @@
 宿主侧下沉算子索引：
 - **D4 (GDN conv-weight 转置外提与连续打包)**：专属报告与证据结构见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。
 
+探索与负性能留存算子索引：
+- **GDN QKV 单 pass 解包 (`gdn_qkv_unpack`)**：专属报告与证据结构见 [ops/gdn_qkv_unpack](../ops/gdn_qkv_unpack/REPORT.md)。910B2 实测因 Triton 启动发射开销慢于原生链，按规范留存负性能事实，保持未激活。
+
 
 Cascade 不属于当前发布组件：没有源码、注册入口或可执行路径。历史报告不代表当前能力。
 
-## 3. 宿主 Fork 变更清单（下沉源码修改，彻底废弃运行时补丁）
+## 3. 宿主 Fork 变更清单与分支铁律（下沉源码修改，彻底废弃运行时补丁）
 
 宿主侧无法由插件外部介入的修改已全部下沉到宿主 Fork 仓库，随宿主镜像构建发布；本仓废除 `tools/runtime-tree/apply-runtime-patches.sh` 等任何在容器运行树上打补丁的工具。
 
-- **宿主 Fork 仓库**：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
-- **对应宿主分支**：`work/issue20-w3f2-host`（已推送到远端，基线为 `based/image-baseline` / `74f0c0a27`）
-- **变更清单**：
+### 3.1 两个宿主仓库与基线分支铁律
+由于社区 `main` 分支走在非常靠前的上游（已领先本地镜像 260+ commits），底层依赖已与当前 910B2 镜像运行时脱节。因此两个宿主仓库**定死以 `based/image-baseline` 为基线与 PR 目标**：
+1. **昇腾适配宿主 (`vllm-ascend-hust`)**：
+   - 仓库：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
+   - **基线分支**：`based/image-baseline`（锚定当前镜像 `74f0c0a27`）
+   - **PR 铁律**：所有特性分支从 `based/image-baseline` 切出，发起 PR 的 Target 分支必须指定为 `based/image-baseline`，严禁向 `main` 提 PR。
+2. **vLLM 核心宿主 (`vllm-hust`)**：
+   - 仓库：`git@github.com:vLLM-HUST/vllm-hust.git`
+   - **基线分支**：`based/image-baseline`（锚定当前镜像 `f18cf803c`）
+   - **PR 铁律**：所有特性分支从 `based/image-baseline` 切出，发起 PR 的 Target 分支必须指定为 `based/image-baseline`，严禁向 `main` 提 PR。
+
+### 3.2 现存下沉变更清单
+- **对应开发分支**：`work/issue20-w3f2-host`（已推送到 `vLLM-HUST/vllm-ascend-hust`，基于 `based/image-baseline`）
+- **变更明细**：
   1. **W3F2 (GDN in_proj 权重合并与 Hook)** — Commit `ce807cd7ce972b9a410663cebe10b7ea25fb2a31`
      - `vllm_ascend/ops/gdn.py`：实现 `process_weights_after_loading` hook，当 `VLLM_HUST_GDN_MERGE_INPROJ=1` 时合并 `in_proj_ba` 与 `in_proj_qkv`。
      - `vllm_ascend/worker/model_runner_v1.py`：在加载权重后调用该 hook。
      - `vllm_ascend/patch/worker/patch_qwen3_5.py`：对齐 Qwen3.5 模型层的权重重绑定。
-  2. **D4 (GDN conv-weight 转置外提)** — Commit `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`
-     - `vllm_ascend/ops/gdn.py`：在加载期物化 conv1d.weight `[4096,1,4]` 为连续 `[4,4096]`（由 `VLLM_HUST_D4_CONV_PACK=1` 开启）；forward 内部统一使用预打包权重，消除每步 `transpose(0, 1)` 开销；未开启时自动回退原生逐步转置。
+  2. **D4 (GDN conv-weight 转置外提与预打包)** — Commit `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`
+     - `vllm_ascend/ops/gdn.py`：在加载期物化 conv1d.weight `[4096,1,4]` 为连续 `[4,4096]`（由 `VLLM_HUST_D4_CONV_PACK=1` 开启）；forward 内部统一使用预打包权重，消除每步 `transpose(0, 1)` 开销；单层每步消除动态转置开销，全模型 30 层 GDN 净消除多余转置。
+     - 插件仓内履约与证据：详见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。
 
 ## 4. 工具边界
 

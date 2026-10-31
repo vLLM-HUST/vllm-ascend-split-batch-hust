@@ -2,6 +2,22 @@
   "schema": "operator-delivery-index/v1",
   "project": "vllm-ascend-split-batch-hust",
   "baseline": {
+    "host_forks": {
+      "vllm_ascend_hust": {
+        "repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
+        "baseline_branch": "based/image-baseline",
+        "baseline_commit": "4d2c82742 (image 74f0c0a27)",
+        "pr_target_branch": "based/image-baseline",
+        "note": "严格定死以 based/image-baseline 为基线，严禁以 main 切分支或提 PR"
+      },
+      "vllm_hust": {
+        "repo": "git@github.com:vLLM-HUST/vllm-hust.git",
+        "baseline_branch": "based/image-baseline",
+        "baseline_commit": "f18cf803c (image f18cf803c)",
+        "pr_target_branch": "based/image-baseline",
+        "note": "严格定死以 based/image-baseline 为基线，严禁以 main 切分支或提 PR"
+      }
+    },
     "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
     "host_fork_baseline_branch": "based/image-baseline",
     "host_fork_dev_branch": "work/issue20-w3f2-host",
@@ -18,11 +34,11 @@
       "readme": "ops/gdn_conv_pack/README.md",
       "report": "ops/gdn_conv_pack/REPORT.md",
       "evidence": "ops/gdn_conv_pack/evidence.json",
-      "status": "integrated_host_fork",
+      "status": "integrated_host_fork_measured",
       "default_enabled": false,
       "gate_env": "VLLM_HUST_D4_CONV_PACK=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "pending_npu_refresh"
+      "serving_status": "positive_speedup_per_step_9_25ms"
     },
     {
       "id": "fi_gelu",
@@ -65,6 +81,34 @@
       "gate_env": "VLLM_HUST_FI_SAMPLING=1",
       "l3_numerical_guard": "passed",
       "serving_status": "pending_npu_refresh"
+    },
+    {
+      "id": "gate_fp32",
+      "display_name": "MoE Gate Weight FP32 Hoist",
+      "layer": "plugin_carrier",
+      "directory": "ops/gate_fp32",
+      "readme": "ops/gate_fp32/README.md",
+      "report": "ops/gate_fp32/REPORT.md",
+      "evidence": "ops/gate_fp32/evidence.json",
+      "status": "default_off_registered",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_GATE_FP32=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "pending_npu_refresh"
+    },
+    {
+      "id": "gdn_qkv_unpack",
+      "display_name": "GDN QKV Single-pass Unpack Kernel",
+      "layer": "plugin_carrier",
+      "directory": "ops/gdn_qkv_unpack",
+      "readme": "ops/gdn_qkv_unpack/README.md",
+      "report": "ops/gdn_qkv_unpack/REPORT.md",
+      "evidence": "ops/gdn_qkv_unpack/evidence.json",
+      "status": "default_off_negative_speedup",
+      "default_enabled": false,
+      "gate_env": "unexposed",
+      "l3_numerical_guard": "passed",
+      "serving_status": "negative_or_pending"
     }
   ]
 }

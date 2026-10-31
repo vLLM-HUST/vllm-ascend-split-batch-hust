@@ -1,0 +1,39 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "gate_fp32",
+  "callsite": "vllm_ascend_split_batch.gate_fp32_plugin",
+  "environment": {
+    "device": "2x910B2 TP2",
+    "cann_version": "9.1.0",
+    "vllm_ascend_version": "0.25.1rc2.dev125+hust",
+    "dtype": "bf16_to_fp32"
+  },
+  "shape_facts": {
+    "tested_shapes": [
+      [256, 2048]
+    ],
+    "layers": 40
+  },
+  "l0_microbenchmark": {
+    "status": "pending_npu_refresh",
+    "conclusion": "eliminates 40x Cast[256,2048] ops per decode step",
+    "speedup": null
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "metric": "exact_bitwise_equal",
+    "probe_script": "tests/test_gate_fp32_plugin.py"
+  },
+  "l4_attribution": {
+    "call_count_expected": 40,
+    "call_count_actual": null,
+    "note": "one Cast elimination per MoE layer decode step"
+  },
+  "serving_end_to_end": {
+    "tested": false,
+    "speedup": null
+  },
+  "evidence_fingerprint": {
+    "sha256": "472e391cf8e9bb492061e809da029b3c58252d00"
+  }
+}
