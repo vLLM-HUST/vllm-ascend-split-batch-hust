@@ -189,10 +189,7 @@ mechanism (load-time `in_proj_ba` -> `in_proj_qkvz` weight merge, one
   `MergedColumnParallelLinear` shards and the `key_dim` / `value_dim` / `tp_size`
   / `num_v_heads` attributes used to derive the F2 row counts.
 
-Host cohort: vllm-ascend `0.25.1rc2.dev605+hust.20260903.4.gfbe4911bb` (active
-stack tree, `/root/vllm-workspace/.stack/ascend-fbe4911`), vllm
-`0.28.1.post1.dev143+gf18cf803c`, 2x910B2 TP=2, Qwen3.5-35B-A3B, caliber
-`mmlu-pro-eval-traffic`, cohort `028-qwen35-35b-a3b-tp2-fullgraph`.
+Host environment: vllm-ascend (Commit `74f0c0a27`), vllm `0.28.1.post1.dev143+gf18cf803c`, 2x910B2 TP=2, Qwen3.5-35B-A3B.
 
 ### Current status: fail-closed on the missing forward-consumer seam
 
@@ -248,11 +245,7 @@ of a fork subclass; (c) `gqa_interleaved_layout` and the four dim attributes;
 merged-consumption seam now exists** — if it does, delete this blocker and run the
 L3/L4 acceptance.
 
-Statistics scope: [original runtime-tree evidence and limitations](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/HOST_CONTRACT.md#L260).
-The historical evidence belongs to caliber `mmlu-pro-eval-traffic` / cohort
-`028-qwen35-35b-a3b-tp2-fullgraph` **and to the runtime-tree patch**, not to this carrier: any performance number for this carrier
-must be re-accepted with a fresh L4 window on the same caliber. Nothing here may
-be extrapolated to another caliber, cohort, `capture_size` or the eager path.
+Statistics scope: 早期历史评估记录曾参考过部分特定测试流量，但属于历史已废弃的口径，且绑定于旧运行时补丁。当前仓内已废弃该类历史流量。任何现行性能数字必须严格依据 docs/npu-benchmark-execution-guide.md 规定的标准受控评测负载重新采集，严禁跨条件混用。
 
 ## W1R GMM `tuning_config` / counts dump (tier-2 upstream proposal, default-off)
 

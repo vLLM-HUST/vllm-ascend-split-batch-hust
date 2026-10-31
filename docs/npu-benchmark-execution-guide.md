@@ -87,6 +87,8 @@ vllm bench serve \
     --percentile-metrics ttft,tpot,itl
 ```
 
+仓内已建立标准 Workload 目录 `workloads/`，包含 `random-input`、`sharegpt` 和 `long-prefix`。当前阶段主要使用受控 `random-input`；后续扩展压测可通过 `bash workloads/run_workload.sh <workload>` 直接执行。
+
 ---
 
 ## 4. 评测成果回填与闭环更新流程

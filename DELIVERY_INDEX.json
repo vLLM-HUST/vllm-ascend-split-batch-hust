@@ -38,7 +38,7 @@
       "default_enabled": false,
       "gate_env": "VLLM_HUST_D4_CONV_PACK=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "positive_speedup_per_step_9_25ms"
+      "serving_status": "verified_on_par_with_baseline"
     },
     {
       "id": "fi_gelu",
