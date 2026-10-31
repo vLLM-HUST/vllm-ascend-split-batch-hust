@@ -65,6 +65,20 @@
       "gate_env": "VLLM_HUST_FI_SAMPLING=1",
       "l3_numerical_guard": "passed",
       "serving_status": "pending_npu_refresh"
+    },
+    {
+      "id": "gate_fp32",
+      "display_name": "MoE Gate Weight FP32 Hoist",
+      "layer": "plugin_carrier",
+      "directory": "ops/gate_fp32",
+      "readme": "ops/gate_fp32/README.md",
+      "report": "ops/gate_fp32/REPORT.md",
+      "evidence": "ops/gate_fp32/evidence.json",
+      "status": "default_off_registered",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_GATE_FP32=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "pending_npu_refresh"
     }
   ]
 }
