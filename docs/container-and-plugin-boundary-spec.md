@@ -84,7 +84,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 宿主层 (Host Fork: vLLM-HUST/vllm-ascend-hust @ based/image-baseline)   │
+│ 宿主层 (Fork: vLLM-HUST/vllm-ascend-hust @ based/split-batch-baseline)  │
 │                                                                        │
 │  负责：                                                                 │
 │   1. 模型前向内部私有方法的代码修改 (如 forward 内部连续张量分配)        │
@@ -118,15 +118,15 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 - **昇腾适配宿主 (`vllm-ascend-hust`)**：
   - 本地路径：`/root/host-trees/vllm-ascend`
   - 远端仓库：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
-  - **基线分支（Base Branch）**：**`based/image-baseline`**（精确锁定容器运行时镜像 Commit `74f0c0a27` / `0.25.1rc2.dev125+hust`）
-  - 开发分支：`work/issue20-w3f2-host`
-  - 已沉淀算子：
+  - **基线分支（Base Branch）**：**`based/split-batch-baseline`**（分支头 `ad82d77cb`，内容为镜像 Commit `74f0c0a27` / `0.25.1rc2.dev125+hust` 的宿主源码 + 3 个构建文件修复：`triton-ascend==3.2.2` 依赖对齐与 `setup.py` build-isolation 修复）
+  - 开发分支：`work/issue20-w3f2-host`（基于旧基线 `based/image-baseline`，未含在新基线内，其两处改动需按新基线重新提 PR）
+  - 已沉淀算子（commit 位于旧基线派生分支，待按新基线重新提交）：
     - **GDN in_proj 权重加载期合并**（Commit `ce807cd`）：实现 `process_weights_after_loading` Hook，在加载模型权重后合并 `in_proj_ba` 与 `in_proj_qkv`；
     - **GDN 卷积权重加载期预打包**（Commit `deb5ff`）：在模型加载期物化 `conv1d.weight` 为连续 `[4, 4096]` 格式，消除前向传播中的 `transpose(0, 1)`（消除每步冗余动态转置）。
 - **vLLM 核心宿主 (`vllm-hust`)**：
   - 本地路径：`/root/host-trees/vllm-hust`
   - 远端仓库：`git@github.com:vLLM-HUST/vllm-hust.git`
-  - **基线分支（Base Branch）**：**`based/image-baseline`**（精确锁定容器运行时镜像 Commit `f18cf803c` / `0.28.1.post1.dev143+gf18cf803c`）
+  - **基线分支（Base Branch）**：**`based/split-batch-baseline`**（锚定容器运行时镜像 Commit `f18cf803c` / `0.28.1.post1.dev143+gf18cf803c`；当前与旧 `based/image-baseline` 指向同一 commit，内容零差异）
 
 ### 3.3 插件层边界与标准公开接口
 - **代码位置**：`/root/vllm-workspace/vllm-ascend-split-batch-hust`
@@ -156,14 +156,14 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 
 ### 3.6 宿主 Fork 分支与 PR 协同铁律（严禁在 main 上切分支或提 PR）
 由于社区 `main` 分支走在非常靠前的上游（已领先本地镜像 260+ commits），底层 API、CANN 驱动要求及模型架构均与当前 910B2 镜像运行时严重脱节。因此确立以下分支管理与 PR 铁律：
-1. **基线定死为 `based/image-baseline`**：
-   - `vllm-ascend-hust` 与 `vllm-hust` 的祖先分支必须严格锁定在本地与远端的 `based/image-baseline`；
-   - 严禁从 `main` 切特性分支；
-2. **提 PR 时的 Base 分支定死为 `based/image-baseline`**：
-   - GitHub 创建 PR 时必须显式把 Base Branch 切换为 `based/image-baseline`，严禁向 `main` 发起 PR；
+1. **基线定死为 `based/split-batch-baseline`**：
+   - 两个宿主仓库的特性分支祖先必须严格锁定在远端的 `based/split-batch-baseline`；
+   - 严禁从 `main` 切特性分支，也不再使用旧基线 `based/image-baseline`；
+2. **提 PR 时的 Base 分支定死为 `based/split-batch-baseline`**：
+   - GitHub 创建 PR 时必须显式把 Base Branch 切换为 `based/split-batch-baseline`，严禁向 `main` 发起 PR；
    - 这样保证 PR Diff 仅包含宿主侧必须修改的几处核心改动（如卷积权重预打包、in_proj 权重合并钩子），零上游污染；
 3. **长期维护双轨机制**：
-   - 镜像冻结轨（`based/image-baseline`）：负责当前镜像运行时环境的稳定复现与算子交付；
+   - 镜像冻结轨（`based/split-batch-baseline`）：负责当前镜像运行时环境的稳定复现与算子交付；
    - 上游跟踪轨（`main`）：仅负责持续追踪社区最新演进，不直接作为当前镜像评测基准。
 
 ### 3.7 插件仓如何体现宿主 Fork 的收益与证据追溯
@@ -171,7 +171,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 1. **独立三件套目录跟踪**：在插件仓的 `ops/` 目录下为宿主算子建立同等规格的独立子目录（如 `ops/gdn_conv_pack/`），包含完整的 `README.md`、`REPORT.md` 与 `evidence.json`；
 2. **总索引明确标记层级**：在根目录 `DELIVERY_INDEX.json` 中标记 `"layer": "host_fork"`，明确其属于宿主层原生优化；
 3. **明确记录机理与消除开销**：在报告中必须列清该优化为何必须下沉至宿主、消除了宿主内部多少次冗余计算/拷贝（如卷积权重预打包单步消除 30 层 GDN 的 308 us 转置开销，全模型净省 9.25 ms），并记录基线与优化后的 L0 实测数字；
-4. **绑定宿主分支与 Commit 证据指纹**：在 `evidence.json` 中完整绑定宿主远端仓库、Base 分支（`based/image-baseline`）、开发分支及具体 Commit Hash，实现代码到证据的闭环双向追溯。
+4. **绑定宿主分支与 Commit 证据指纹**：在 `evidence.json` 中完整绑定宿主远端仓库、Base 分支（`based/split-batch-baseline`）、开发分支及具体 Commit Hash，实现代码到证据的闭环双向追溯。
 
 ---
 
