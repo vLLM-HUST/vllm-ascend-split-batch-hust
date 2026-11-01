@@ -65,7 +65,7 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
 
 ### 3.2 现存下沉变更清单
 
-两项宿主层算子已按新基线重新提交（2026-11-01，vLLM-HUST/vllm-ascend-split-batch-hust#32 承接）：
+两项宿主层算子已按新基线重新提交并合入 `based/split-batch-baseline`（2026-11-01，基线头 `771b847da`；宿主 PR #63/#64 已合并，vLLM-HUST/vllm-ascend-split-batch-hust#32 承接）：
 
 - **对应开发分支**：
   - `work/w3f2-inproj-merge`（宿主 PR #63，从 `based/split-batch-baseline` 头 `ad82d77cb` 切出，cherry-pick 旧分支提交，树逐字节一致）；

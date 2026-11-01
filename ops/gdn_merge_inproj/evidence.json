@@ -57,6 +57,7 @@
     "host_fork_dev_branch": "work/w3f2-inproj-merge",
     "host_fork_pr": 63,
     "host_commit": "fcbc4458bb8afcc37441e602921ed45dcbe5e775",
+    "host_merge_state": "merged into based/split-batch-baseline (pr 63, 2026-11-01)",
     "host_commit_source": "cherry-pick of ce807cd7ce972b9a410663cebe10b7ea25fb2a31 (work/issue20-w3f2-host), tree-identical"
   }
 }
