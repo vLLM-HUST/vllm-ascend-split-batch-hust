@@ -60,7 +60,7 @@ cohort：Qwen3.5-35B-A3B、2×910B2、TP2、bf16、`cudagraph_mode=FULL`、captu
 
 | 层 | 结果 |
 |---|---|
-| L0 纯算子 | 广播乘 7.99 µs → ≈3 µs（M=8，图内打包 50×） |
+| L0 纯算子 | 广播乘 3.64 µs → 1.34 µs（M=8，图内打包 50×，逐位一致）；M=32 时 3.73 → 2.43 µs |
 | L3 数值护栏 | 8 条固定 prompt 贪心生成**逐字一致** |
 | L4 图内归因 | `moe_gate_mul` kernel 2470 次 / 6.35 ms；`Mul` 3187 → 617 次 |
 | computing 口径 | `Mul` 22.36 ms → 2.67 ms，净 −13.10 ms；decode −2.54%，computing −1.18% |
