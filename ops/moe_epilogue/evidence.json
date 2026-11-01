@@ -1,0 +1,77 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "moe_shared_expert_epilogue",
+  "callsite": "vllm_ascend.ops.fused_moe.shared_experts:AscendSharedExperts.part2",
+  "environment": {
+    "device": "Ascend910B2",
+    "cann_version": "9.1.0",
+    "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+    "vllm_ascend_version": "0.25.1rc2.dev125+hust",
+    "model": "Qwen3.5-35B-A3B",
+    "dtype": "bf16"
+  },
+  "shape_facts": {
+    "phase": "decode",
+    "batch_size": 8,
+    "prompt_tokens": 2048,
+    "decode_tokens": 256,
+    "gate_shape": "T x 1",
+    "shared_out_shape": "T x 2048",
+    "moe_layers": 40,
+    "cudagraph_mode": "FULL",
+    "capture_sizes": "1,2,4,8,16,32"
+  },
+  "l0_microbenchmark": {
+    "status": "completed_via_profile_decomposition",
+    "conclusion": "no isolated L0 leg exists for mul-only fusion; single-call cost taken from the L4 profile decomposition: native Mul 7.01us (22.36ms / 3187) vs fused moe_gate_mul 2.57us (6.35ms / 2470)",
+    "speedup": 2.73,
+    "native_median_us": 7.01,
+    "optimized_median_us": 2.57,
+    "raw_measurements": {
+      "stock3_M8_us": 6.3,
+      "fused3_M8_us": 1.8,
+      "stock2_M8_us": 4.63,
+      "fused2_M8_us": 1.47,
+      "note": "stock3/fused3/stock2/fused2 are historical probe legs (3-in-1 and sigmoid+mul variants); neither matches the delivered mul-only fusion"
+    }
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "metric": "exact_token_match",
+    "detail": "8 fixed greedy prompts, 8/8 byte-identical outputs between VLLM_HUST_MOE_EPILOGUE=0 and =1",
+    "probe_script": "opt-qwen35b experiments: records/l3_n1.sh (host-side rerun pending after baseline merge)"
+  },
+  "l4_attribution": {
+    "call_count_expected": 2560,
+    "call_count_actual": 2470,
+    "note": "40 layers x 64 decode steps; residual gap comes from the last layer and partially filled decode buckets. Residual 617 Mul calls belong to attn_output_gate in the 10 full-attention layers.",
+    "all_kernel_ms_before": 515.2,
+    "all_kernel_ms_after": 502.1,
+    "family_ms_before": 22.36,
+    "family_ms_after": 2.67,
+    "family_delta_ms": -13.1,
+    "decode_delta_pct": -2.54,
+    "computing_delta_pct": -1.18,
+    "computing_denominator_ms": 1108.9
+  },
+  "serving_end_to_end": {
+    "tested": true,
+    "concurrency": 32,
+    "input_output": "2048/256",
+    "design": "ABBA balanced, 2 blocks x 4 legs = 8 legs",
+    "speedup": 0.9871,
+    "tpot_delta_pct": 0.88,
+    "conclusion": "within noise: tok/s -1.29%, TPOT +0.88%; a second 256/512 @1 cohort gave TPOT -0.58% against a 2.04% spread between same-config legs. No end-to-end gain is claimed."
+  },
+  "status": "default_off_host_fork_measured",
+  "default_enabled": false,
+  "evidence_fingerprint": {
+    "benchmark_script": "ops/moe_epilogue/bench_l0.py",
+    "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
+    "host_fork_base_branch": "based/split-batch-baseline",
+    "host_fork_base_commit": "ad82d77cb",
+    "host_fork_dev_branch": "work/moe-shared-expert-epilogue",
+    "host_commit": "ace3d38423123c101ca2cdca8aeaaf21a7a40c5c",
+    "pending": "L3 rerun on the host-side implementation after the host commit lands in the baseline and the image is rebuilt"
+  }
+}

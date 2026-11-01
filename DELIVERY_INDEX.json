@@ -109,6 +109,20 @@
       "gate_env": "unexposed",
       "l3_numerical_guard": "passed",
       "serving_status": "negative_or_pending"
+    },
+    {
+      "id": "moe_epilogue",
+      "display_name": "MoE Shared-Expert Epilogue Multiply Fusion",
+      "layer": "host_fork",
+      "directory": "ops/moe_epilogue",
+      "readme": "ops/moe_epilogue/README.md",
+      "report": "ops/moe_epilogue/REPORT.md",
+      "evidence": "ops/moe_epilogue/evidence.json",
+      "status": "default_off_host_fork_measured",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_MOE_EPILOGUE=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "within_noise"
     }
   ]
 }
