@@ -1,0 +1,106 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "gdn_split_fusion",
+  "callsite": "vllm_ascend.ops.gdn:AscendGatedDeltaNetAttention.forward (non-interleaved projection) + vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn:QwenGatedDeltaNetAttention.rearrange_mixed_qkv",
+  "components": [
+    {
+      "id": "split_pack",
+      "host_repo": "vLLM-HUST/vllm-ascend-hust",
+      "gate_env": "VLLM_HUST_GDN_SPLIT_FUSION=1",
+      "host_file": "vllm_ascend/ops/gdn.py",
+      "op": "torch.ops.vllm.gdn_split_pack"
+    },
+    {
+      "id": "rearrange",
+      "host_repo": "vLLM-HUST/vllm-hust",
+      "gate_env": "VLLM_HUST_GDN_REARRANGE_FUSION=1",
+      "host_file": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+      "op": "none (plain python branch inside an opaque custom op body)"
+    }
+  ],
+  "environment": {
+    "device": "Ascend910B2",
+    "cann_version": "9.1.0",
+    "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+    "vllm_ascend_version": "0.25.1rc2.dev125+hust",
+    "model": "Qwen3.5-35B-A3B",
+    "dtype": "bf16"
+  },
+  "shape_facts": {
+    "phase": "decode",
+    "batch_size": 8,
+    "gdn_layers": 30,
+    "split_pack": {
+      "mixed_qkvz_row": 3072,
+      "qkv_size": 2048,
+      "z_size": 1024,
+      "ba_width": 256,
+      "half": 128
+    },
+    "rearrange": {
+      "mixed_qkv_row": 4096,
+      "q_dim": 1024,
+      "k_dim": 1024,
+      "v_dim": 2048,
+      "head_k_dim": 128,
+      "head_v_dim": 128
+    },
+    "cudagraph_mode": "FULL",
+    "capture_sizes": "1,2,4,8,16,32"
+  },
+  "l0_microbenchmark": {
+    "status": "completed",
+    "measurement": "NPU graph, 50 repetitions packed per replay, single 910B2, us per layer-step",
+    "split_pack": {
+      "M1": {"native_us": 0.24, "candidate_us": 0.23, "note": "below MIN_ROWS, stock path taken", "bitwise_equal": true},
+      "M8": {"native_us": 3.32, "candidate_us": 1.46, "saved_us": 1.86, "saved_pct": 56.1, "bitwise_equal": true},
+      "M16": {"native_us": 3.34, "candidate_us": 2.07, "saved_us": 1.27, "saved_pct": 38.0, "bitwise_equal": true},
+      "M32": {"native_us": 4.05, "candidate_us": 3.34, "saved_us": 0.72, "saved_pct": 17.7, "bitwise_equal": true}
+    },
+    "rearrange": {
+      "M1": {"native_us": 4.31, "candidate_us": 0.99, "saved_us": 3.32, "saved_pct": 77.0, "bitwise_equal": true},
+      "M8": {"native_us": 9.31, "candidate_us": 1.42, "saved_us": 7.89, "saved_pct": 84.7, "bitwise_equal": true},
+      "M16": {"native_us": 9.35, "candidate_us": 1.96, "saved_us": 7.39, "saved_pct": 79.1, "bitwise_equal": true},
+      "M32": {"native_us": 10.26, "candidate_us": 3.02, "saved_us": 7.24, "saved_pct": 70.5, "bitwise_equal": true}
+    },
+    "combined_M8_saved_us": 9.75,
+    "speedup": 2.62,
+    "native_median_us": 12.63,
+    "optimized_median_us": 2.88
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "scope": "operator-level bitwise equivalence on NPU, M in {1,8,16,32}, including post-view shape and contiguity for the rearrange component",
+    "metric": "exact_bitwise_equal",
+    "end_to_end_pending": true,
+    "detail": "8-prompt greedy comparison over a live server has NOT been run for this operator"
+  },
+  "l4_attribution": {
+    "tested": false,
+    "note": "task-count reduction and per-call cost still need op_statistic measurement; L0 timing alone is not sufficient",
+    "prior_reference": "pre-change profile showed about 7.98us per layer-step for the split_pack site and 7.56us for the rearrange site"
+  },
+  "serving_end_to_end": {
+    "tested": false,
+    "projection_ms": 18.7,
+    "projection_basis": "9.75us x 30 layers x 64 steps",
+    "decode_delta_pct_projected": -3.6,
+    "computing_delta_pct_projected": -1.7,
+    "conclusion": "projection only, not a measurement"
+  },
+  "status": "default_off_l0_only",
+  "default_enabled": false,
+  "evidence_fingerprint": {
+    "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
+    "host_fork_base_branch": "based/split-batch-baseline",
+    "host_fork_base_commit": "ad82d77cb",
+    "host_fork_dev_branch": "work/gdn-split-fusion",
+    "host_commit": "16e66804c",
+    "second_host_repo": "git@github.com:vLLM-HUST/vllm-hust.git",
+    "second_host_base_branch": "based/split-batch-baseline",
+    "second_host_base_commit": "f18cf803c",
+    "second_host_dev_branch": "work/gdn-rearrange-fusion",
+    "second_host_commit": "8c9f165259",
+    "pending": "L3 end-to-end, L4 attribution and serving A/B are all outstanding"
+  }
+}
