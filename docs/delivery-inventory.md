@@ -39,7 +39,8 @@
 退役守卫：`tests/test_runtime_patch_manifest_guard.py` 断言上述模块不再存在、`gate-fp32` 入口不再挂接源码变换、seam 断言表不再登记源码变换条目。
 
 宿主侧下沉算子索引：
-- **GDN 卷积权重加载期预打包 (GDN conv-weight 转置外提与连续打包)**：专属报告与证据结构见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。
+- **GDN 卷积权重加载期预打包 (GDN conv-weight 转置外提与连续打包)**：专属报告与证据结构见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。宿主分支 `work/d4-conv-pack`（宿主 PR #64，叠层于 PR #63）。
+- **GDN in_proj 输入投影权重加载期合并 (GDN 输入投影两次 MatMul 合一)**：专属报告与证据结构见 [ops/gdn_merge_inproj](../ops/gdn_merge_inproj/REPORT.md)。宿主分支 `work/w3f2-inproj-merge`（宿主 PR #63）。L0/L3/L4/端到端均未测，放行前必须补齐 L3 数值护栏。
 
 探索与负性能留存算子索引：
 - **GDN QKV 单 pass 解包 (`gdn_qkv_unpack`)**：专属报告与证据结构见 [ops/gdn_qkv_unpack](../ops/gdn_qkv_unpack/REPORT.md)。910B2 实测因 Triton 启动发射开销慢于原生链，按规范留存负性能事实，保持未激活。
@@ -63,13 +64,20 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
    - **PR 铁律**：所有特性分支从 `based/split-batch-baseline` 切出，发起 PR 的 Target 分支必须指定为 `based/split-batch-baseline`，严禁向 `main` 提 PR。
 
 ### 3.2 现存下沉变更清单
-- **对应开发分支**：`work/issue20-w3f2-host`（已推送到 `vLLM-HUST/vllm-ascend-hust`，基于旧基线 `based/image-baseline`，尚未进入新基线 `based/split-batch-baseline`）
+
+两项宿主层算子已按新基线重新提交并合入 `based/split-batch-baseline`（2026-11-01，基线头 `771b847da`；宿主 PR #63/#64 已合并，vLLM-HUST/vllm-ascend-split-batch-hust#32 承接）：
+
+- **对应开发分支**：
+  - `work/w3f2-inproj-merge`（宿主 PR #63，从 `based/split-batch-baseline` 头 `ad82d77cb` 切出，cherry-pick 旧分支提交，树逐字节一致）；
+  - `work/d4-conv-pack`（宿主 PR #64，叠层于 `work/w3f2-inproj-merge` 之上——其 pack 触发点位于 in_proj hook 内部，存在合并顺序硬依赖）。
+  - 旧开发分支 `work/issue20-w3f2-host`（基于旧基线 `based/image-baseline`）仅作历史溯源，其内容已被上述两分支完整取代。
 - **变更明细**：
-  1. **GDN in_proj 输入投影权重加载期合并与 Hook（历史代号 W3F2）** — Commit `ce807cd7ce972b9a410663cebe10b7ea25fb2a31`
+  1. **GDN in_proj 输入投影权重加载期合并与 Hook（历史代号 W3F2）** — Commit `fcbc4458bb8afcc37441e602921ed45dcbe5e775`（cherry-pick 自 `ce807cd7ce972b9a410663cebe10b7ea25fb2a31`）
      - `vllm_ascend/ops/gdn.py`：实现 `process_weights_after_loading` hook，当 `VLLM_HUST_GDN_MERGE_INPROJ=1` 时合并 `in_proj_ba` 与 `in_proj_qkv`。
      - `vllm_ascend/worker/model_runner_v1.py`：在加载权重后调用该 hook。
      - `vllm_ascend/patch/worker/patch_qwen3_5.py`：对齐 Qwen3.5 模型层的权重重绑定。
-  2. **GDN 卷积权重加载期预打包与转置外提（历史代号 D4）** — Commit `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`
+     - 插件仓内履约与证据：详见 [ops/gdn_merge_inproj](../ops/gdn_merge_inproj/REPORT.md)。
+  2. **GDN 卷积权重加载期预打包与转置外提（历史代号 D4）** — Commit `771b847dae5e9493fae9ca234b7498a072ffd39c`（cherry-pick 自 `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`）
      - `vllm_ascend/ops/gdn.py`：在加载期物化 conv1d.weight `[4096,1,4]` 为连续 `[4,4096]`（由 `VLLM_HUST_D4_CONV_PACK=1` 开启）；forward 内部统一使用预打包权重，消除每步 `transpose(0, 1)` 开销；单层每步消除动态转置开销，全模型 30 层 GDN 净消除多余转置。
      - 插件仓内履约与证据：详见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。
 
