@@ -153,6 +153,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 ### 3.5 彻底废除运行时补丁链条的硬性约束
 - 仓库内**严禁**再引入任何类似 `apply-runtime-patches.sh`、`patch_*.py` 等试图在容器运行树上就地修改 Python/C++ 文件的自动化脚本。
 - 如发现新的必须改动宿主代码的场景，统一按《宿主提案（Host Proposal）》标准在宿主 Fork 分支实现并提交 PR，严禁在插件仓私开补丁打入逻辑。
+- **执行记录（2026-11-01，issue #33 方案 A）**：随包发布的 meta-path 源码变换模块 `runtime_source_patches.py` 与 `runtime_source_patches_pth.py`（内存中改写宿主源码文本，效果等同运行时打补丁）已整体删除，其挂载的 5 个 env 开关归宿见[交付清单 §2.1](delivery-inventory.md)。一般插件入口不得在加载期安装任何源码变换钩子，该边界由 `tests/test_runtime_patch_manifest_guard.py` 机械守卫。
 
 ### 3.6 宿主 Fork 分支与 PR 协同铁律（严禁在 main 上切分支或提 PR）
 由于社区 `main` 分支走在非常靠前的上游（已领先本地镜像 260+ commits），底层 API、CANN 驱动要求及模型架构均与当前 910B2 镜像运行时严重脱节。因此确立以下分支管理与 PR 铁律：

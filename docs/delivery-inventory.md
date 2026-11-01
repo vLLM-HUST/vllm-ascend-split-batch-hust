@@ -23,7 +23,20 @@
 | `fi-gelu` | 是，general plugin | 无 bundle，默认关闭 | OOT provider 受形状/类型门控；当前主模型不走 GELU | probed 独立形状慢于原生链 | L3/L4 未完成 | [ops/fi_gelu](../ops/fi_gelu/REPORT.md) |
 | `aot-cache-guard` | 是，general plugin | 无 bundle | 宿主修复后 no-op | 不主张稳态收益 | 仅冷启动问题另行评估 | - |
 | `mlp-chunk` | 是，general plugin | 无 bundle，默认 chunks=1 | 仅配置启用时 | 目标是内存控制，不主张延迟收益 | 未证明容量/并发收益 | - |
-| `runtime_source_patches` 源码变换 | 随包模块，由 `gate-fp32:load` 调用 install；不是独立 entry point | 四个 env 默认关闭 | 锚点精确匹配且模块尚未导入才安装；漂移回原生 | 独立旧快照不自动验收当前转换模块；未证明完整 L0/L3/L4 配对 | 未证明 | - |
+
+### 2.1 运行时源码变换退役记录（2026-11-01，issue #33 方案 A）
+
+`runtime_source_patches` 源码变换模块已整体退役，连同备用加载入口 `runtime_source_patches_pth.py` 与随之失去消费点的 `moe_init_triton.py`。`gate-fp32` 的 `vllm.general_plugins` 入口不再在加载期安装任何 meta-path 源码变换钩子（退役前该调用是无条件的，与 `VLLM_HUST_GATE_FP32` 无关）。原挂在模块下的 5 个开关归宿如下，每条均有仓内记录可查：
+
+| 开关 | 归宿 | 依据 |
+|---|---|---|
+| `VLLM_HUST_D4_CONV_PACK` | 归宿主 Fork，插件侧锚点表删除 | 宿主已有正式实现并登记：[ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)、`DELIVERY_INDEX.json` 条目 `layer: host_fork`（宿主 commit `deb5ffe`，分支 `work/issue20-w3f2-host`，基于旧基线；迁入新基线 `based/split-batch-baseline` 由 issue #32 承接） |
+| `VLLM_HUST_GDN_UNPACK_VIEWS` | 删除 | [host-proposals/ConcatD-zero-copy-unpack](../host-proposals/ConcatD-zero-copy-unpack/OWNERSHIP.md) 已定性为早期探索、其收益与连续性已被宿主卷积权重预打包方案覆盖；且其变换表依赖卷积预打包锚点注入的行，无法独立成立 |
+| `VLLM_HUST_MOE_INIT_TRITON` | 删除 | 仓内无已归档的 L0 门通过记录（`tools/bench_moe_init_triton_only.py` 的 10% 门从未回填结果），收益未证明；其唯一仓内消费点是本模块注入 token_dispatcher 的分支。若重启，须按宿主提案流程下沉 |
+| `VLLM_HUST_NZ_SKIP_GATE` | 删除 | 全仓无评测证据、无交付登记，仅为 `aclnnMatmulWeightNz` EZ1001（n=1/k=1）的应急豁免；宿主如有同类需要，按宿主提案流程处理 |
+| `VLLM_HUST_DBO_ENABLE` | 删除 | [docs/comm-overlap-dbo-feasibility.md](comm-overlap-dbo-feasibility.md) 已结题"不可行"（2026-10-22）：起服拦截于 microbatching 后端配置校验断言，且 DBO 钩子消费者仅存在于 DeepEP 系内核，TP allReduce 路径无可行切入点 |
+
+退役守卫：`tests/test_runtime_patch_manifest_guard.py` 断言上述模块不再存在、`gate-fp32` 入口不再挂接源码变换、seam 断言表不再登记源码变换条目。
 
 宿主侧下沉算子索引：
 - **GDN 卷积权重加载期预打包 (GDN conv-weight 转置外提与连续打包)**：专属报告与证据结构见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。
