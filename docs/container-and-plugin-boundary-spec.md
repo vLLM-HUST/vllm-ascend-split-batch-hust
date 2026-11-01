@@ -119,10 +119,10 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
   - 本地路径：`/root/host-trees/vllm-ascend`
   - 远端仓库：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
   - **基线分支（Base Branch）**：**`based/split-batch-baseline`**（分支头 `ad82d77cb`，内容为镜像 Commit `74f0c0a27` / `0.25.1rc2.dev125+hust` 的宿主源码 + 3 个构建文件修复：`triton-ascend==3.2.2` 依赖对齐与 `setup.py` build-isolation 修复）
-  - 开发分支：`work/issue20-w3f2-host`（基于旧基线 `based/image-baseline`，未含在新基线内，其两处改动需按新基线重新提 PR）
-  - 已沉淀算子（commit 位于旧基线派生分支，待按新基线重新提交）：
-    - **GDN in_proj 权重加载期合并**（Commit `ce807cd`）：实现 `process_weights_after_loading` Hook，在加载模型权重后合并 `in_proj_ba` 与 `in_proj_qkv`；
-    - **GDN 卷积权重加载期预打包**（Commit `deb5ff`）：在模型加载期物化 `conv1d.weight` 为连续 `[4, 4096]` 格式，消除前向传播中的 `transpose(0, 1)`（消除每步冗余动态转置）。
+  - 开发分支：`work/w3f2-inproj-merge`（宿主 PR #63）与 `work/d4-conv-pack`（宿主 PR #64，叠层于 PR #63），均从新基线 `ad82d77cb` 派生；旧分支 `work/issue20-w3f2-host` 仅作历史溯源
+  - 已沉淀算子（已按新基线重新提交，commit 与旧分支对应提交树逐字节一致）：
+    - **GDN in_proj 权重加载期合并**（Commit `fcbc4458b`，cherry-pick 自 `ce807cd`）：实现 `process_weights_after_loading` Hook，在加载模型权重后合并 `in_proj_ba` 与 `in_proj_qkv`；
+    - **GDN 卷积权重加载期预打包**（Commit `771b847da`，cherry-pick 自 `deb5ff`）：在模型加载期物化 `conv1d.weight` 为连续 `[4, 4096]` 格式，消除前向传播中的 `transpose(0, 1)`（消除每步冗余动态转置）。
 - **vLLM 核心宿主 (`vllm-hust`)**：
   - 本地路径：`/root/host-trees/vllm-hust`
   - 远端仓库：`git@github.com:vLLM-HUST/vllm-hust.git`
