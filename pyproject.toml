@@ -111,9 +111,3 @@ extend-exclude = [
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "SIM", "UP"]
-
-[tool.ruff.lint.per-file-ignores]
-# 锚点/载荷为逐字节精确变换数据: 行长不可手术(改写即破坏锚点),
-# noqa 亦不可入(会污染字符串值)。禁用 E501, 其他规则仍生效。
-"src/vllm_ascend_split_batch/runtime_source_patches.py" = ["E501"]
-"src/vllm_ascend_split_batch/moe_init_triton.py" = ["E501"]
