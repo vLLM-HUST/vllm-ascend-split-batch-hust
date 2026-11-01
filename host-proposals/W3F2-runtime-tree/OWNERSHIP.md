@@ -13,6 +13,7 @@
 
 - **已下沉至宿主 Fork 源码**：
   - 宿主仓库：`vLLM-HUST/vllm-ascend-hust`
-  - 所在分支：`work/issue20-w3f2-host`（基于基线 `based/image-baseline` / Commit `74f0c0a`，Commit `ce807cd7ce972b9a410663cebe10b7ea25fb2a31`）
+  - 所在分支：`work/issue20-w3f2-host`，提交 `ce807cd7ce972b9a410663cebe10b7ea25fb2a31`
+  - 当前基线分支：`based/split-batch-baseline`（头 `ad82d77cb`，镜像 `74f0c0a27` 源码 + 3 个构建文件修复）；本改动基于旧基线 `based/image-baseline`，尚未进入该基线
 - **本目录性质**：
   - 历史补丁原件仅作溯源参考备查，插件仓内不执行任何运行时补丁操作。

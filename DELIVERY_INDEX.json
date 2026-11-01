@@ -5,21 +5,21 @@
     "host_forks": {
       "vllm_ascend_hust": {
         "repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
-        "baseline_branch": "based/image-baseline",
-        "baseline_commit": "4d2c82742 (image 74f0c0a27)",
-        "pr_target_branch": "based/image-baseline",
-        "note": "严格定死以 based/image-baseline 为基线，严禁以 main 切分支或提 PR"
+        "baseline_branch": "based/split-batch-baseline",
+        "baseline_commit": "ad82d77cb (image 74f0c0a27)",
+        "pr_target_branch": "based/split-batch-baseline",
+        "note": "严格定死以 based/split-batch-baseline 为基线（镜像源码 + 3 个构建文件修复），严禁以 main 或旧 based/image-baseline 切分支或提 PR"
       },
       "vllm_hust": {
         "repo": "git@github.com:vLLM-HUST/vllm-hust.git",
-        "baseline_branch": "based/image-baseline",
+        "baseline_branch": "based/split-batch-baseline",
         "baseline_commit": "f18cf803c (image f18cf803c)",
-        "pr_target_branch": "based/image-baseline",
-        "note": "严格定死以 based/image-baseline 为基线，严禁以 main 切分支或提 PR"
+        "pr_target_branch": "based/split-batch-baseline",
+        "note": "严格定死以 based/split-batch-baseline 为基线，严禁以 main 或旧 based/image-baseline 切分支或提 PR"
       }
     },
     "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
-    "host_fork_baseline_branch": "based/image-baseline",
+    "host_fork_baseline_branch": "based/split-batch-baseline",
     "host_fork_dev_branch": "work/issue20-w3f2-host",
     "cann": "9.1.0",
     "device": "2x910B2 TP2",

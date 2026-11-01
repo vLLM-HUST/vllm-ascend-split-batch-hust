@@ -39,18 +39,18 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
 宿主侧无法由插件外部介入的修改已全部下沉到宿主 Fork 仓库，随宿主镜像构建发布；本仓废除 `tools/runtime-tree/apply-runtime-patches.sh` 等任何在容器运行树上打补丁的工具。
 
 ### 3.1 两个宿主仓库与基线分支铁律
-由于社区 `main` 分支走在非常靠前的上游（已领先本地镜像 260+ commits），底层依赖已与当前 910B2 镜像运行时脱节。因此两个宿主仓库**定死以 `based/image-baseline` 为基线与 PR 目标**：
+由于社区 `main` 分支走在非常靠前的上游（已领先本地镜像 260+ commits），底层依赖已与当前 910B2 镜像运行时脱节。因此两个宿主仓库**定死以 `based/split-batch-baseline` 为基线与 PR 目标**：
 1. **昇腾适配宿主 (`vllm-ascend-hust`)**：
    - 仓库：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
-   - **基线分支**：`based/image-baseline`（锚定当前镜像 `74f0c0a27`）
-   - **PR 铁律**：所有特性分支从 `based/image-baseline` 切出，发起 PR 的 Target 分支必须指定为 `based/image-baseline`，严禁向 `main` 提 PR。
+   - **基线分支**：`based/split-batch-baseline`（分支头 `ad82d77cb`，内容为镜像 `74f0c0a27` 的宿主源码 + 3 个构建文件修复）
+   - **PR 铁律**：所有特性分支从 `based/split-batch-baseline` 切出，发起 PR 的 Target 分支必须指定为 `based/split-batch-baseline`，严禁向 `main` 或旧基线 `based/image-baseline` 提 PR。
 2. **vLLM 核心宿主 (`vllm-hust`)**：
    - 仓库：`git@github.com:vLLM-HUST/vllm-hust.git`
-   - **基线分支**：`based/image-baseline`（锚定当前镜像 `f18cf803c`）
-   - **PR 铁律**：所有特性分支从 `based/image-baseline` 切出，发起 PR 的 Target 分支必须指定为 `based/image-baseline`，严禁向 `main` 提 PR。
+   - **基线分支**：`based/split-batch-baseline`（锚定当前镜像 `f18cf803c`；与旧 `based/image-baseline` 指向同一 commit，内容零差异）
+   - **PR 铁律**：所有特性分支从 `based/split-batch-baseline` 切出，发起 PR 的 Target 分支必须指定为 `based/split-batch-baseline`，严禁向 `main` 提 PR。
 
 ### 3.2 现存下沉变更清单
-- **对应开发分支**：`work/issue20-w3f2-host`（已推送到 `vLLM-HUST/vllm-ascend-hust`，基于 `based/image-baseline`）
+- **对应开发分支**：`work/issue20-w3f2-host`（已推送到 `vLLM-HUST/vllm-ascend-hust`，基于旧基线 `based/image-baseline`，尚未进入新基线 `based/split-batch-baseline`）
 - **变更明细**：
   1. **GDN in_proj 输入投影权重加载期合并与 Hook（历史代号 W3F2）** — Commit `ce807cd7ce972b9a410663cebe10b7ea25fb2a31`
      - `vllm_ascend/ops/gdn.py`：实现 `process_weights_after_loading` hook，当 `VLLM_HUST_GDN_MERGE_INPROJ=1` 时合并 `in_proj_ba` 与 `in_proj_qkv`。

@@ -7,6 +7,6 @@
 
 ## 2. 架构落地与收益定性
 - **为什么由宿主承载**：插件层仅能介入公开接口，无法侵入模型私有前向与内部权重结构。因此该优化直接下沉至宿主 Fork 源码，随镜像原生发布。
-- **宿主 Fork 归属**：仓库 `vLLM-HUST/vllm-ascend-hust`，严格基于 **`based/image-baseline`** 基线分支（对应镜像 `74f0c0a27`），开发分支为 `work/issue20-w3f2-host`（Commit `deb5ffefe`）。
+- **宿主 Fork 归属**：仓库 `vLLM-HUST/vllm-ascend-hust`，基线分支 **`based/split-batch-baseline`**（镜像 `74f0c0a27` 源码 + 3 个构建文件修复，头 `ad82d77cb`）；本优化提交为 `work/issue20-w3f2-host` 上的 `deb5ffefe`，基于旧基线 `based/image-baseline`，待按新基线重新提交。
 - **评测定性**：在 910B2 硬件上，单层转置开销从 308.62 us 降低到 0.20 us（直接复用预打包连续张量，加速比 >1500x）；全模型 30 层 GDN 每步推理净消除 ~9.25 ms 的纯拷贝与转置时延。
 - **与插件解包的关系**：插件侧曾尝试通过 Triton 单 pass 解包优化（`ops/gdn_qkv_unpack`），但因内核发射时延出现负收益；生产中 GDN 的核心耗时瓶颈实际由本宿主卷积权重加载期预打包优化彻底解决。

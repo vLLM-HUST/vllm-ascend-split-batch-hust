@@ -10,7 +10,8 @@
 
 - **已下沉至宿主 Fork 源码**：
   - 宿主仓库：`vLLM-HUST/vllm-ascend-hust`
-  - 所在分支：`work/issue20-w3f2-host`（基于基线 `based/image-baseline` / Commit `74f0c0a`，Commit `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`）
+  - 所在分支：`work/issue20-w3f2-host`，提交 `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`
+  - 当前基线分支：`based/split-batch-baseline`（头 `ad82d77cb`，镜像 `74f0c0a27` 源码 + 3 个构建文件修复）；本改动基于旧基线 `based/image-baseline`，尚未进入该基线
 - **独立算子报告与索引**：
   - 本优化算子的专属报告与证据已按新标准归档至 [ops/gdn_conv_pack/](computer:///root/vllm-workspace/vllm-ascend-split-batch-hust/ops/gdn_conv_pack)。
 - **本目录性质**：

@@ -3,7 +3,7 @@
 ## 1. 评测环境与形状事实
 - **硬件拓扑**: Atlas 800T A2 (2×910B2, TP=2)
 - **软件栈版本**: CANN 9.1.0 / vllm 0.28.1.post1.dev143+gf18cf803c / vllm-ascend 0.25.1rc2.dev125+hust (Commit `74f0c0a27`)
-- **宿主 Fork 归属**: `vLLM-HUST/vllm-ascend-hust` @ `work/issue20-w3f2-host` (Commit `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`)，Base 分支为 `based/image-baseline`
+- **宿主 Fork 归属**: `vLLM-HUST/vllm-ascend-hust` @ `work/issue20-w3f2-host` (Commit `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`)，Base 分支为 `based/split-batch-baseline`（该提交基于旧基线 `based/image-baseline`，待按新基线重新提交）
 - **模型与权重**: Qwen3.5-35B-A3B (bf16, ND 格式)
 - **张量事实**: conv1d.weight `[4096, 1, 4]` -> 打包连续 `[4, 4096]`
 - **执行相位**: Decode / Prefill (整模型 30 层 GDN)
