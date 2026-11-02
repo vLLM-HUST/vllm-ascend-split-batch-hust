@@ -1,108 +1,94 @@
-# GDN Split / Rearrange Copy Fusion (`gdn_split_fusion`)
+# GDN Projection Unpack / Mixed-QKV Rearrange Fusion (`gdn_split_fusion`)
 
-把 GDN 里两处"多段小拷贝"合成单 kernel。两个组件分别落在两个宿主仓库，开关独立，都可单独回退。
+把 GDN 非交错路径上两处"多段小拷贝"各合成单 kernel。**一个宿主仓库、一个开关**。
 
-| 组件 | 宿主仓库 | 位置 | 开关 |
-|---|---|---|---|
-| ① 非交错投影的 split + contiguous 融合 | `vllm-ascend-hust` | `vllm_ascend/ops/gdn.py` → `AscendGatedDeltaNetAttention.forward` 非交错分支 | `VLLM_HUST_GDN_SPLIT_FUSION=1` |
-| ② 混合 qkv 重排融合 | `vllm-hust` | `vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py` → `QwenGatedDeltaNetAttention.rearrange_mixed_qkv` | `VLLM_HUST_GDN_REARRANGE_FUSION=1` |
+| 组件 | 位置 | 替代的调用链 |
+|---|---|---|
+| ① 投影解包 | `vllm_ascend/ops/gdn.py` → `forward` 非交错分支（两条：普通与 in_proj 合并） | `split` + `reshape` + `chunk` + 2×`contiguous` |
+| ② 混合 qkv 重排 | `vllm_ascend/ops/gdn.py` → `_forward_core` 三处 `rearrange_mixed_qkv` 调用 | `split` + 3×`reshape` + `cat` |
+
+- 开关：`VLLM_HUST_GDN_UNPACK_FUSED=1`（默认 `0`）
+- 行数门限：`VLLM_HUST_GDN_UNPACK_MAXROWS`（默认 4096），下限固定 2 行
+- 实现：`vllm_ascend/ops/gdn_epilogue.py`
 
 ## 1. 背景
 
-Qwen3.5 的 GDN 层在 decode 阶段有两次"把一条混合 buffer 拆成多块连续张量"的操作，每次在 910B2 上要 5–10 µs，而实际搬运的数据只有几十 KB。开销来自 task 数量，不是带宽。
+decode 阶段这两处每次要 5–10 µs，而实际搬运的数据只有几十 KB，开销全在 task 数量上。
 
-**组件 ①**（非交错布局、非交错投影）：
-
-```python
-mixed_qkv, z = mixed_qkvz.split([qkv_size, z_size], dim=-1)
-z = z.reshape(z.size(0), -1, self.head_v_dim)
-ba, _ = self.in_proj_ba(hidden_states)
-b, a = self._split_ba_for_tp(ba)
-b = b.contiguous()
-a = a.contiguous()
-```
-
-`split` 出的是视图，但 `b`、`a` 各要一次 `contiguous()` 真正拷贝，两次 task。
-
-**组件 ②**（`rearrange_mixed_qkv`）：
-
-```python
-query, key, value = torch.split(mixed_qkv, [q_dim, k_dim, v_dim], dim=-1)
-fused = torch.cat([query.reshape(-1), key.reshape(-1), value.reshape(-1)], dim=0)
-q_contig = fused[0:q_size]
-k_contig = fused[q_size : q_size + k_size]
-v_contig = fused[q_size + k_size :]
-```
-
-一段 `split`、三个 `reshape`、一个 `cat`，共四次 launch，只为产出三个连续 buffer。
+原实现里 ② 更贵，因为它先对三个非连续视图各做一次 `contiguous`，再用 `cat` 拼成一块，四次搬运只为产出三个连续张量。
 
 ## 2. 做法
 
-组件 ①：单 kernel 一次写入 `mixed_qkv`、`b`、`a` 三个 buffer。`z` 不进 kernel——对连续切片做 `reshape` 是纯视图，留在外面还能避免 custom op 返回别名。
+两个 kernel，都按"核数分块 + UB 感知内层循环"启动：
 
-组件 ②：单 kernel 直接写 `q`、`k`、`v` 三个连续 buffer，调用方再 `.view(1, seq, -1, head_dim)`。视图后的形状、连续性、数值与原实现逐位一致。
+```python
+grid = max(1, min(_vector_core_num(), rows))   # 最多 48 个 program
+per_vec = triton.cdiv(rows, grid)              # 每个 program 分多少行
+per_iter = _rows_per_iter(2 * width, elem)     # 每批行数，读写双份流量
+```
 
-## 3. 为什么组件 ① 必须走 opaque op
+内层 `tl.range(start, end, ROWS_PER_ITER)` 按 UB 容量分批。这样 prefill 的 1867 行不会摊成 1867 个单行 program。
 
-`forward` 在 dynamo 追踪范围内。Python 里按张量形状分支会在追踪期按首个形状常量折叠，而首个被追踪的形状是 prefill 分块，decode 就永远走不到融合路径。所以形状判定下沉到 `torch.ops.vllm.gdn_split_pack`，每次调用按真实形状决定。
+早先的实现用 `grid = (rows,)`（一行一个 program），在 prefill 上碎得厉害，只能靠"超过 32 行就回退"规避——本版去掉了这个上限。
 
-组件 ② 不需要 op：`rearrange_mixed_qkv` 只从 `qwen_gdn_attention_core` 内部被调用，而后者是 `direct_register_custom_op` 注册的自定义 op，函数体不被追踪，普通 Python 分支安全。
+## 3. 组件 ② 为什么留在本仓库
 
-## 4. 宿主归属
+`AscendGatedDeltaNetAttention` 自己重写了 `_forward_core`，三处 `rearrange_mixed_qkv` 调用都在 `vllm_ascend/ops/gdn.py` 里。因此新增 `_rearrange_mixed_qkv()` 覆盖并把三处调用指过去即可，**不需要改 vllm core**。
 
-**组件 ①**
+早先的版本改的是 `vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py::rearrange_mixed_qkv` 本体，那意味着要维护第二个宿主仓库（`vllm-hust`）和第二条基线。
+
+## 4. 为什么组件 ① 必须走 opaque op
+
+`forward` 在 dynamo 追踪范围内。Python 里按张量形状分支会在追踪期按首个形状常量折叠，decode 就永远走不到融合路径。所以形状判定下沉到 `torch.ops.vllm_ascend.gdn_unpack`。
+
+组件 ② 也用了 op（`gdn_rearrange`），但它不在追踪区内，用 op 主要是为了有明确的 fake impl 与别名契约。
+
+## 5. fail-closed 契约
+
+op 内部判断，任一不满足就走原生链，**不抛异常**：
+
+- 开关未设置或不等于 `1`
+- dtype 非 `bfloat16`
+- 输入非二维或非连续
+- `ba` 宽度不等于 `2 × half`，或行数与 `qkvz` 不一致
+- 宽度与 `q + k + v` 不符
+- 行数小于 2 或大于 `VLLM_HUST_GDN_UNPACK_MAXROWS`
+
+注意回退路径用 `clone` 而不是 `contiguous`：单行切片的 leading dim 为 1，PyTorch 会认为它已经连续，`contiguous` 会返回输入视图，违反 custom op 的别名契约。
+
+## 6. 宿主归属
 
 - 仓库 `vLLM-HUST/vllm-ascend-hust`
-- Base `based/split-batch-baseline`（`ad82d77cb`）
-- 分支 `work/gdn-split-fusion`
-- 提交 `16e66804c`
-- 改动 4 个文件，+328 / −6
+- Base `based/split-batch-baseline`（`8039119f`）
+- 分支 `work/gdn-unpack-fused`
+- 提交 `53701fb47`
+- 改动 3 个文件，+551 / −26
 
-**组件 ②**
+## 7. 收益
 
-- 仓库 `vLLM-HUST/vllm-hust`
-- Base `based/split-batch-baseline`（`f18cf803c`）
-- 分支 `work/gdn-rearrange-fusion`
-- 提交 `8c9f165259`
-- 改动 2 个文件，+133 / −9
+cohort：Qwen3.5-35B-A3B、2×910B2、TP2、bf16、`cudagraph_mode=FULL`。图内打包（decode 50×，prefill 5×），单位 µs/层·step：
 
-## 5. 适用范围与回退
+| M | ① 原生 → 融合 | ② 原生 → 融合 | 合计省 | 逐位一致 |
+|---|---|---|---|---|
+| 1 | 0.37 → 1.85（走原生，见 §8） | 0.34 → 1.77 | −2.90 | ✅ |
+| 8 | 5.06 → **1.56** | 5.13 → **1.59** | **7.03** | ✅ |
+| 32 | 6.19 → **3.43** | 6.18 → **3.17** | 5.78 | ✅ |
+| 266 | 9.19 → **6.74** | 10.10 → **7.55** | 5.00 | ✅ |
+| 1867 | 14.53 → **9.36** | 22.45 → **11.11** | **16.51** | ✅ |
 
-组件 ① fail-closed 条件（任一不满足走原生）：
+按 M=8、30 层、64 step 投影：`7.03 × 1920 = 13.5 ms`，约 decode 非通信时间的 **2.6%**。
 
-- 开关未设或不等于 `1`
-- 层上有 `split_ba`（KP 布局，切分方式不同）
-- dtype 非 `bfloat16`、输入非二维或非连续
-- `ba` 宽度不等于 `2 × half`，或行数与 `mixed_qkvz` 不一致
-- 行数小于 `VLLM_HUST_GDN_SPLIT_FUSION_MINROWS`（默认 2）或大于 `VLLM_HUST_GDN_SPLIT_FUSION_MAXROWS`（默认 32）
+prefill 也正收益，这是本版相对上一版（prefill 直接回退）的主要改进。
 
-组件 ② fail-closed 条件：
+## 8. 已知问题：M=1 的 op 开销
 
-- 开关未设或不等于 `1`
-- dtype 非 `bfloat16`、输入非二维或非连续
-- 最后一维不等于 `2 × q_dim + v_dim`
-- 行数超过 `VLLM_HUST_GDN_REARRANGE_MAXROWS`（默认 32）
+M=1 时 op 内部回退到原生链，但**调用 custom op 本身有约 1.4 µs 固定开销**，因此 ① 从 0.37 µs 变成 1.85 µs、② 从 0.34 µs 变成 1.77 µs。
 
-两个开关互不依赖，可以分别开关。回退：把对应 env 置 `0` + 重启 + 重新捕获计算图。
+30 层合计约 84 µs/step，相对 66 ms 的每 token 耗时约 0.13%。目前接受这个代价，因为形状判断必须留在 op 内（dynamo 折叠问题）。如果后续确认 vLLM 对 GDN 的 forward 按形状重新追踪，可以把判断移到 Python 层，彻底消掉这部分开销。
 
-## 6. 收益
+## 9. 交付状态
 
-cohort：Qwen3.5-35B-A3B、2×910B2、TP2、bf16、`cudagraph_mode=FULL`、capture `[1,2,4,8,16,32]`。L0 为图内打包 50× 的单层单步耗时。
-
-| M | 组件 ① 原生 → 融合 | 组件 ② 原生 → 融合 | 合计省 |
-|---|---|---|---|
-| 1 | 0.24 → 0.23（未融合） | 4.31 → 0.99 | 3.32 µs |
-| 8 | 3.32 → 1.46 | 9.31 → 1.42 | **9.75 µs** |
-| 16 | 3.34 → 2.07 | 9.35 → 1.96 | 8.66 µs |
-| 32 | 4.05 → 3.34 | 10.26 → 3.02 | 7.96 µs |
-
-按 M=8、30 层、64 step 投影：`9.75 × 30 × 64 = 18.7 ms`，相当于 decode 非通信时间（515.2 ms）的 **3.6%**、computing 分母（1108.9 ms）的 **1.7%**。
-
-上表为 L0 微基准，尚未做 L4 图内归因与服务端到端；投影值不可当作实测收益引用。
-
-## 7. 交付状态
-
-- 承载层级：`host_fork`（两个宿主仓库各一处）
-- 默认状态：全部关闭
-- 当前：两侧代码已提交到特性分支，未合入基线，未重建镜像
-- 待办：L3 对拍、L4 归因、端到端（见 REPORT.md 第 6 节）
+- 承载层级：`host_fork`（单仓库）
+- 默认状态：关闭
+- 已做：算子级逐位对拍（5 档 M，含 2 档 prefill）
+- 未做：端到端数值对拍、图内归因、服务端实测（见 REPORT.md 结论一节）

@@ -120,7 +120,7 @@
       "evidence": "ops/gdn_split_fusion/evidence.json",
       "status": "default_off_l0_only",
       "default_enabled": false,
-      "gate_env": "VLLM_HUST_GDN_SPLIT_FUSION=1 + VLLM_HUST_GDN_REARRANGE_FUSION=1",
+      "gate_env": "VLLM_HUST_GDN_UNPACK_FUSED=1",
       "l3_numerical_guard": "operator_level_passed",
       "serving_status": "pending"
     }

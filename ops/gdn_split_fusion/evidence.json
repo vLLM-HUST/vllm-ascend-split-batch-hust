@@ -1,37 +1,37 @@
 {
   "$schema": "operator-benchmark-evidence/v1",
   "operator_name": "gdn_split_fusion",
-  "callsite": "vllm_ascend.ops.gdn:AscendGatedDeltaNetAttention.forward (non-interleaved projection) + vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn:QwenGatedDeltaNetAttention.rearrange_mixed_qkv",
+  "callsite": "vllm_ascend.ops.gdn:AscendGatedDeltaNetAttention.forward (non-interleaved projection) + AscendGatedDeltaNetAttention._rearrange_mixed_qkv",
   "components": [
     {
-      "id": "split_pack",
-      "host_repo": "vLLM-HUST/vllm-ascend-hust",
-      "gate_env": "VLLM_HUST_GDN_SPLIT_FUSION=1",
+      "id": "projection_unpack",
       "host_file": "vllm_ascend/ops/gdn.py",
-      "op": "torch.ops.vllm.gdn_split_pack"
+      "op": "torch.ops.vllm_ascend.gdn_unpack",
+      "replaces": "split + reshape + chunk + 2x contiguous"
     },
     {
-      "id": "rearrange",
-      "host_repo": "vLLM-HUST/vllm-hust",
-      "gate_env": "VLLM_HUST_GDN_REARRANGE_FUSION=1",
-      "host_file": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
-      "op": "none (plain python branch inside an opaque custom op body)"
+      "id": "mixed_qkv_rearrange",
+      "host_file": "vllm_ascend/ops/gdn.py",
+      "op": "torch.ops.vllm_ascend.gdn_rearrange",
+      "replaces": "split + 3x reshape + cat"
     }
   ],
+  "gate_env": "VLLM_HUST_GDN_UNPACK_FUSED=1",
   "environment": {
     "device": "Ascend910B2",
+    "world_size": 2,
     "cann_version": "9.1.0",
     "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
     "vllm_ascend_version": "0.25.1rc2.dev125+hust",
     "model": "Qwen3.5-35B-A3B",
-    "dtype": "bf16"
+    "dtype": "bf16",
+    "cudagraph_mode": "FULL"
   },
   "shape_facts": {
-    "phase": "decode",
-    "batch_size": 8,
+    "phase": "decode and prefill",
     "gdn_layers": 30,
-    "split_pack": {
-      "mixed_qkvz_row": 3072,
+    "projection": {
+      "qkvz_row": 3072,
       "qkv_size": 2048,
       "z_size": 1024,
       "ba_width": 256,
@@ -45,62 +45,60 @@
       "head_k_dim": 128,
       "head_v_dim": 128
     },
-    "cudagraph_mode": "FULL",
     "capture_sizes": "1,2,4,8,16,32"
   },
   "l0_microbenchmark": {
     "status": "completed",
-    "measurement": "NPU graph, 50 repetitions packed per replay, single 910B2, us per layer-step",
-    "split_pack": {
-      "M1": {"native_us": 0.24, "candidate_us": 0.23, "note": "below MIN_ROWS, stock path taken", "bitwise_equal": true},
-      "M8": {"native_us": 3.32, "candidate_us": 1.46, "saved_us": 1.86, "saved_pct": 56.1, "bitwise_equal": true},
-      "M16": {"native_us": 3.34, "candidate_us": 2.07, "saved_us": 1.27, "saved_pct": 38.0, "bitwise_equal": true},
-      "M32": {"native_us": 4.05, "candidate_us": 3.34, "saved_us": 0.72, "saved_pct": 17.7, "bitwise_equal": true}
+    "measurement": "NPU graph packed (50x decode, 5x prefill), single 910B2, us per layer-step",
+    "projection": {
+      "M1": {"native_us": 0.37, "candidate_us": 1.85, "note": "custom-op dispatch overhead dominates a single row", "bitwise_equal": true},
+      "M8": {"native_us": 5.06, "candidate_us": 1.56, "saved_us": 3.5, "saved_pct": 69.2, "bitwise_equal": true},
+      "M32": {"native_us": 6.19, "candidate_us": 3.43, "saved_us": 2.76, "saved_pct": 44.6, "bitwise_equal": true},
+      "M266": {"native_us": 9.19, "candidate_us": 6.74, "saved_us": 2.45, "saved_pct": 26.7, "bitwise_equal": true},
+      "M1867": {"native_us": 14.53, "candidate_us": 9.36, "saved_us": 5.17, "saved_pct": 35.6, "bitwise_equal": true}
     },
     "rearrange": {
-      "M1": {"native_us": 4.31, "candidate_us": 0.99, "saved_us": 3.32, "saved_pct": 77.0, "bitwise_equal": true},
-      "M8": {"native_us": 9.31, "candidate_us": 1.42, "saved_us": 7.89, "saved_pct": 84.7, "bitwise_equal": true},
-      "M16": {"native_us": 9.35, "candidate_us": 1.96, "saved_us": 7.39, "saved_pct": 79.1, "bitwise_equal": true},
-      "M32": {"native_us": 10.26, "candidate_us": 3.02, "saved_us": 7.24, "saved_pct": 70.5, "bitwise_equal": true}
+      "M1": {"native_us": 0.34, "candidate_us": 1.77, "note": "custom-op dispatch overhead dominates a single row", "bitwise_equal": true},
+      "M8": {"native_us": 5.13, "candidate_us": 1.59, "saved_us": 3.53, "saved_pct": 68.8, "bitwise_equal": true},
+      "M32": {"native_us": 6.18, "candidate_us": 3.17, "saved_us": 3.02, "saved_pct": 48.9, "bitwise_equal": true},
+      "M266": {"native_us": 10.1, "candidate_us": 7.55, "saved_us": 2.55, "saved_pct": 25.2, "bitwise_equal": true},
+      "M1867": {"native_us": 22.45, "candidate_us": 11.11, "saved_us": 11.34, "saved_pct": 50.5, "bitwise_equal": true}
     },
-    "combined_M8_saved_us": 9.75,
-    "speedup": 2.62,
-    "native_median_us": 12.63,
-    "optimized_median_us": 2.88
+    "speedup": 3.24,
+    "native_median_us": 10.19,
+    "optimized_median_us": 3.15,
+    "projection_ms_projected": 13.5,
+    "projection_basis": "7.03us x 30 layers x 64 steps",
+    "decode_delta_pct_projected": -2.6
   },
   "l3_numerical_guard": {
     "passed": true,
-    "scope": "operator-level bitwise equivalence on NPU, M in {1,8,16,32}, including post-view shape and contiguity for the rearrange component",
+    "scope": "operator-level bitwise equivalence on NPU across M in {1,8,32,266,1867}",
     "metric": "exact_bitwise_equal",
+    "max_abs_diff": 0,
     "end_to_end_pending": true,
     "detail": "8-prompt greedy comparison over a live server has NOT been run for this operator"
   },
   "l4_attribution": {
     "tested": false,
-    "note": "task-count reduction and per-call cost still need op_statistic measurement; L0 timing alone is not sufficient",
-    "prior_reference": "pre-change profile showed about 7.98us per layer-step for the split_pack site and 7.56us for the rearrange site"
+    "verified": false,
+    "note": "task-count reduction still needs op_statistic measurement; component 2 should drop from 4 tasks to 1 per layer-step"
   },
   "serving_end_to_end": {
     "tested": false,
-    "projection_ms": 18.7,
-    "projection_basis": "9.75us x 30 layers x 64 steps",
-    "decode_delta_pct_projected": -3.6,
-    "computing_delta_pct_projected": -1.7,
-    "conclusion": "projection only, not a measurement"
+    "concurrency": 32,
+    "speedup": null,
+    "conclusion": "not measured; 2.6% projected decode gain sits near the 2.04% same-config leg spread"
   },
+  "known_issue": "M=1 pays ~1.4us of custom-op dispatch overhead per component (~84us per step over 30 layers, about 0.13% of TPOT) because the shape gate must stay inside the op",
   "status": "default_off_l0_only",
   "default_enabled": false,
   "evidence_fingerprint": {
     "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
     "host_fork_base_branch": "based/split-batch-baseline",
-    "host_fork_base_commit": "ad82d77cb",
-    "host_fork_dev_branch": "work/gdn-split-fusion",
-    "host_commit": "16e66804c",
-    "second_host_repo": "git@github.com:vLLM-HUST/vllm-hust.git",
-    "second_host_base_branch": "based/split-batch-baseline",
-    "second_host_base_commit": "f18cf803c",
-    "second_host_dev_branch": "work/gdn-rearrange-fusion",
-    "second_host_commit": "8c9f165259",
-    "pending": "L3 end-to-end, L4 attribution and serving A/B are all outstanding"
+    "host_fork_base_commit": "8039119fd",
+    "host_fork_dev_branch": "work/gdn-unpack-fused",
+    "host_commit": "53701fb47",
+    "pending": "end-to-end numerics, in-graph attribution and serving A/B are all outstanding"
   }
 }
