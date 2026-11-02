@@ -123,6 +123,20 @@
       "gate_env": "VLLM_HUST_MOE_EPILOGUE=1",
       "l3_numerical_guard": "passed",
       "serving_status": "within_noise"
+    },
+    {
+      "id": "gdn_merge_inproj",
+      "display_name": "GDN in_proj Weight Load-time Merge (GDN 输入投影权重加载期合并)",
+      "layer": "host_fork",
+      "directory": "ops/gdn_merge_inproj",
+      "readme": "ops/gdn_merge_inproj/README.md",
+      "report": "ops/gdn_merge_inproj/REPORT.md",
+      "evidence": "ops/gdn_merge_inproj/evidence.json",
+      "status": "default_off_host_fork_unmeasured",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_GDN_MERGE_INPROJ=1",
+      "l3_numerical_guard": "not_run",
+      "serving_status": "unmeasured"
     }
   ]
 }
