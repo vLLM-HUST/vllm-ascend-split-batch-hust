@@ -68,8 +68,8 @@
     "native_median_us": 10.19,
     "optimized_median_us": 3.15,
     "projection_ms_projected": 13.5,
-    "projection_basis": "7.03us x 30 layers x 64 steps",
-    "decode_delta_pct_projected": -2.6
+    "projection_basis": "7.03us x 30 layers x 64 steps at M=8; superseded by l4_attribution, which measured -57.2ms over 511 steps at concurrency 32",
+    "decode_delta_pct_projected": -0.39
   },
   "l3_numerical_guard": {
     "passed": true,
@@ -85,9 +85,22 @@
     "detail": "two separately started servers on the same baseline, gate unset versus VLLM_HUST_GDN_UNPACK_FUSED=1; process environment verified before sampling"
   },
   "l4_attribution": {
-    "tested": false,
-    "verified": false,
-    "note": "task-count reduction still needs op_statistic measurement; component 2 should drop from 4 tasks to 1 per layer-step"
+    "tested": true,
+    "verified": true,
+    "caliber": "32 requests x 512 outputs @32, op_statistic over the whole bench window, rank0",
+    "call_count_expected": 15330,
+    "call_count_actual": 15324,
+    "fused_kernels": {
+      "_unpack_kernel": {"count": 15324, "total_ms": 106.1, "per_call_us": 6.93},
+      "_rearrange_kernel": {"count": 15324, "total_ms": 101.9, "per_call_us": 6.65}
+    },
+    "replaced": {
+      "ConcatD": {"off_count": 15420, "off_ms": 265.7, "on_count": 30, "on_ms": 0.5, "off_per_call_us": 17.2}
+    },
+    "net_attributable_ms": -57.2,
+    "net_attributable_pct": -0.39,
+    "all_kernel_total": {"off_ms": 14518.0, "on_ms": 14198.3, "delta_pct": -2.2},
+    "note": "the all-kernel delta also carries window drift (Transpose -34.2ms); only the ConcatD swap is attributable. 15324 = 30 layers x 511 steps. The measured per-call saving is 3.7us, well below the 7.03us the microbenchmark predicted at M=8 because the live batch is 32."
   },
   "serving_end_to_end": {
     "tested": false,
