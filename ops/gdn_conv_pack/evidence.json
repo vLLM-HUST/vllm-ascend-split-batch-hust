@@ -70,7 +70,7 @@
     "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
     "host_fork_base_branch": "based/split-batch-baseline",
     "host_fork_base_commit": "ad82d77cb",
-    "host_fork_legacy_base_branch": "based/image-baseline",
+    "host_fork_legacy_base_branch": "archive/based-image-baseline-20261023",
     "host_fork_dev_branch": "work/d4-conv-pack",
     "host_fork_pr": 64,
     "host_commit": "771b847dae5e9493fae9ca234b7498a072ffd39c",

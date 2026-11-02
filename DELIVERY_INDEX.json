@@ -8,7 +8,7 @@
         "baseline_branch": "based/split-batch-baseline",
         "baseline_commit": "ad82d77cb (image 74f0c0a27)",
         "pr_target_branch": "based/split-batch-baseline",
-        "note": "严格定死以 based/split-batch-baseline 为基线（镜像源码 + 3 个构建文件修复），严禁以 main 或旧 based/image-baseline 切分支或提 PR"
+        "note": "严格定死以 based/split-batch-baseline 为基线（镜像源码 + 3 个构建文件修复），严禁以 main 或已归档的 based/image-baseline（现名 archive/based-image-baseline-20261023）切分支或提 PR"
       },
       "vllm_hust": {
         "repo": "git@github.com:vLLM-HUST/vllm-hust.git",
