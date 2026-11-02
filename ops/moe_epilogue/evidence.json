@@ -83,6 +83,8 @@
     "host_fork_base_commit": "ad82d77cb",
     "host_fork_dev_branch": "work/moe-shared-expert-epilogue",
     "host_commit": "ace3d38423123c101ca2cdca8aeaaf21a7a40c5c",
-    "pending": "L3 rerun on the host-side implementation after the host commit lands in the baseline and the image is rebuilt"
+    "host_merge_commit": "8039119f",
+    "baseline_state": "merged into based/split-batch-baseline via PR #66",
+    "pending": "L3 rerun on the merged baseline (which now also carries the in_proj merge and conv-weight pack from PR #63); image rebuild still unavailable"
   }
 }

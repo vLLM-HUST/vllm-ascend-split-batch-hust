@@ -31,7 +31,7 @@ shared_out = F.sigmoid(gate_out) * shared_out
 - 仓库：`vLLM-HUST/vllm-ascend-hust`
 - Base 分支：`based/split-batch-baseline`（`ad82d77cb`，镜像源码 + 3 个构建文件修复）
 - 开发分支：`work/moe-shared-expert-epilogue`
-- 提交：`ace3d38423123c101ca2cdca8aeaaf21a7a40c5c`
+- 提交：`ace3d38423123c101ca2cdca8aeaaf21a7a40c5c`（已通过 PR #66 合入基线，合并提交 `8039119f`）
 
 改动范围（4 个文件，+238 / −1）：
 
