@@ -56,6 +56,21 @@
 
 产物：`records/l3host-off.json`、`records/l3host-on.json`。
 
+### 在合并后的基线上再复测一次（2026-11-02）
+
+`based/split-batch-baseline` 已经前进到 `8039119f`，除 N1 外还包含 PR #63 的 in_proj 权重加载期合并与卷积权重预打包——两者都改变加载期权重布局，与原采集条件不同，因此重跑一次。
+
+| 项 | 值 |
+|---|---|
+| 基线 | `8039119f`（N1 `ace3d3842` + W3F2 `fcbc4458` + D4 `771b847d`） |
+| 加载方式 | 基线 checkout 直接经 `PYTHONPATH` 加载，无 overlay 打补丁 |
+| 两腿 | `VLLM_HUST_MOE_EPILOGUE` 未设 / `=1`，进程环境已核对 |
+| 结果 | **8/8 逐条完全一致** |
+
+产物：`records/retest-off.json`、`records/retest-on.json`。
+
+至此 L3 在「单点 overlay」和「合并后基线」两种形态下都通过，剩余未验项只有镜像重建后的运行时确认。
+
 ## 4. L4 图内调用与链路归因
 
 新采集（2026-11-01，宿主源码直改形态）。口径：32 请求 × 512 输出、并发 32、TP2 FULL graph，rank0 非通信算子汇总（`op_statistic`），覆盖整个 bench 窗口：

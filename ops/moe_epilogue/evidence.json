@@ -46,6 +46,13 @@
       "result": "8/8 identical",
       "artifacts": "records/l3host-off.json, records/l3host-on.json"
     },
+    "rerun_on_baseline": {
+      "date": "2026-11-02",
+      "baseline": "based/split-batch-baseline @ 8039119f (also carries PR #63: in_proj load-time merge + conv-weight pack)",
+      "implementation": "baseline checkout loaded via PYTHONPATH, no overlay patching",
+      "result": "8/8 identical",
+      "artifacts": "opt-qwen35b records/retest-off.json, records/retest-on.json"
+    },
     "probe_script": "records/l3_fixed_batch.py + baseline/serve-n1-host.sh"
   },
   "l4_attribution": {
@@ -85,6 +92,6 @@
     "host_commit": "ace3d38423123c101ca2cdca8aeaaf21a7a40c5c",
     "host_merge_commit": "8039119f",
     "baseline_state": "merged into based/split-batch-baseline via PR #66",
-    "pending": "L3 rerun on the merged baseline (which now also carries the in_proj merge and conv-weight pack from PR #63); image rebuild still unavailable"
+    "pending": "image rebuild only; L3 has been re-run on the merged baseline and stays 8/8 identical"
   }
 }
