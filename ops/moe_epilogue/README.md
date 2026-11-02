@@ -16,7 +16,7 @@ shared_out = F.sigmoid(gate_out) * shared_out
 
 `gate_out` 形状 `[T, 1]`，`shared_out` 形状 `[T, 2048]`。这个广播乘在 910B2 上单次约 7.99 µs，是普通小算子（≈2.5 µs）的 3.2 倍——开销来自广播类算子的固定启动成本，与搬数据量无关。
 
-本优化把这个广播乘换成单个 triton kernel，**保留宿主 `F.sigmoid` 不动**。自算 sigmoid 与 Ascend 的 `Sigmoid` 走不同 fp32 近似路径，实测差 1–2 ulp，会改变输出 token；因此只融合乘。
+本优化把这个广播乘换成单个 triton kernel，**保留宿主 `F.sigmoid` 不动**。自算 sigmoid 与 Ascend 的 `Sigmoid` 走不同 fp32 近似路径，结果相差 1–2 ulp，会改变输出 token；因此只融合乘。
 
 ## 2. 为什么必须下沉宿主
 

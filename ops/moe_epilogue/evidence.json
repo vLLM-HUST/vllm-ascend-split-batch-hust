@@ -76,10 +76,10 @@
     "input_output": "2048/256",
     "design": "ABBA balanced, 2 blocks x 4 legs = 8 legs (prior run)",
     "speedup": 0.9871,
-    "tpot_delta_pct": 0.88,
+    "per_token_time_delta_pct": 0.88,
     "conclusion": "within noise; no repeated measurement performed on the host-fork form",
     "rationale": "L4 puts the operator at 1.55% -> 1.31% of all-kernel time, a 37.0 ms saving inside 14500 ms (0.26%). Same-config leg spread in this cohort measures 2.04%, so an 8-leg ABBA design cannot resolve a 0.26% effect; the signal is about 8x smaller than the noise.",
-    "prior_run": "tok/s -1.29%, TPOT +0.88% over 8 legs; a second 256/512 @1 cohort gave TPOT -0.58% against a 2.04% same-config spread"
+    "prior_run": "gen-rate -1.29%, per-token time +0.88% over 8 legs; a second 256/512 @1 cohort gave per-token -0.58% against a 2.04% same-config spread"
   },
   "status": "default_off_host_fork_measured",
   "default_enabled": false,
