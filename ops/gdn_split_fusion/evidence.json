@@ -73,11 +73,16 @@
   },
   "l3_numerical_guard": {
     "passed": true,
-    "scope": "operator-level bitwise equivalence on NPU across M in {1,8,32,266,1867}",
-    "metric": "exact_bitwise_equal",
+    "scope": "operator-level bitwise equivalence across M in {1,8,32,266,1867}, plus an 8-prompt greedy end-to-end comparison over a live server",
+    "metric": "exact_bitwise_equal and exact_token_match",
     "max_abs_diff": 0,
-    "end_to_end_pending": true,
-    "detail": "8-prompt greedy comparison over a live server has NOT been run for this operator"
+    "end_to_end": {
+      "date": "2026-11-02",
+      "baseline": "based/split-batch-baseline @ 8039119f",
+      "result": "8/8 identical",
+      "artifacts": "opt-qwen35b records/gdn-unpack-off.json, records/gdn-unpack-on.json"
+    },
+    "detail": "two separately started servers on the same baseline, gate unset versus VLLM_HUST_GDN_UNPACK_FUSED=1; process environment verified before sampling"
   },
   "l4_attribution": {
     "tested": false,
