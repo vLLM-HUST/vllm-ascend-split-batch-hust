@@ -41,6 +41,7 @@
 宿主侧下沉算子索引：
 - **GDN 卷积权重加载期预打包 (GDN conv-weight 转置外提与连续打包)**：专属报告与证据结构见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。宿主分支 `work/d4-conv-pack`（宿主 PR #64，叠层于 PR #63）。
 - **GDN in_proj 输入投影权重加载期合并 (GDN 输入投影两次 MatMul 合一)**：专属报告与证据结构见 [ops/gdn_merge_inproj](../ops/gdn_merge_inproj/REPORT.md)。宿主分支 `work/w3f2-inproj-merge`（宿主 PR #63）。L0/L3/L4/端到端均未测，放行前必须补齐 L3 数值护栏。
+- **MoE 共享专家后置门控乘融合 (`moe_epilogue`)**：把 `AscendSharedExperts.part2` 里的广播乘换成单 kernel，保留宿主 `sigmoid`。算子层单次 3.64 → 1.34 µs，输出逐字一致；全链路 Mul 家族 −37.0 ms；端到端不可判定，不主张服务收益。见 [ops/moe_epilogue](../ops/moe_epilogue/REPORT.md)。
 
 探索与负性能留存算子索引：
 - **GDN QKV 单 pass 解包 (`gdn_qkv_unpack`)**：专属报告与证据结构见 [ops/gdn_qkv_unpack](../ops/gdn_qkv_unpack/REPORT.md)。910B2 实测因 Triton 启动发射开销慢于原生链，按规范留存负性能事实，保持未激活。
@@ -80,6 +81,11 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
   2. **GDN 卷积权重加载期预打包与转置外提（历史代号 D4）** — Commit `771b847dae5e9493fae9ca234b7498a072ffd39c`（cherry-pick 自 `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`）
      - `vllm_ascend/ops/gdn.py`：在加载期物化 conv1d.weight `[4096,1,4]` 为连续 `[4,4096]`（由 `VLLM_HUST_D4_CONV_PACK=1` 开启）；forward 内部统一使用预打包权重，消除每步 `transpose(0, 1)` 开销；单层每步消除动态转置开销，全模型 30 层 GDN 净消除多余转置。
      - 插件仓内履约与证据：详见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。
+  3. **MoE 共享专家后置门控乘融合** — Commit `ace3d38423123c101ca2cdca8aeaaf21a7a40c5c`（分支 `work/moe-shared-expert-epilogue`，基于 `based/split-batch-baseline`）
+     - `vllm_ascend/ops/fused_moe/shared_experts.py`：`part2` 的广播乘改为调用 `torch.ops.vllm.moe_gate_mul`，由 `VLLM_HUST_MOE_EPILOGUE=1` 开启；关闭时逐字走原表达式。
+     - `vllm_ascend/ops/triton/moe_epilogue.py`：单 kernel 与运行期形状判定（≤32 行走融合，prefill 回退）。
+     - `vllm_ascend/ops/register_custom_ops.py`：注册 `moe_gate_mul`（`PrivateUse1`）。
+     - 插件仓内履约与证据：详见 [ops/moe_epilogue](../ops/moe_epilogue/REPORT.md)。
 
 ## 4. 工具边界
 
