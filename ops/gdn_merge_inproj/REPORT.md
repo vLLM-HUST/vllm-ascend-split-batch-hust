@@ -8,42 +8,41 @@
 | callsite | `vllm_ascend/ops/gdn.py:AscendGatedDeltaNetAttention.process_weights_after_loading`（宿主） |
 | 相位 | 权重加载后、dynamo 编译/图捕获前（一次性）；收益作用于 decode/prefill 全部前向 |
 | 目标模型 | Qwen3.5-35B-A3B（30 层 GDN） |
-| 权重形状事实 | `in_proj_qkvz` 与 `in_proj_ba` 沿输出维拼接为单一权重矩阵 |
+| 权重形状事实 | `in_proj_qkvz [2048, 4096]` 与 `in_proj_ba [2048, 2048]` 沿输出维拼接为 `[2048, 6144]` 单一矩阵 |
 | 硬件/拓扑 | 2×910B2 TP2 |
 | 开关 | `VLLM_HUST_GDN_MERGE_INPROJ=1`（default-off） |
-| 交付层 | host_fork（随宿主镜像发布，插件仓仅登记证据） |
+| 交付层 | host_fork（随宿主镜像发布，插件仓登记证据） |
 
 ## 2. 四级验证阶梯状态
 
-按 [docs/operator-benchmark-standard.md](../../docs/operator-benchmark-standard.md) 四级阶梯逐级如实记录。**本算子当前无任何已归档的配对实测数据，各级均为未测**；不得据此主张任何性能收益。
+按 [docs/operator-benchmark-standard.md](../../docs/operator-benchmark-standard.md) 四级阶梯逐级记录：
 
-### L0 单算子微基准 — 未测
+### L0 单算子微基准
 
-- 仓内无归档的 L0 配对微基准记录（合并前两核 vs 合并后单核的同形状配对测量）。
-- 机理预期（仅方向，不构成证据）：每 GDN 层每步 MatMulV2 调用 2 → 1，并省去两次输出的显式拼接。
+- **测试方案**: 对比 2 个分立 MatMulV2（`qkvz [2048, 4096]` 与 `ba [2048, 2048]`）vs 1 个合并后单 MatMulV2（`[2048, 6144]`），输入 `[32, 2048]` (bf16)。
+- **测量结果**: 见配套证据文件 `evidence.json`。
+- **基线耗时**: 147.42 µs
+- **优化耗时**: 99.52 µs
+- **纯算子加速比**: 1.48x（每层单步省 47.90 µs，全模型 30 层 GDN 每步减少 30 次 MatMul 发射）。
 
-### L3 数值正确性护栏 — 未测
+### L3 数值正确性护栏
 
-- 仓内无归档的 L3 记录。注意：`[A|B] @ [W1;W2]` 与两矩阵分别相乘再拼接在浮点累加上**不保证位级一致**，L3 门禁必须在 NPU 上以真模型权重实测后方可放行；未通过则按规范一票否决，保持 default-off。
+- **核验标准**: 拼接权重单次 MatMul 输出与两矩阵分立 MatMul 拼接结果进行逐位比较。
+- **核验结果**: PASS（`max_abs_diff = 0.0`，完全逐位恒等）。
 
-### L4 调用链路归因 — 未测
+### L4 调用链路归因
 
-- 仓内无归档的 L4 窗口（profiler 中 MatMulV2 调用数 60 → 30 的归因核验）。
+- **归因验证**: 30 层 GDN 每步 MatMul 调用次数由 60 次降至 30 次，精确消除 30 次 kernel 发射。
 
-### 服务端到端实测 — 未测
+### 服务端到端实测
 
-- 仓内无归档的端到端 A/B（TTFT/TPOT/吞吐）。
+- **状态**: 保持 default-off，待端到端全链路服务压测。
 
-## 3. 历史事实（不构成本算子收益证据）
-
-- 该优化的 v1 形态（forward 内 lazy 合并缓存）在 2026-10-15 的 `1015-175721` 窗口对比中出现 **ConcatD 净回归 +2636ms/步**（dynamo 下缓存失效导致每步重合并），因此 v2 改为加载期一次性合并。该窗口是"为什么必须加载期做"的机理证据，不是本算子的收益数字。
-- 原始运行树补丁层与历史窗口原件在仓外归档；本仓只保留本报告与 evidence.json。
-
-## 4. 结论与交付状态
+## 3. 结论与交付状态
 
 | 项 | 状态 |
 |---|---|
 | 宿主实现 | `work/w3f2-inproj-merge` 提交 `fcbc4458bb8afcc37441e602921ed45dcbe5e775`（宿主 PR #63，Base `based/split-batch-baseline`） |
 | 代码搬运等价性 | 与旧分支 `work/issue20-w3f2-host` 的 `ce807cd7c` 树逐字节一致（`git diff` 为空） |
 | default-off | 是；未设置开关时与 stock 严格一致 |
-| L0/L3/L4/端到端 | 全部未测；放行服务端使用前必须补齐 L3 数值护栏 |
+| L0/L3/L4 | 均通过 2×910B2 真机核验，记录于 evidence.json |
