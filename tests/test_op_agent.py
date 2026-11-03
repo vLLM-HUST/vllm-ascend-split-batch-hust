@@ -106,10 +106,27 @@ def test_evaluate_kernel_short_circuit():
 
     # Case 2: L3 passes -> measures L0 directly in single call
     good_code = "def optimized_op(a, b): return a * b"
-    res_good = json.loads(tool.forward(good_code))
+    res_good = json.loads(tool.forward(kernel_code=good_code))
     assert res_good["l3_passed"] is True
     assert res_good["l0_median_us"] > 0
     assert "speedup" in res_good
+
+    # Case 3: Pass-by-reference via WriteCandidateFileTool
+    from tools.op_agent.optimizer_loop import WriteCandidateFileTool
+
+    writer = WriteCandidateFileTool()
+    cand_path = "ops/tmp_test_cand.py"
+    try:
+        write_res = json.loads(writer.forward(cand_path, good_code))
+        assert write_res["status"] == "saved"
+        res_file = json.loads(tool.forward(file_path=cand_path))
+        assert res_file["l3_passed"] is True
+        assert res_file["l0_median_us"] > 0
+    finally:
+        import os
+
+        if os.path.exists(cand_path):
+            os.remove(cand_path)
 
 
 def test_kb_in_memory_caching():

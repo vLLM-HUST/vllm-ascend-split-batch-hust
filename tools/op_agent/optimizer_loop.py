@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""High-Efficiency Smolagents-based Operator Loop (Short-Circuit L3+L0).
+"""High-Efficiency Smolagents-based Operator Loop (Cache-Friendly by Reference).
 
 Customized for Qwen3.5-35B (TP=2) operator tuning under repo standards:
+  - Pass-by-reference: `write_candidate_file` + `evaluate_kernel(file_path=...)`.
   - Short-circuit kernel evaluation (check L3; proceed to L0 only on pass).
-  - Context pruning callback: replaces verbose old code with compact summaries.
+  - Preserves 100% prefix KV Cache hit rate by maintaining monotonic prompt history.
   - In-memory Knowledge Base cache for sub-millisecond retrieval.
   - Memory safe: cleans sys.modules and releases NPU cache every iteration.
 """
@@ -12,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from typing import Any
 
 import numpy as np
@@ -34,44 +34,108 @@ BEST_RECORD: dict[str, Any] = {
 }
 
 
+class WriteCandidateFileTool(Tool):
+    """Tool allowing the agent to save code to a workspace file safely."""
+
+    name = "write_candidate_file"
+    description = (
+        "Write candidate Python/Triton operator code to a target file path. "
+        "Allows pass-by-reference so that subsequent evaluation uses `file_path` "
+        "instead of carrying large code strings across conversation steps."
+    )
+    inputs = {
+        "file_path": {
+            "type": "string",
+            "description": "Destination file path, e.g. 'ops/tmp_cand.py'.",
+        },
+        "content": {
+            "type": "string",
+            "description": "The Python source code defining `optimized_op`.",
+        },
+    }
+    output_type = "string"
+
+    def forward(self, file_path: str, content: str) -> str:
+        try:
+            parent = os.path.dirname(file_path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            return json.dumps({"status": "saved", "file_path": file_path})
+        except Exception as e:
+            return json.dumps({"status": "error", "message": str(e)})
+
+
 class EvaluateKernelTool(Tool):
-    """Unified short-circuit tool checking L3 correctness and measuring L0 speedup."""
+    """Unified short-circuit tool checking L3 correctness and measuring L0 speedup.
+
+    Supports pass-by-reference via `file_path` to keep prompt history clean and
+    maximize KV Cache hit rate on the LLM serving backend.
+    """
 
     name = "evaluate_kernel"
     description = (
         "Evaluate candidate operator in one step. Tests L3 numerical consistency; "
         "if L3 passes, benchmarks L0 latency in µs without redundant tool calls. "
-        "Returns concise JSON: `l3_passed`, `l0_median_us`, `speedup`, and `improved`. "
-        "Your code MUST define an entrypoint function named `optimized_op(*args)`."
+        "Returns concise JSON: `l3_passed`, `l0_median_us`, `speedup`, `improved`. "
+        "Prefer passing `file_path` to avoid echoing large code strings into context."
     )
     inputs = {
+        "file_path": {
+            "type": "string",
+            "description": "Path to candidate Python/Triton file (preferred).",
+            "nullable": True,
+        },
         "kernel_code": {
             "type": "string",
-            "description": "Python/Triton source code defining `optimized_op`.",
-        }
+            "description": "Direct code string fallback.",
+            "nullable": True,
+        },
     }
     output_type = "string"
 
-    def forward(self, kernel_code: str) -> str:
+    def forward(
+        self,
+        file_path: str | None = None,
+        kernel_code: str | None = None,
+    ) -> str:
         global BEST_RECORD
-        res = run_candidate_evaluation(kernel_code, CURRENT_TEST_CASE)
+
+        # Resolve code: prefer pass-by-reference via file_path
+        code_to_eval = ""
+        if file_path:
+            if not os.path.exists(file_path):
+                return json.dumps(
+                    {"l3_passed": False, "error": f"File not found: {file_path}"}
+                )
+            try:
+                with open(file_path, encoding="utf-8") as f:
+                    code_to_eval = f.read()
+            except Exception as e:
+                return json.dumps(
+                    {"l3_passed": False, "error": f"Failed to read file: {e}"}
+                )
+        elif kernel_code:
+            code_to_eval = kernel_code
+        else:
+            return json.dumps(
+                {"l3_passed": False, "error": "Provide file_path or kernel_code"}
+            )
+
+        res = run_candidate_evaluation(code_to_eval, CURRENT_TEST_CASE)
 
         if not res["l3_passed"]:
             # Truncate verbose traceback to keep prompt context clean
             raw_err = res.get("error", "L3 Numerical check failed")
             short_err = raw_err.split("\n")[-1] if "\n" in raw_err else raw_err
-            return json.dumps(
-                {
-                    "l3_passed": False,
-                    "error": short_err[:180],
-                }
-            )
+            return json.dumps({"l3_passed": False, "error": short_err[:160]})
 
         latency = res["l0_median_us"]
         improved = latency < BEST_RECORD["l0_median_us"]
         if improved:
             BEST_RECORD["l0_median_us"] = latency
-            BEST_RECORD["kernel_code"] = kernel_code
+            BEST_RECORD["kernel_code"] = code_to_eval
 
         base_lat = CURRENT_TEST_CASE.get("baseline_latency", latency)
         speedup = round(base_lat / max(latency, 1e-6), 2)
@@ -107,7 +171,7 @@ class L3CheckTool(Tool):
         res = run_candidate_evaluation(kernel_code, CURRENT_TEST_CASE)
         if not res["l3_passed"]:
             err = res.get("error", "")
-            return json.dumps({"l3_passed": False, "error": err[:180]})
+            return json.dumps({"l3_passed": False, "error": err[:160]})
         return json.dumps({"l3_passed": True, "message": "L3 passed"})
 
 
@@ -179,7 +243,7 @@ class ReadKnowledgeCardTool(Tool):
     output_type = "string"
 
     def forward(self, file_path: str) -> str:
-        return read_kb_card(file_path, max_chars=1200)
+        return read_kb_card(file_path, max_chars=1000)
 
 
 def setup_qwen35_case(case_name: str = "moe_shared_epilogue_decode") -> dict[str, Any]:
@@ -218,27 +282,6 @@ def setup_qwen35_case(case_name: str = "moe_shared_epilogue_decode") -> dict[str
     }
 
 
-def prune_agent_history(memory_messages: list[dict[str, Any]]) -> None:
-    """In-place prune conversation history to bound token growth.
-
-    Compresses lengthy kernel codes in older steps into concise placeholders.
-    """
-    if len(memory_messages) <= 4:
-        return
-
-    # Keep initial task and the most recent 2 turns; compress intermediate ones
-    for msg in memory_messages[1:-2]:
-        content = msg.get("content", "")
-        if isinstance(content, str) and len(content) > 300:
-            # Replace inline kernel code blocks with a brief summary
-            compressed = re.sub(
-                r'kernel_code="""[\s\S]*?"""',
-                'kernel_code="<omitted_previous_candidate>"',
-                content,
-            )
-            msg["content"] = compressed[:300] + " ... [pruned]"
-
-
 class MockKernelModel(Model):
     """Mock Agent model demonstrating short-circuit auto-optimization."""
 
@@ -267,10 +310,12 @@ class MockKernelModel(Model):
             code = self.candidates[idx].strip()
             escaped_code = json.dumps(code)
 
-            # Use short-circuit evaluate_kernel tool
+            # Demonstrate pass-by-reference: write to a workspace file and evaluate
             action_code = (
-                f"eval_res = evaluate_kernel(kernel_code={escaped_code})\n"
-                f"print('Step {self.step} Short-Circuit Eval:', eval_res)\n"
+                f"cand_path = 'ops/tmp_cand_{idx}.py'\n"
+                f"write_candidate_file(cand_path, {escaped_code})\n"
+                f"eval_res = evaluate_kernel(file_path=cand_path)\n"
+                f"print('Step {self.step} Pass-by-ref Eval:', eval_res)\n"
             )
         else:
             action_code = "final_answer('Knowledge consult and optimization finished.')"
@@ -302,6 +347,7 @@ def get_configured_model() -> Model:
 def create_agent(model=None, tools=None):
     if tools is None:
         tools = [
+            WriteCandidateFileTool(),
             EvaluateKernelTool(),
             L3CheckTool(),
             L0BenchmarkTool(),
@@ -311,16 +357,12 @@ def create_agent(model=None, tools=None):
     if model is None:
         model = get_configured_model()
 
-    def step_pruning_hook(step_log):
-        if hasattr(step_log, "memory_messages"):
-            prune_agent_history(step_log.memory_messages)
-
+    # Preserves 100% prefix KV Cache hit rate by maintaining monotonic prompt history
     return CodeAgent(
         tools=tools,
         model=model,
         max_steps=5,
         add_base_tools=False,
-        step_callbacks=[step_pruning_hook],
     )
 
 
@@ -351,6 +393,7 @@ def optimized_op(gate, out):
     print(f"=== Baseline L0 Latency: {base_latency:.2f} µs ===")
 
     tools = [
+        WriteCandidateFileTool(),
         EvaluateKernelTool(),
         L3CheckTool(),
         L0BenchmarkTool(),
@@ -362,8 +405,9 @@ def optimized_op(gate, out):
     task = (
         f"Optimize {case_name} operator. "
         "Consult knowledge base if needed with `search_knowledge_base`. "
-        "Evaluate candidates with short-circuit `evaluate_kernel(kernel_code=...)` "
-        "which runs L3 correctness check and automatically benchmarks L0 if passed."
+        "Write candidate code to a temporary file via `write_candidate_file` and "
+        "evaluate with `evaluate_kernel(file_path=...)` to keep context minimal "
+        "and maximize KV cache hit rate."
     )
 
     try:
