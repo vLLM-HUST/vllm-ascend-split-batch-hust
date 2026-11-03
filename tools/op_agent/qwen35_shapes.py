@@ -61,4 +61,12 @@ CANONICAL_CASES: dict[str, dict[str, Any]] = {
         "dtype": "bfloat16",
         "desc": "Fused QKV unpack and L2Norm (T=16, C=4096)",
     },
+    # 5. GDN Gated RMSNorm Fusion (Part 3 Output Projection)
+    "gdn_norm_gate": {
+        "callsite": "vllm_ascend/ops/gdn.py:255",
+        "phase": "decode",
+        "input_shape": (512, 128),
+        "dtype": "bfloat16",
+        "desc": "RMSNormGated: out = RMSNorm(x, weight) * silu(z) (Rows=512, Dim=128)",
+    },
 }

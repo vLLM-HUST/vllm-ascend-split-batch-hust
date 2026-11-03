@@ -316,6 +316,53 @@ def setup_qwen35_case(case_name: str = "moe_shared_epilogue_decode") -> dict[str
             "required_cards": 2,
         }
 
+    # 2. GDN Gated RMSNorm (Part 3 output norm: [Rows=512, Dim=128])
+    if case_name == "gdn_norm_gate":
+        Rows, Dim = case_meta.get("input_shape", (512, 128))
+
+        def input_gen():
+            if hw.is_tp2_ready:
+                import torch
+                import torch_npu  # noqa: F401
+
+                torch.manual_seed(42)
+                x = torch.randn(Rows, Dim, dtype=torch.bfloat16).npu(0)
+                z = torch.randn(Rows, Dim, dtype=torch.bfloat16).npu(0)
+                weight = torch.randn(Dim, dtype=torch.bfloat16).npu(0)
+                return x, z, weight
+            else:
+                np.random.seed(42)
+                x = np.random.randn(Rows, Dim).astype(np.float32)
+                z = np.random.randn(Rows, Dim).astype(np.float32)
+                weight = np.random.randn(Dim).astype(np.float32)
+                return x, z, weight
+
+        def baseline_op(x, z, weight):
+            if hasattr(x, "pow"):
+                import torch
+                import torch.nn.functional as F
+
+                variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
+                rsqrt = torch.rsqrt(variance + 1e-6)
+                x_normed = (x.to(torch.float32) * rsqrt) * weight.to(torch.float32)
+                out = x_normed * F.silu(z.to(torch.float32))
+                return out.to(x.dtype)
+            else:
+                variance = np.mean(np.square(x), axis=-1, keepdims=True)
+                x_normed = (x / np.sqrt(variance + 1e-6)) * weight
+                silu_z = z / (1.0 + np.exp(-z))
+                return x_normed * silu_z
+
+        return {
+            "name": case_name,
+            "callsite": case_meta["callsite"],
+            "shape_facts": {"Rows": Rows, "Dim": Dim, "phase": case_meta["phase"]},
+            "input_gen_fn": input_gen,
+            "baseline_fn": baseline_op,
+            "iters": 50,
+            "required_cards": 2,
+        }
+
     # Default / MoE Shared Epilogue cases
     M, H = case_meta.get("gate_shape", (32, 1))[0], 2048
 
@@ -460,6 +507,25 @@ def optimized_op(x, weight):
         var = np.mean(np.square(x), axis=-1, keepdims=True)
         return (x / np.sqrt(var + 1e-6)) * weight
 """
+    elif case_name == "gdn_norm_gate":
+        baseline_code = """
+import torch
+import torch.nn.functional as F
+
+def optimized_op(x, z, weight):
+    if hasattr(x, "pow"):
+        variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        rsqrt = torch.rsqrt(variance + 1e-6)
+        x_normed = (x.to(torch.float32) * rsqrt) * weight.to(torch.float32)
+        out = x_normed * F.silu(z.to(torch.float32))
+        return out.to(x.dtype)
+    else:
+        import numpy as np
+        var = np.mean(np.square(x), axis=-1, keepdims=True)
+        x_normed = (x / np.sqrt(var + 1e-6)) * weight
+        silu_z = z / (1.0 + np.exp(-z))
+        return x_normed * silu_z
+"""
     else:
         baseline_code = """
 def optimized_op(gate, out):
@@ -483,19 +549,47 @@ def optimized_op(gate, out):
     ]
     agent = create_agent(model=model, tools=tools)
 
-    task = (
-        f"Optimize {case_name} operator.\n"
-        "Input signature: `optimized_op(x, weight)` with x=[32, 2048] bf16, "
-        "weight=[2048] bf16.\n"
-        "Canonical RMSNorm formula:\n"
-        "  variance = x.pow(2).mean(-1, keepdim=True)\n"
-        "  return (x * torch.rsqrt(variance + 1e-6)) * weight\n\n"
-        "Steps to optimize:\n"
-        "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
-        "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
-        "3. If L3 passes and L0 speedup is achieved, conclude with `final_answer`.\n"
-        "4. Otherwise inspect error and iterate."
-    )
+    if case_name == "gdn_norm_gate":
+        task = (
+            f"Optimize {case_name} operator.\n"
+            "Input signature: `optimized_op(x, z, weight)` with x=[512, 128] bf16, "
+            "z=[512, 128] bf16, weight=[128] bf16.\n"
+            "Canonical Gated RMSNorm formula:\n"
+            "  variance = x.pow(2).mean(-1, keepdim=True)\n"
+            "  x_normed = (x * torch.rsqrt(variance + 1e-6)) * weight\n"
+            "  out = x_normed * F.silu(z)\n\n"
+            "Steps to optimize:\n"
+            "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
+            "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
+            "3. If L3 passes and L0 speedup is achieved, call `final_answer`.\n"
+            "4. Otherwise inspect error and iterate."
+        )
+    elif case_name == "gdn_input_norm_decode":
+        task = (
+            f"Optimize {case_name} operator.\n"
+            "Input signature: `optimized_op(x, weight)` with x=[32, 2048] bf16, "
+            "weight=[2048] bf16.\n"
+            "Canonical RMSNorm formula:\n"
+            "  variance = x.pow(2).mean(-1, keepdim=True)\n"
+            "  return (x * torch.rsqrt(variance + 1e-6)) * weight\n\n"
+            "Steps to optimize:\n"
+            "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
+            "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
+            "3. If L3 passes and L0 speedup is achieved, call `final_answer`.\n"
+            "4. Otherwise inspect error and iterate."
+        )
+    else:
+        task = (
+            f"Optimize {case_name} operator.\n"
+            "Input signature: `optimized_op(gate, out)` with gate=[32, 1] bf16, "
+            "out=[32, 2048] bf16.\n"
+            "Formula: gate * out\n\n"
+            "Steps to optimize:\n"
+            "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
+            "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
+            "3. If L3 passes and L0 speedup is achieved, call `final_answer`.\n"
+            "4. Otherwise inspect error and iterate."
+        )
 
     try:
         agent.run(task)
