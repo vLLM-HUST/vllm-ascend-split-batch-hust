@@ -273,9 +273,51 @@ class ReadKnowledgeCardTool(Tool):
 def setup_qwen35_case(case_name: str = "moe_shared_epilogue_decode") -> dict[str, Any]:
     """Setup real Qwen3.5-35B TP=2 operator shape facts."""
     case_meta = CANONICAL_CASES[case_name]
-    M, H = case_meta.get("gate_shape", (32, 1))[0], 2048
-
     hw = check_npu_environment(required_cards=2)
+
+    # 1. GDN in_proj norm (RMSNorm over [T=32, H=2048])
+    if case_name == "gdn_input_norm_decode":
+        T, H = case_meta.get("input_shape", (32, 2048))
+
+        def input_gen():
+            if hw.is_tp2_ready:
+                import torch
+                import torch_npu  # noqa: F401
+
+                torch.manual_seed(42)
+                x = torch.randn(T, H, dtype=torch.bfloat16).npu(0)
+                weight = torch.randn(H, dtype=torch.bfloat16).npu(0)
+                return x, weight
+            else:
+                np.random.seed(42)
+                x = np.random.randn(T, H).astype(np.float32)
+                weight = np.random.randn(H).astype(np.float32)
+                return x, weight
+
+        def baseline_op(x, weight):
+            # Canonical RMSNorm baseline: x * rsqrt(mean(x^2) + eps) * weight
+            if hasattr(x, "pow"):
+                import torch
+
+                variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
+                rsqrt = torch.rsqrt(variance + 1e-6)
+                return (x.to(torch.float32) * rsqrt).to(x.dtype) * weight
+            else:
+                variance = np.mean(np.square(x), axis=-1, keepdims=True)
+                return (x / np.sqrt(variance + 1e-6)) * weight
+
+        return {
+            "name": case_name,
+            "callsite": case_meta["callsite"],
+            "shape_facts": {"T": T, "Hidden": H, "phase": case_meta["phase"]},
+            "input_gen_fn": input_gen,
+            "baseline_fn": baseline_op,
+            "iters": 50,
+            "required_cards": 2,
+        }
+
+    # Default / MoE Shared Epilogue cases
+    M, H = case_meta.get("gate_shape", (32, 1))[0], 2048
 
     def input_gen():
         if hw.is_tp2_ready:
@@ -385,7 +427,7 @@ def create_agent(model=None, tools=None):
     return CodeAgent(
         tools=tools,
         model=model,
-        max_steps=5,
+        max_steps=10,
         add_base_tools=False,
     )
 
@@ -404,7 +446,22 @@ def run_qwen35_optimization(case_name: str = "moe_shared_epilogue_decode", model
     print("==========================================\n")
 
     # Baseline L0 measurement
-    baseline_code = """
+    if case_name == "gdn_input_norm_decode":
+        baseline_code = """
+import torch
+
+def optimized_op(x, weight):
+    if hasattr(x, "pow"):
+        variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        rsqrt = torch.rsqrt(variance + 1e-6)
+        return (x.to(torch.float32) * rsqrt).to(x.dtype) * weight
+    else:
+        import numpy as np
+        var = np.mean(np.square(x), axis=-1, keepdims=True)
+        return (x / np.sqrt(var + 1e-6)) * weight
+"""
+    else:
+        baseline_code = """
 def optimized_op(gate, out):
     return gate * out
 """
@@ -427,11 +484,17 @@ def optimized_op(gate, out):
     agent = create_agent(model=model, tools=tools)
 
     task = (
-        f"Optimize {case_name} operator. "
-        "Consult knowledge base if needed with `search_knowledge_base`. "
-        "Write candidate code to a temporary file via `write_candidate_file` and "
-        "evaluate with `evaluate_kernel(file_path=...)` to keep context minimal "
-        "and maximize KV cache hit rate."
+        f"Optimize {case_name} operator.\n"
+        "Input signature: `optimized_op(x, weight)` with x=[32, 2048] bf16, "
+        "weight=[2048] bf16.\n"
+        "Canonical RMSNorm formula:\n"
+        "  variance = x.pow(2).mean(-1, keepdim=True)\n"
+        "  return (x * torch.rsqrt(variance + 1e-6)) * weight\n\n"
+        "Steps to optimize:\n"
+        "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
+        "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
+        "3. If L3 passes and L0 speedup is achieved, conclude with `final_answer`.\n"
+        "4. Otherwise inspect error and iterate."
     )
 
     try:
