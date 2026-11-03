@@ -1,0 +1,97 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "moe_shared_expert_epilogue",
+  "callsite": "vllm_ascend.ops.fused_moe.shared_experts:AscendSharedExperts.part2",
+  "environment": {
+    "device": "Ascend910B2",
+    "cann_version": "9.1.0",
+    "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+    "vllm_ascend_version": "0.25.1rc2.dev125+hust",
+    "model": "Qwen3.5-35B-A3B",
+    "dtype": "bf16"
+  },
+  "shape_facts": {
+    "phase": "decode",
+    "batch_size": 8,
+    "prompt_tokens": 2048,
+    "decode_tokens": 256,
+    "gate_shape": "T x 1",
+    "shared_out_shape": "T x 2048",
+    "moe_layers": 40,
+    "cudagraph_mode": "FULL",
+    "capture_sizes": "1,2,4,8,16,32"
+  },
+  "l0_microbenchmark": {
+    "status": "completed",
+    "conclusion": "fused mul-only kernel beats the single aten broadcast multiply for M in 1..32 and stays bitwise identical; gain shrinks as M grows because the kernel scales with rows while the native launch overhead is amortised",
+    "speedup": 2.72,
+    "native_median_us": 3.64,
+    "optimized_median_us": 1.34,
+    "measurement": "NPU graph, 50 repetitions packed per replay, D=2048, bf16, single 910B2",
+    "raw_measurements": {
+      "M1": {"native_us": 1.17, "candidate_us": 1.0, "saved_pct": 14.2, "bitwise_equal": true},
+      "M8": {"native_us": 3.64, "candidate_us": 1.34, "saved_pct": 63.1, "bitwise_equal": true},
+      "M16": {"native_us": 3.68, "candidate_us": 1.71, "saved_pct": 53.4, "bitwise_equal": true},
+      "M32": {"native_us": 3.73, "candidate_us": 2.43, "saved_pct": 34.7, "bitwise_equal": true}
+    },
+    "note": "native baseline is the single aten broadcast multiply gate * out; the host sigmoid is excluded because it stays on the stock path"
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "metric": "exact_token_match",
+    "detail": "8 fixed greedy prompts (max_tokens=64), 8/8 identical outputs between VLLM_HUST_MOE_EPILOGUE unset and =1",
+    "rerun": {
+      "date": "2026-11-01",
+      "implementation": "host-fork source change (ace3d3842) overlaid on the container tree via PYTHONPATH",
+      "result": "8/8 identical",
+      "artifacts": "records/l3host-off.json, records/l3host-on.json"
+    },
+    "rerun_on_baseline": {
+      "date": "2026-11-02",
+      "baseline": "based/split-batch-baseline @ 8039119f (also carries PR #63: in_proj load-time merge + conv-weight pack)",
+      "implementation": "baseline checkout loaded via PYTHONPATH, no overlay patching",
+      "result": "8/8 identical",
+      "artifacts": "opt-qwen35b records/retest-off.json, records/retest-on.json"
+    },
+    "probe_script": "records/l3_fixed_batch.py + baseline/serve-n1-host.sh"
+  },
+  "l4_attribution": {
+    "caliber": "collected on the retired runtime-source-patch form; not re-measured after the host-fork rewrite",
+    "call_count_expected": 2560,
+    "call_count_actual": 2470,
+    "note": "40 layers x 64 decode steps; residual gap comes from the last layer and partially filled decode buckets. Residual 617 Mul calls belong to attn_output_gate in the 10 full-attention layers.",
+    "all_kernel_ms_before": 515.2,
+    "all_kernel_ms_after": 502.1,
+    "family_ms_before": 22.36,
+    "family_ms_after": 2.67,
+    "family_delta_ms": -13.1,
+    "decode_delta_pct": -2.54,
+    "computing_delta_pct": -1.18,
+    "computing_denominator_ms": 1108.9
+  },
+  "serving_end_to_end": {
+    "tested": true,
+    "repeat_measurement": false,
+    "concurrency": 32,
+    "input_output": "2048/256",
+    "design": "ABBA balanced, 2 blocks x 4 legs = 8 legs (prior run)",
+    "speedup": 0.9871,
+    "per_token_time_delta_pct": 0.88,
+    "conclusion": "within noise; no repeated measurement performed on the host-fork form",
+    "rationale": "L4 puts the operator at 1.55% -> 1.31% of all-kernel time, a 37.0 ms saving inside 14500 ms (0.26%). Same-config leg spread in this cohort measures 2.04%, so an 8-leg ABBA design cannot resolve a 0.26% effect; the signal is about 8x smaller than the noise.",
+    "prior_run": "gen-rate -1.29%, per-token time +0.88% over 8 legs; a second 256/512 @1 cohort gave per-token -0.58% against a 2.04% same-config spread"
+  },
+  "status": "default_off_host_fork_measured",
+  "default_enabled": false,
+  "evidence_fingerprint": {
+    "benchmark_script": "ops/moe_epilogue/bench_l0.py",
+    "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
+    "host_fork_base_branch": "based/split-batch-baseline",
+    "host_fork_base_commit": "ad82d77cb",
+    "host_fork_dev_branch": "work/moe-shared-expert-epilogue",
+    "host_commit": "ace3d38423123c101ca2cdca8aeaaf21a7a40c5c",
+    "host_merge_commit": "8039119f",
+    "baseline_state": "merged into based/split-batch-baseline via PR #66",
+    "pending": "image rebuild only; L3 has been re-run on the merged baseline and stays 8/8 identical"
+  }
+}

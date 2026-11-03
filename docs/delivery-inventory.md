@@ -41,6 +41,7 @@
 宿主侧下沉算子索引：
 - **GDN 卷积权重加载期预打包 (GDN conv-weight 转置外提与连续打包)**：专属报告与证据结构见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。宿主分支 `work/d4-conv-pack`（宿主 PR #64，叠层于 PR #63）。
 - **GDN in_proj 输入投影权重加载期合并 (GDN 输入投影两次 MatMul 合一)**：专属报告与证据结构见 [ops/gdn_merge_inproj](../ops/gdn_merge_inproj/REPORT.md)。宿主分支 `work/w3f2-inproj-merge`（宿主 PR #63）。L0/L3/L4/端到端均未测，放行前必须补齐 L3 数值护栏。
+- **MoE 共享专家后置门控乘融合 (`moe_epilogue`)**：把 `AscendSharedExperts.part2` 里的广播乘换成单 kernel，保留宿主 `sigmoid`。算子层单次 3.64 → 1.34 µs，输出逐字一致；全链路 Mul 家族 −37.0 ms；端到端不可判定，不主张服务收益。见 [ops/moe_epilogue](../ops/moe_epilogue/REPORT.md)。
 - **GDN 投影解包 / 混合 qkv 重排融合 (`gdn_split_fusion`)**：把投影分支的 split + reshape + chunk + 2×contiguous，以及 `rearrange_mixed_qkv` 的 split + 3×reshape + cat，各合成单 kernel；单仓库、单开关，prefill 全形状正收益。微基准 M=8 省 7.03 µs/层·step，图内归因实测 Slice+ConcatD 从 633.5 降到 283.3 ms（2.41%），端到端 8/8 一致；8 腿 ABBA 待补。见 [ops/gdn_split_fusion](../ops/gdn_split_fusion/REPORT.md)。
 
 探索与负性能留存算子索引：
@@ -81,7 +82,12 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
   2. **GDN 卷积权重加载期预打包与转置外提（历史代号 D4）** — Commit `771b847dae5e9493fae9ca234b7498a072ffd39c`（cherry-pick 自 `deb5ffefe32b53c61ae6193ff4ee4368cf1889ba`）
      - `vllm_ascend/ops/gdn.py`：在加载期物化 conv1d.weight `[4096,1,4]` 为连续 `[4,4096]`（由 `VLLM_HUST_D4_CONV_PACK=1` 开启）；forward 内部统一使用预打包权重，消除每步 `transpose(0, 1)` 开销；单层每步消除动态转置开销，全模型 30 层 GDN 净消除多余转置。
      - 插件仓内履约与证据：详见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。
-  3. **GDN 投影解包 / 混合 qkv 重排融合** — 单宿主仓库
+  3. **MoE 共享专家后置门控乘融合** — Commit `ace3d38423123c101ca2cdca8aeaaf21a7a40c5c`（分支 `work/moe-shared-expert-epilogue`，已通过 PR #66 合入 `based/split-batch-baseline`，合并提交 `8039119f`）
+     - `vllm_ascend/ops/fused_moe/shared_experts.py`：`part2` 的广播乘改为调用 `torch.ops.vllm.moe_gate_mul`，由 `VLLM_HUST_MOE_EPILOGUE=1` 开启；关闭时逐字走原表达式。
+     - `vllm_ascend/ops/triton/moe_epilogue.py`：单 kernel 与运行期形状判定（≤32 行走融合，prefill 回退）。
+     - `vllm_ascend/ops/register_custom_ops.py`：注册 `moe_gate_mul`（`PrivateUse1`）。
+     - 插件仓内履约与证据：详见 [ops/moe_epilogue](../ops/moe_epilogue/REPORT.md)。
+  4. **GDN 投影解包 / 混合 qkv 重排融合** — 单宿主仓库
      - `vllm-ascend-hust` 分支 `work/gdn-unpack-fused`（Commit `53701fb47`，基于 `based/split-batch-baseline`）：新增 `vllm_ascend/ops/gdn_epilogue.py`（两个 kernel + `torch.ops.vllm_ascend.gdn_unpack` / `gdn_rearrange`）；`gdn.py` 的投影分支（普通与 in_proj 合并两条）改用 `gdn_unpack`，并新增 `_rearrange_mixed_qkv` 覆盖、把 `_forward_core` 三处调用指过去。开关 `VLLM_HUST_GDN_UNPACK_FUSED=1`。
      - 早期跨仓库版本（`vllm-ascend-hust` 的 `work/gdn-split-fusion` `16e66804c` 与 `vllm-hust` 的 `work/gdn-rearrange-fusion` `8c9f165259`）保留作历史，未合入基线。
      - 插件仓内履约与证据：详见 [ops/gdn_split_fusion](../ops/gdn_split_fusion/REPORT.md)。

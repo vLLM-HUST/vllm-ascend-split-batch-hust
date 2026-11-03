@@ -8,7 +8,7 @@
         "baseline_branch": "based/split-batch-baseline",
         "baseline_commit": "ad82d77cb (image 74f0c0a27)",
         "pr_target_branch": "based/split-batch-baseline",
-        "note": "严格定死以 based/split-batch-baseline 为基线（镜像源码 + 3 个构建文件修复），严禁以 main 或旧 based/image-baseline 切分支或提 PR"
+        "note": "严格定死以 based/split-batch-baseline 为基线（镜像源码 + 3 个构建文件修复），严禁以 main 或已归档的 based/image-baseline（现名 archive/based-image-baseline-20261023）切分支或提 PR"
       },
       "vllm_hust": {
         "repo": "git@github.com:vLLM-HUST/vllm-hust.git",
@@ -123,6 +123,20 @@
       "gate_env": "VLLM_HUST_GDN_UNPACK_FUSED=1",
       "l3_numerical_guard": "passed",
       "serving_status": "pending"
+    },
+    {
+      "id": "moe_epilogue",
+      "display_name": "MoE Shared-Expert Epilogue Multiply Fusion",
+      "layer": "host_fork",
+      "directory": "ops/moe_epilogue",
+      "readme": "ops/moe_epilogue/README.md",
+      "report": "ops/moe_epilogue/REPORT.md",
+      "evidence": "ops/moe_epilogue/evidence.json",
+      "status": "default_off_host_fork_measured",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_MOE_EPILOGUE=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "within_noise"
     },
     {
       "id": "gdn_merge_inproj",
