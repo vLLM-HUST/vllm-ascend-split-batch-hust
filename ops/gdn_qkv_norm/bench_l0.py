@@ -3,8 +3,10 @@
 
 from vllm_ascend_split_batch import gdn_qkv_norm
 
+
 def optimized_op(x):
     return gdn_qkv_norm.unpack_norm(x)
+
 
 if __name__ == "__main__":
     print("Benchmarking gdn_qkv_norm...")
