@@ -56,11 +56,27 @@ class WriteCandidateFileTool(Tool):
     output_type = "string"
 
     def forward(self, file_path: str, content: str) -> str:
+        # Strictly forbid writing outside the workspace to keep environment safe
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        target_path = (
+            file_path
+            if os.path.isabs(file_path)
+            else os.path.join(repo_root, file_path)
+        )
+        norm_target = os.path.abspath(target_path)
+        if not norm_target.startswith(repo_root):
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": "Security: candidate path must stay inside workspace.",
+                }
+            )
+
         try:
-            parent = os.path.dirname(file_path)
+            parent = os.path.dirname(norm_target)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-            with open(file_path, "w", encoding="utf-8") as f:
+            with open(norm_target, "w", encoding="utf-8") as f:
                 f.write(content)
             return json.dumps({"status": "saved", "file_path": file_path})
         except Exception as e:
@@ -105,12 +121,20 @@ class EvaluateKernelTool(Tool):
         # Resolve code: prefer pass-by-reference via file_path
         code_to_eval = ""
         if file_path:
-            if not os.path.exists(file_path):
+            repo_root = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "..")
+            )
+            norm_target = os.path.abspath(
+                file_path
+                if os.path.isabs(file_path)
+                else os.path.join(repo_root, file_path)
+            )
+            if not os.path.exists(norm_target):
                 return json.dumps(
                     {"l3_passed": False, "error": f"File not found: {file_path}"}
                 )
             try:
-                with open(file_path, encoding="utf-8") as f:
+                with open(norm_target, encoding="utf-8") as f:
                     code_to_eval = f.read()
             except Exception as e:
                 return json.dumps(
