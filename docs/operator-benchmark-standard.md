@@ -189,5 +189,7 @@
 3. **证据指纹同步**：修改 `ops/<operator>/` 下被 `checksum.sha256` 覆盖的文件后，必须重新生成并校验指纹：
 
    ```bash
-   python3 -c "from tools.op_agent.custody import verify_dir_checksum, write_dir_checksum; print(verify_dir_checksum(write_dir_checksum('ops/<operator>')))"
+   python3 -c "from tools.op_agent.custody import verify_dir_checksum, write_dir_checksum; path='ops/<operator>'; write_dir_checksum(path); ok, message=verify_dir_checksum(path); print(message); assert ok"
    ```
+
+4. **隔离环境与 CI 命令一致**：CPU 门禁须在不继承系统包的虚拟环境中运行，只安装 CI 声明的依赖，并使用 `env -u PYTHONPATH <venv>/bin/pytest -q -m "not host_tree"` 验证。不得仅用 `python -m pytest` 的通过结果代替 CI 的 `pytest` 结果。测试加载仓内未安装的工具时，使用 `importlib.util.spec_from_file_location` 按文件路径加载，不依赖工作目录或外部 `PYTHONPATH`，也不为修复导入错误跳过守护测试。

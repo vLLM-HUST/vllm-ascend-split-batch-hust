@@ -6,12 +6,16 @@
 不在本测试范围;新增文件严禁落入该类路径。
 """
 
+import importlib.util
 import re
 from pathlib import Path
 
-from tools.op_agent.custody import verify_dir_checksum
-
 ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "delivery_custody", ROOT / "tools/op_agent/custody.py"
+)
+custody = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(custody)
 # 与 .github/workflows/organization-benchmark-custody.yml 的固定审查版本一致。
 POLICY_REF = "0cfe5109551e9b1c30ff3a75a2d93ee6ba8c9aa4"
 
@@ -70,5 +74,5 @@ def test_delivery_surface_prose_has_no_measured_metric_pairs():
 
 def test_delivery_checksum_covers_untampered_evidence():
     for checksum in sorted((ROOT / "ops").glob("*/checksum.sha256")):
-        ok, message = verify_dir_checksum(str(checksum.parent))
+        ok, message = custody.verify_dir_checksum(str(checksum.parent))
         assert ok, message
