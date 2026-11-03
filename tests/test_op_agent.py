@@ -80,3 +80,62 @@ def test_llm_model_configuration(monkeypatch):
     monkeypatch.setenv("OP_AGENT_API_KEY", "dummy-key")
     m_custom = get_configured_model()
     assert m_custom.model_id == "test-model"
+
+
+def test_evaluate_kernel_short_circuit():
+    import json
+
+    import tools.op_agent.optimizer_loop as loop
+    from tools.op_agent.optimizer_loop import EvaluateKernelTool
+
+    loop.CURRENT_TEST_CASE = {
+        "baseline_fn": lambda a, b: a * b,
+        "input_gen_fn": lambda: (2.0, 3.0),
+        "iters": 5,
+        "required_cards": 1,
+        "baseline_latency": 100.0,
+    }
+    tool = EvaluateKernelTool()
+
+    # Case 1: L3 fails -> short-circuit without L0
+    bad_code = "def optimized_op(a, b): return a + b"
+    res_bad = json.loads(tool.forward(bad_code))
+    assert res_bad["l3_passed"] is False
+    assert "error" in res_bad
+    assert "l0_median_us" not in res_bad
+
+    # Case 2: L3 passes -> measures L0 directly in single call
+    good_code = "def optimized_op(a, b): return a * b"
+    res_good = json.loads(tool.forward(good_code))
+    assert res_good["l3_passed"] is True
+    assert res_good["l0_median_us"] > 0
+    assert "speedup" in res_good
+
+
+def test_kb_in_memory_caching():
+    import tempfile
+    import time
+
+    from tools.op_agent.kb import query_ascend_kb, read_kb_card
+
+    # Query caching
+    res1 = query_ascend_kb("triton", limit=2)
+    t0 = time.perf_counter()
+    res2 = query_ascend_kb("triton", limit=2)
+    t_elapsed_ms = (time.perf_counter() - t0) * 1000
+    assert res1 == res2
+    assert t_elapsed_ms < 50.0  # sub-50ms cache response
+
+    # Card condensed reading
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+        f.write("---\nauthor: me\ndate: 2026\n---\n\n## Summary\nUse tiling.")
+        tmp_name = f.name
+    try:
+        content = read_kb_card(tmp_name)
+        assert "author:" not in content
+        assert "Use tiling." in content
+    finally:
+        import os
+
+        if os.path.exists(tmp_name):
+            os.remove(tmp_name)
