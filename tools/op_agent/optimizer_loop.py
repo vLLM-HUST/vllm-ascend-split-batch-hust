@@ -19,6 +19,7 @@ import numpy as np
 from smolagents import CodeAgent, Model, Tool
 from smolagents.models import ChatMessage
 
+from tools.op_agent.cases import CASE_REGISTRY, get_case
 from tools.op_agent.custody import verify_dir_checksum
 from tools.op_agent.evaluator import run_candidate_evaluation
 from tools.op_agent.exporter import export_operator_delivery
@@ -272,135 +273,12 @@ class ReadKnowledgeCardTool(Tool):
 
 def setup_qwen35_case(case_name: str = "moe_shared_epilogue_decode") -> dict[str, Any]:
     """Setup real Qwen3.5-35B TP=2 operator shape facts."""
-    case_meta = CANONICAL_CASES[case_name]
     hw = check_npu_environment(required_cards=2)
+    if case_name in CASE_REGISTRY:
+        op_case = get_case(case_name)
+        return op_case.build_test_case(hw.is_tp2_ready)
 
-    # 1. GDN in_proj norm (RMSNorm over [T=32, H=2048])
-    if case_name == "gdn_input_norm_decode":
-        T, H = case_meta.get("input_shape", (32, 2048))
-
-        def input_gen():
-            if hw.is_tp2_ready:
-                import torch
-                import torch_npu  # noqa: F401
-
-                torch.manual_seed(42)
-                x = torch.randn(T, H, dtype=torch.bfloat16).npu(0)
-                weight = torch.randn(H, dtype=torch.bfloat16).npu(0)
-                return x, weight
-            else:
-                np.random.seed(42)
-                x = np.random.randn(T, H).astype(np.float32)
-                weight = np.random.randn(H).astype(np.float32)
-                return x, weight
-
-        def baseline_op(x, weight):
-            # Canonical RMSNorm baseline: x * rsqrt(mean(x^2) + eps) * weight
-            if hasattr(x, "pow"):
-                import torch
-
-                variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
-                rsqrt = torch.rsqrt(variance + 1e-6)
-                return (x.to(torch.float32) * rsqrt).to(x.dtype) * weight
-            else:
-                variance = np.mean(np.square(x), axis=-1, keepdims=True)
-                return (x / np.sqrt(variance + 1e-6)) * weight
-
-        return {
-            "name": case_name,
-            "callsite": case_meta["callsite"],
-            "shape_facts": {"T": T, "Hidden": H, "phase": case_meta["phase"]},
-            "input_gen_fn": input_gen,
-            "baseline_fn": baseline_op,
-            "iters": 50,
-            "required_cards": 2,
-        }
-
-    # 2. GDN Gated RMSNorm (Part 3 output norm: [Rows=512, Dim=128])
-    if case_name == "gdn_norm_gate":
-        Rows, Dim = case_meta.get("input_shape", (512, 128))
-
-        def input_gen():
-            if hw.is_tp2_ready:
-                import torch
-                import torch_npu  # noqa: F401
-
-                torch.manual_seed(42)
-                x = torch.randn(Rows, Dim, dtype=torch.bfloat16).npu(0)
-                z = torch.randn(Rows, Dim, dtype=torch.bfloat16).npu(0)
-                weight = torch.randn(Dim, dtype=torch.bfloat16).npu(0)
-                return x, z, weight
-            else:
-                np.random.seed(42)
-                x = np.random.randn(Rows, Dim).astype(np.float32)
-                z = np.random.randn(Rows, Dim).astype(np.float32)
-                weight = np.random.randn(Dim).astype(np.float32)
-                return x, z, weight
-
-        def baseline_op(x, z, weight):
-            if hasattr(x, "pow"):
-                import torch
-                import torch.nn.functional as F
-
-                variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
-                rsqrt = torch.rsqrt(variance + 1e-6)
-                x_normed = (x.to(torch.float32) * rsqrt) * weight.to(torch.float32)
-                out = x_normed * F.silu(z.to(torch.float32))
-                return out.to(x.dtype)
-            else:
-                variance = np.mean(np.square(x), axis=-1, keepdims=True)
-                x_normed = (x / np.sqrt(variance + 1e-6)) * weight
-                silu_z = z / (1.0 + np.exp(-z))
-                return x_normed * silu_z
-
-        return {
-            "name": case_name,
-            "callsite": case_meta["callsite"],
-            "shape_facts": {"Rows": Rows, "Dim": Dim, "phase": case_meta["phase"]},
-            "input_gen_fn": input_gen,
-            "baseline_fn": baseline_op,
-            "iters": 50,
-            "required_cards": 2,
-        }
-
-    # 3. GDN split_ba ([T=32, Dim=32] -> b=[32, 16], a=[32, 16])
-    if case_name == "gdn_split_ba":
-        T, TotalDim = case_meta.get("input_shape", (32, 32))
-        HalfDim = TotalDim // 2
-
-        def input_gen():
-            if hw.is_tp2_ready:
-                import torch
-                import torch_npu  # noqa: F401
-
-                torch.manual_seed(42)
-                ba = torch.randn(T, TotalDim, dtype=torch.bfloat16).npu(0)
-                return (ba,)
-            else:
-                np.random.seed(42)
-                ba = np.random.randn(T, TotalDim).astype(np.float32)
-                return (ba,)
-
-        def baseline_op(ba):
-            if hasattr(ba, "chunk"):
-                b, a = ba.chunk(2, dim=-1)
-                return b.contiguous(), a.contiguous()
-            else:
-                b = ba[:, :HalfDim]
-                a = ba[:, HalfDim:]
-                return b, a
-
-        return {
-            "name": case_name,
-            "callsite": case_meta["callsite"],
-            "shape_facts": {"T": T, "TotalDim": TotalDim, "phase": case_meta["phase"]},
-            "input_gen_fn": input_gen,
-            "baseline_fn": baseline_op,
-            "iters": 50,
-            "required_cards": 2,
-        }
-
-    # Default / MoE Shared Epilogue cases
+    case_meta = CANONICAL_CASES[case_name]
     M, H = case_meta.get("gate_shape", (32, 1))[0], 2048
 
     def input_gen():
@@ -530,56 +408,27 @@ def run_qwen35_optimization(case_name: str = "moe_shared_epilogue_decode", model
     print("==========================================\n")
 
     # Baseline L0 measurement
-    if case_name == "gdn_input_norm_decode":
-        baseline_code = """
-import torch
-
-def optimized_op(x, weight):
-    if hasattr(x, "pow"):
-        variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        rsqrt = torch.rsqrt(variance + 1e-6)
-        return (x.to(torch.float32) * rsqrt).to(x.dtype) * weight
-    else:
-        import numpy as np
-        var = np.mean(np.square(x), axis=-1, keepdims=True)
-        return (x / np.sqrt(var + 1e-6)) * weight
-"""
-    elif case_name == "gdn_norm_gate":
-        baseline_code = """
-import torch
-import torch.nn.functional as F
-
-def optimized_op(x, z, weight):
-    if hasattr(x, "pow"):
-        variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        rsqrt = torch.rsqrt(variance + 1e-6)
-        x_normed = (x.to(torch.float32) * rsqrt) * weight.to(torch.float32)
-        out = x_normed * F.silu(z.to(torch.float32))
-        return out.to(x.dtype)
-    else:
-        import numpy as np
-        var = np.mean(np.square(x), axis=-1, keepdims=True)
-        x_normed = (x / np.sqrt(var + 1e-6)) * weight
-        silu_z = z / (1.0 + np.exp(-z))
-        return x_normed * silu_z
-"""
-    elif case_name == "gdn_split_ba":
-        baseline_code = """
-import torch
-
-def optimized_op(ba):
-    if hasattr(ba, "chunk"):
-        b, a = ba.chunk(2, dim=-1)
-        return b.contiguous(), a.contiguous()
-    else:
-        half = ba.shape[-1] // 2
-        return ba[:, :half], ba[:, half:]
-"""
+    if case_name in CASE_REGISTRY:
+        op_case = get_case(case_name)
+        baseline_code = op_case.get_baseline_code()
+        task = op_case.get_task_prompt()
     else:
         baseline_code = """
 def optimized_op(gate, out):
     return gate * out
 """
+        task = (
+            f"Optimize {case_name} operator.\n"
+            "Input signature: `optimized_op(gate, out)` with gate=[32, 1] bf16, "
+            "out=[32, 2048] bf16.\n"
+            "Formula: gate * out\n\n"
+            "Steps to optimize:\n"
+            "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
+            "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
+            "3. If L3 passes and L0 speedup is achieved, call `final_answer`.\n"
+            "4. Otherwise inspect error and iterate."
+        )
+
     base_res = run_candidate_evaluation(baseline_code, CURRENT_TEST_CASE)
     base_latency = base_res["l0_median_us"]
     CURRENT_TEST_CASE["baseline_latency"] = base_latency
@@ -597,61 +446,6 @@ def optimized_op(gate, out):
         ReadKnowledgeCardTool(),
     ]
     agent = create_agent(model=model, tools=tools)
-
-    if case_name == "gdn_norm_gate":
-        task = (
-            f"Optimize {case_name} operator.\n"
-            "Input signature: `optimized_op(x, z, weight)` with x=[512, 128] bf16, "
-            "z=[512, 128] bf16, weight=[128] bf16.\n"
-            "Canonical Gated RMSNorm formula:\n"
-            "  variance = x.pow(2).mean(-1, keepdim=True)\n"
-            "  x_normed = (x * torch.rsqrt(variance + 1e-6)) * weight\n"
-            "  out = x_normed * F.silu(z)\n\n"
-            "Steps to optimize:\n"
-            "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
-            "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
-            "3. If L3 passes and L0 speedup is achieved, call `final_answer`.\n"
-            "4. Otherwise inspect error and iterate."
-        )
-    elif case_name == "gdn_split_ba":
-        task = (
-            f"Optimize {case_name} operator.\n"
-            "Input signature: `optimized_op(ba)` with ba=[32, 32] bf16.\n"
-            "Formula:\n"
-            "  b, a = ba.chunk(2, dim=-1)\n"
-            "  return b.contiguous(), a.contiguous()\n\n"
-            "Steps to optimize:\n"
-            "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
-            "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
-            "3. If L3 passes and L0 speedup is achieved, call `final_answer`.\n"
-            "4. Otherwise inspect error and iterate."
-        )
-    elif case_name == "gdn_input_norm_decode":
-        task = (
-            f"Optimize {case_name} operator.\n"
-            "Input signature: `optimized_op(x, weight)` with x=[32, 2048] bf16, "
-            "weight=[2048] bf16.\n"
-            "Canonical RMSNorm formula:\n"
-            "  variance = x.pow(2).mean(-1, keepdim=True)\n"
-            "  return (x * torch.rsqrt(variance + 1e-6)) * weight\n\n"
-            "Steps to optimize:\n"
-            "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
-            "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
-            "3. If L3 passes and L0 speedup is achieved, call `final_answer`.\n"
-            "4. Otherwise inspect error and iterate."
-        )
-    else:
-        task = (
-            f"Optimize {case_name} operator.\n"
-            "Input signature: `optimized_op(gate, out)` with gate=[32, 1] bf16, "
-            "out=[32, 2048] bf16.\n"
-            "Formula: gate * out\n\n"
-            "Steps to optimize:\n"
-            "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
-            "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
-            "3. If L3 passes and L0 speedup is achieved, call `final_answer`.\n"
-            "4. Otherwise inspect error and iterate."
-        )
 
     try:
         agent.run(task)
