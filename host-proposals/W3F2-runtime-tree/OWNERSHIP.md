@@ -13,7 +13,8 @@
 
 - **已下沉至宿主 Fork 源码**：
   - 宿主仓库：`vLLM-HUST/vllm-ascend-hust`
-  - 所在分支：`work/issue20-w3f2-host`，提交 `ce807cd7ce972b9a410663cebe10b7ea25fb2a31`
-  - 当前基线分支：`based/split-batch-baseline`（头 `ad82d77cb`，镜像 `74f0c0a27` 源码 + 3 个构建文件修复）；本改动基于旧基线 `based/image-baseline`，尚未进入该基线
+  - 现行分支：`work/w3f2-inproj-merge`（宿主 PR #63，基于新基线 `based/split-batch-baseline` 头 `ad82d77cb`），提交 `fcbc4458bb8afcc37441e602921ed45dcbe5e775`（cherry-pick 自下述原提交，树逐字节一致）
+  - 原始提交：`work/issue20-w3f2-host` 上的 `ce807cd7ce972b9a410663cebe10b7ea25fb2a31`（基于旧基线 `based/image-baseline`，该分支仅作历史溯源）
+  - 插件仓交付登记：`ops/gdn_merge_inproj/` 三件套与 `DELIVERY_INDEX.json` 条目
 - **本目录性质**：
   - 历史补丁原件仅作溯源参考备查，插件仓内不执行任何运行时补丁操作。

@@ -71,7 +71,10 @@
     "host_fork_base_branch": "based/split-batch-baseline",
     "host_fork_base_commit": "ad82d77cb",
     "host_fork_legacy_base_branch": "based/image-baseline",
-    "host_fork_dev_branch": "work/issue20-w3f2-host",
-    "host_commit": "deb5ffefe32b53c61ae6193ff4ee4368cf1889ba"
+    "host_fork_dev_branch": "work/d4-conv-pack",
+    "host_fork_pr": 64,
+    "host_commit": "771b847dae5e9493fae9ca234b7498a072ffd39c",
+    "host_merge_state": "merged into based/split-batch-baseline (pr 64, 2026-11-01)",
+    "host_commit_source": "cherry-pick of deb5ffefe32b53c61ae6193ff4ee4368cf1889ba (work/issue20-w3f2-host), tree-identical; stacked on work/w3f2-inproj-merge (PR 63)"
   }
 }
