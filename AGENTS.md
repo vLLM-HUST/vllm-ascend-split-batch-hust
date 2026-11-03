@@ -39,6 +39,13 @@
 3. **注释与文档原则**：
    - 代码只写必需注释，不写解释性叙事或改动沿革；
    - 文档只写技术规范、判据与约束，不写心路历程。
+4. **推送前本地全绿与组织政策合规**（详见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) §5）：
+   - 推送或发 PR 前必须在本地完整跑通 §4 全部命令；CI package job 的 `ruff check .`、`ruff format --check .` 对 `ops/`、`docs/`、`tests/` 下新增文件同样生效，不得借排除清单绕过；
+   - CPU 门禁必须用隔离虚拟环境、清空 `PYTHONPATH` 并执行 CI 的 `pytest` 命令复验；不能只用 `python -m pytest` 或依赖本机预装包。仓内未安装工具按文件路径加载，不得为导入错误跳过守护测试；
+   - 组织工作流 `Benchmark-only data (organization)` 对 PR 变更文件执行 fail-closed 审查：文本新增行命中下行任一关键词后同行出现数字即拒绝：
+     `ttft`、`tpot`、`throughput`、`latency`、`tokens/s`、`实测`、`吞吐`、`延迟`；
+     度量数字一律落在结构化 `evidence.json`，行文与标题避免"关键词+数字"同段；
+   - 算子交付面由 `pytest -q tests/test_ops_delivery_policy.py` 把关；修改 `ops/<operator>/` 下被 `checksum.sha256` 覆盖的文件后，必须用 `tools/op_agent/custody.py` 重新生成指纹。
 
 ---
 
@@ -66,7 +73,7 @@ ruff check .
 ruff format --check .
 
 # 仓内关键契约与规范测试
-pytest -q tests/test_benchmark_standard.py tests/test_json_hygiene.py tests/test_document_custody.py
+pytest -q tests/test_benchmark_standard.py tests/test_json_hygiene.py tests/test_document_custody.py tests/test_ops_delivery_policy.py
 
 # 快速运行单算子测试
 pytest -q tests/test_gate_fp32_plugin.py

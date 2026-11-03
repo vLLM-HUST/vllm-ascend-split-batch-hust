@@ -1,0 +1,26 @@
+{
+  "operator": "gdn_qkv_norm",
+  "callsite": "vllm_ascend/ops/gdn.py:480,619-620",
+  "model": "Qwen3.5-35B-A3B",
+  "precision": "torch.bfloat16",
+  "tp_size": 2,
+  "shape_facts": {
+    "T": 16,
+    "row_stride": 4096,
+    "q": 1024,
+    "k": 1024,
+    "v": 2048,
+    "head_dim": 128,
+    "phase": "pure decode"
+  },
+  "l3_verification": {
+    "status": "passed",
+    "atol": 0.001,
+    "rtol": 0.001
+  },
+  "l0_benchmark": {
+    "baseline_median_us": 791.24,
+    "optimized_median_us": 247.09,
+    "speedup": 3.2
+  }
+}

@@ -12,7 +12,7 @@
 | 4 | [agent-guide.md](agent-guide.md) | 在这个仓库写代码必须遵守什么(人机通用) |
 | 5 | [support-matrix.md](support-matrix.md) | 能力的激活边界和宿主条件 |
 | 6 | [delivery-inventory.md](delivery-inventory.md) | 当前组件、补丁、工具归属和收益证据状态 |
-| 7 | [operator-benchmark-standard.md](operator-benchmark-standard.md) | 算子优化评测四级阶梯、形状事实合同与报告标准 |
+| 7 | [operator-benchmark-standard.md](operator-benchmark-standard.md) | 算子优化评测四级阶梯、形状事实合同、报告标准与交付合规门禁 |
 | 8 | [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) | NPU 实测执行步骤、各算子测试命令与结果回填流程 |
 | 9 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
 | 10 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
