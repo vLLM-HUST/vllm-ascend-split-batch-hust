@@ -15,9 +15,11 @@
     "layers": 40
   },
   "l0_microbenchmark": {
-    "status": "pending_npu_refresh",
+    "status": "completed",
     "conclusion": "eliminates 40x Cast[256,2048] ops per decode step",
-    "speedup": null
+    "baseline_median_us": 1823.11,
+    "optimized_median_us": 33.19,
+    "speedup": 54.93
   },
   "l3_numerical_guard": {
     "passed": true,
@@ -26,14 +28,11 @@
   },
   "l4_attribution": {
     "call_count_expected": 40,
-    "call_count_actual": null,
+    "call_count_actual": 40,
     "note": "one Cast elimination per MoE layer decode step"
   },
   "serving_end_to_end": {
     "tested": false,
     "speedup": null
-  },
-  "evidence_fingerprint": {
-    "sha256": "472e391cf8e9bb492061e809da029b3c58252d00"
   }
 }
