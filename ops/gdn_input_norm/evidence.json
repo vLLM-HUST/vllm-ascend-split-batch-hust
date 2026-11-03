@@ -1,0 +1,22 @@
+{
+  "operator": "gdn_input_norm",
+  "callsite": "vllm_ascend/ops/gdn.py:in_proj_norm",
+  "model": "Qwen3.5-35B-A3B",
+  "precision": "torch.bfloat16",
+  "tp_size": 2,
+  "shape_facts": {
+    "T": 32,
+    "Hidden": 2048,
+    "phase": "decode"
+  },
+  "l3_verification": {
+    "status": "passed",
+    "atol": 0.001,
+    "rtol": 0.001
+  },
+  "l0_benchmark": {
+    "baseline_median_us": 45.34,
+    "optimized_median_us": 6.48,
+    "speedup": 7.0
+  }
+}
