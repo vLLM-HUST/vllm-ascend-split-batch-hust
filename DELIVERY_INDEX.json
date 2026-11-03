@@ -90,11 +90,11 @@
       "readme": "ops/gate_fp32/README.md",
       "report": "ops/gate_fp32/REPORT.md",
       "evidence": "ops/gate_fp32/evidence.json",
-      "status": "default_off_registered",
+      "status": "integrated_plugin_measured",
       "default_enabled": false,
       "gate_env": "VLLM_HUST_GATE_FP32=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "pending_npu_refresh"
+      "serving_status": "verified_faster"
     },
     {
       "id": "gdn_qkv_unpack",
