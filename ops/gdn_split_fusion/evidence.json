@@ -95,12 +95,14 @@
       "_rearrange_kernel": {"count": 15324, "total_ms": 101.9, "per_call_us": 6.65}
     },
     "replaced": {
-      "ConcatD": {"off_count": 15420, "off_ms": 265.7, "on_count": 30, "on_ms": 0.5, "off_per_call_us": 17.2}
+      "ConcatD": {"off_count": 15420, "off_ms": 265.7, "on_count": 30, "on_ms": 0.5, "off_per_call_us": 17.2},
+      "Slice": {"off_count": 117550, "off_ms": 367.9, "on_count": 25557, "on_ms": 74.7, "note": "the qkv/qkvz/ba splits collapse into the kernels"}
     },
-    "net_attributable_ms": -57.2,
-    "net_attributable_pct": -0.39,
+    "target_group": {"off_ms": 633.5, "on_ms": 283.3, "saved_ms": 350.2, "pct_of_all_kernels": 2.41},
+    "net_attributable_ms": -350.2,
+    "net_attributable_pct": -2.41,
     "all_kernel_total": {"off_ms": 14518.0, "on_ms": 14198.3, "delta_pct": -2.2},
-    "note": "the all-kernel delta also carries window drift (Transpose -34.2ms); only the ConcatD swap is attributable. 15324 = 30 layers x 511 steps. The measured per-call saving is 3.7us, well below the 7.03us the microbenchmark predicted at M=8 because the live batch is 32."
+    "note": "the attributable saving covers Slice plus ConcatD replaced by the two kernels (633.5 -> 283.3 ms). The all-kernel delta is smaller because other operators drift in the opposite direction. 15324 calls = 30 layers x 511 steps."
   },
   "serving_end_to_end": {
     "tested": false,
