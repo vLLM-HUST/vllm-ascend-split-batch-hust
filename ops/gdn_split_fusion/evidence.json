@@ -113,10 +113,27 @@
     "note": "the attributable saving covers Slice plus ConcatD replaced by the two kernels (633.5 -> 283.3 ms). The all-kernel delta is smaller because other operators drift in the opposite direction. 15324 calls = 30 layers x 511 steps."
   },
   "serving_end_to_end": {
-    "tested": false,
+    "tested": true,
     "concurrency": 32,
-    "speedup": null,
-    "conclusion": "not measured; 2.6% projected decode gain sits near the 2.04% same-config leg spread"
+    "input_output": "128 requests x (512 or 2048) in / 256 out",
+    "cohort_512": {
+      "kv_tokens": 66000,
+      "legs": 8,
+      "design": "two ABBA blocks of 4 legs",
+      "tok_s_pct": 0.46,
+      "per_token_ms_pct": -2.6,
+      "note": "both blocks positive; A-leg spread 4.18%"
+    },
+    "cohort_2048": {
+      "kv_tokens": 263000,
+      "legs": 12,
+      "design": "three ABBA blocks of 4 legs",
+      "tok_s_pct": -1.27,
+      "per_token_ms_pct": 1.78,
+      "note": "all three blocks negative; -3.17% before dropping one outlier leg; A-leg spread 4.29%"
+    },
+    "conclusion": "both cohorts fall inside their own leg spread, so neither a gain nor a loss is claimed. The operator saves more in the 2048 cohort (+5.05%) than in 512 (+2.41%), yet the serving result is slightly worse there.",
+    "root_cause": "op_statistic sums 14518 ms of kernel time for a bench whose wall time is far shorter, so the kernels do not run back to back; removing 350 ms only widens the gaps."
   },
   "known_issue": "M=1 pays ~1.4us of custom-op dispatch overhead per component (~84us per step over 30 layers, about 0.13% of TPOT) because the shape gate must stay inside the op",
   "status": "default_off_serving_no_gain",
