@@ -53,4 +53,12 @@ CANONICAL_CASES: dict[str, dict[str, Any]] = {
         "dtype": "bfloat16",
         "desc": "Prefill broadcast multiply (T=512, H=2048)",
     },
+    # 4. GDN QKV Unpack and L2Norm Fusion (Qwen3.5 Linear Attention)
+    "gdn_qkv_norm": {
+        "callsite": "src/vllm_ascend_split_batch/gdn_qkv_norm.py:unpack_norm",
+        "phase": "decode",
+        "input_shape": (16, 4096),
+        "dtype": "bfloat16",
+        "desc": "Fused QKV unpack and L2Norm (T=16, C=4096)",
+    },
 }
