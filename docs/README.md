@@ -16,7 +16,8 @@
 | 8 | [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) | NPU 实测执行步骤、各算子测试命令与结果回填流程 |
 | 9 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
 | 10 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
-| 11 | [progress.md](progress.md) | 项目当前状态 |
+| 11 | [op-agent-harness-spec.md](op-agent-harness-spec.md) | 算子调优 Harness (tools/op_agent) 架构与使用规范 |
+| 12 | [progress.md](progress.md) | 项目当前状态 |
 
 ## 单一事实源分工
 
@@ -35,6 +36,7 @@
 | 宿主 seam 与 monkeypatch 面清单 | [HOST_CONTRACT.md](HOST_CONTRACT.md) |
 | 历史实现溯源（索引 + 逐条核对结论） | [PROVENANCE.md](PROVENANCE.md) / [provenance-verification.md](provenance-verification.md) / [../provenance/](../provenance/)(只读) |
 | 历史证据与原始度量保管规范 | [EVIDENCE.md](EVIDENCE.md) |
+| 算子自动调优 Harness 规范与插拔用例架构 | [op-agent-harness-spec.md](op-agent-harness-spec.md) |
 | 算子交付形态：编译型实现独立交付；**Triton/纯 Python 算子实现由本仓承载** | [architecture.md](architecture.md) §2/§5 + 本仓 `src/vllm_ascend_split_batch/` |
 | 算子调度(选择)接口 | [design/operator-dispatch.md](design/operator-dispatch.md)(骨架,未接线) |
 | 架构语义、编程规范、发布、踩坑、进度 | 本目录 |
