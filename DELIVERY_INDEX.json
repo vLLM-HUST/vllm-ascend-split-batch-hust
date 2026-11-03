@@ -132,11 +132,11 @@
       "readme": "ops/gdn_merge_inproj/README.md",
       "report": "ops/gdn_merge_inproj/REPORT.md",
       "evidence": "ops/gdn_merge_inproj/evidence.json",
-      "status": "default_off_host_fork_unmeasured",
+      "status": "integrated_host_fork_measured",
       "default_enabled": false,
       "gate_env": "VLLM_HUST_GDN_MERGE_INPROJ=1",
-      "l3_numerical_guard": "not_run",
-      "serving_status": "unmeasured"
+      "l3_numerical_guard": "passed",
+      "serving_status": "verified_faster"
     },
     {
       "id": "gdn_qkv_norm",
