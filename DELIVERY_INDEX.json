@@ -193,6 +193,20 @@
       "gate_env": "VLLM_HUST_GDN_SPLIT_BA=1",
       "l3_numerical_guard": "passed",
       "serving_status": "verified_faster"
+    },
+    {
+      "id": "moe_gate_merge",
+      "display_name": "MoE Router and Shared-Expert Gate Merge",
+      "layer": "rejected_exploration",
+      "directory": "ops/moe_gate_merge",
+      "readme": "ops/moe_gate_merge/README.md",
+      "report": "ops/moe_gate_merge/REPORT.md",
+      "evidence": "ops/moe_gate_merge/evidence.json",
+      "status": "default_off_negative_speedup",
+      "default_enabled": false,
+      "gate_env": "unexposed",
+      "l3_numerical_guard": "passed",
+      "serving_status": "negative_or_pending"
     }
   ]
 }

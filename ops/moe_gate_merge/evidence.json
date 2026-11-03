@@ -1,0 +1,44 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "moe_gate_merge",
+  "callsite": "vllm/model_executor/models/qwen3_next.py:186-192",
+  "environment": {
+    "device": "Atlas 800T A2 (Ascend910B2)",
+    "cann_version": "9.1.0",
+    "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+    "vllm_ascend_version": "0.25.1rc2.dev125+hust",
+    "model": "Qwen3.5-35B-A3B",
+    "dtype": "bf16"
+  },
+  "shape_facts": {
+    "phase": "decode",
+    "M": 32,
+    "K": 2048,
+    "N_router": 256,
+    "N_shared": 1,
+    "N_merged": 257
+  },
+  "l0_microbenchmark": {
+    "status": "completed_negative_speedup",
+    "conclusion": "merged GEMM [32, 2048] x [257, 2048].T runs faster than two separate GEMMs (13.22us vs 21.81us), but slicing back to contiguous [32, 256] and [32, 1] adds 12.97us overhead due to non-16-byte alignment (stride 257), resulting in net negative speedup (26.19us vs 21.81us, 0.83x)",
+    "baseline_median_us": 21.81,
+    "optimized_median_us": 26.19,
+    "speedup": 0.83
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "metric": "exact_bitwise_equal",
+    "max_abs_diff": 0.0
+  },
+  "l4_attribution": {
+    "call_count_expected": 0,
+    "call_count_actual": 0,
+    "note": "rejected due to negative speedup on NPU; retained as negative benchmark reference"
+  },
+  "serving_end_to_end": {
+    "tested": false,
+    "concurrency": 0,
+    "speedup": null,
+    "note": "not applicable; operator rejected"
+  }
+}
