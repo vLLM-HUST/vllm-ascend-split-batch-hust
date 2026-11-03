@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+# The package CI runs without numpy / torch / smolagents installed.
+# Mark the whole module to skip if optional dependencies are not present.
+pytest.importorskip("numpy", reason="op agent tests need numpy")
+pytest.importorskip("smolagents", reason="op agent tests need smolagents")
+
 from tools.op_agent.custody import verify_dir_checksum
 from tools.op_agent.evaluator import run_candidate_evaluation
 from tools.op_agent.guard import check_npu_environment
@@ -9,6 +16,8 @@ from tools.op_agent.qwen35_shapes import CANONICAL_CASES
 
 def test_guard_detection():
     hw = check_npu_environment(required_cards=2)
+    if not hw.has_npu:
+        pytest.skip("No NPU detected on runner")
     assert hw.device_count >= 2
     assert hw.is_tp2_ready is True
     assert "Ascend910B2" in hw.device_name
