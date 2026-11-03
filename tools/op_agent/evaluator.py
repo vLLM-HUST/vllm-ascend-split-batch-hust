@@ -67,8 +67,38 @@ def run_candidate_evaluation(
         expected = baseline_fn(*inputs)
         actual = candidate_op(*inputs)
 
-        # Check tensor or numpy
-        if isinstance(expected, np.ndarray):
+        # Check tensor, tuple of tensors, or numpy
+        if isinstance(expected, tuple):
+            if not isinstance(actual, tuple) or len(actual) != len(expected):
+                return {
+                    "success": False,
+                    "l3_passed": False,
+                    "error": "L3 VETO: Return structure mismatch (expected tuple).",
+                }
+            import torch
+
+            for i, (act_item, exp_item) in enumerate(
+                zip(actual, expected, strict=True)
+            ):
+                if hasattr(exp_item, "allclose"):
+                    if not torch.allclose(act_item, exp_item, atol=atol, rtol=rtol):
+                        diff = torch.max(torch.abs(act_item - exp_item)).item()
+                        err_msg = (
+                            f"L3 VETO: Element {i} max diff={diff:.4e} "
+                            "exceeds tolerance."
+                        )
+                        return {
+                            "success": False,
+                            "l3_passed": False,
+                            "error": err_msg,
+                        }
+                elif np.all(act_item != exp_item):
+                    return {
+                        "success": False,
+                        "l3_passed": False,
+                        "error": f"L3 VETO: Element {i} mismatch.",
+                    }
+        elif isinstance(expected, np.ndarray):
             matches = np.allclose(actual, expected, atol=atol, rtol=rtol)
             max_diff = float(np.max(np.abs(actual - expected)))
             if not matches:

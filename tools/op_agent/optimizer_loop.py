@@ -363,6 +363,43 @@ def setup_qwen35_case(case_name: str = "moe_shared_epilogue_decode") -> dict[str
             "required_cards": 2,
         }
 
+    # 3. GDN split_ba ([T=32, Dim=32] -> b=[32, 16], a=[32, 16])
+    if case_name == "gdn_split_ba":
+        T, TotalDim = case_meta.get("input_shape", (32, 32))
+        HalfDim = TotalDim // 2
+
+        def input_gen():
+            if hw.is_tp2_ready:
+                import torch
+                import torch_npu  # noqa: F401
+
+                torch.manual_seed(42)
+                ba = torch.randn(T, TotalDim, dtype=torch.bfloat16).npu(0)
+                return (ba,)
+            else:
+                np.random.seed(42)
+                ba = np.random.randn(T, TotalDim).astype(np.float32)
+                return (ba,)
+
+        def baseline_op(ba):
+            if hasattr(ba, "chunk"):
+                b, a = ba.chunk(2, dim=-1)
+                return b.contiguous(), a.contiguous()
+            else:
+                b = ba[:, :HalfDim]
+                a = ba[:, HalfDim:]
+                return b, a
+
+        return {
+            "name": case_name,
+            "callsite": case_meta["callsite"],
+            "shape_facts": {"T": T, "TotalDim": TotalDim, "phase": case_meta["phase"]},
+            "input_gen_fn": input_gen,
+            "baseline_fn": baseline_op,
+            "iters": 50,
+            "required_cards": 2,
+        }
+
     # Default / MoE Shared Epilogue cases
     M, H = case_meta.get("gate_shape", (32, 1))[0], 2048
 
@@ -526,6 +563,18 @@ def optimized_op(x, z, weight):
         silu_z = z / (1.0 + np.exp(-z))
         return x_normed * silu_z
 """
+    elif case_name == "gdn_split_ba":
+        baseline_code = """
+import torch
+
+def optimized_op(ba):
+    if hasattr(ba, "chunk"):
+        b, a = ba.chunk(2, dim=-1)
+        return b.contiguous(), a.contiguous()
+    else:
+        half = ba.shape[-1] // 2
+        return ba[:, :half], ba[:, half:]
+"""
     else:
         baseline_code = """
 def optimized_op(gate, out):
@@ -558,6 +607,19 @@ def optimized_op(gate, out):
             "  variance = x.pow(2).mean(-1, keepdim=True)\n"
             "  x_normed = (x * torch.rsqrt(variance + 1e-6)) * weight\n"
             "  out = x_normed * F.silu(z)\n\n"
+            "Steps to optimize:\n"
+            "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
+            "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"
+            "3. If L3 passes and L0 speedup is achieved, call `final_answer`.\n"
+            "4. Otherwise inspect error and iterate."
+        )
+    elif case_name == "gdn_split_ba":
+        task = (
+            f"Optimize {case_name} operator.\n"
+            "Input signature: `optimized_op(ba)` with ba=[32, 32] bf16.\n"
+            "Formula:\n"
+            "  b, a = ba.chunk(2, dim=-1)\n"
+            "  return b.contiguous(), a.contiguous()\n\n"
             "Steps to optimize:\n"
             "1. Write an optimized Triton kernel using `write_candidate_file`.\n"
             "2. Evaluate it with `evaluate_kernel(file_path=...)`.\n"

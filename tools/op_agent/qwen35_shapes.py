@@ -69,4 +69,12 @@ CANONICAL_CASES: dict[str, dict[str, Any]] = {
         "dtype": "bfloat16",
         "desc": "RMSNormGated: out = RMSNorm(x, weight) * silu(z) (Rows=512, Dim=128)",
     },
+    # 6. GDN ba Chunk / Split (Part 1 Split BA for TP Decode)
+    "gdn_split_ba": {
+        "callsite": "vllm_ascend/ops/gdn.py:210",
+        "phase": "decode",
+        "input_shape": (32, 32),
+        "dtype": "bfloat16",
+        "desc": "ba.chunk(2, dim=-1) to contiguous (b, a) (T=32, Dim=32 -> 16+16)",
+    },
 }
