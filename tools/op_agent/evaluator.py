@@ -184,5 +184,14 @@ def run_candidate_evaluation(
             "error": f"Evaluation exception: {type(e).__name__}: {str(e)}",
         }
     finally:
+        sys.modules.pop("candidate_module", None)
+        if "torch" in sys.modules:
+            try:
+                import torch
+
+                if hasattr(torch, "npu") and torch.npu.is_available():
+                    torch.npu.empty_cache()
+            except Exception:
+                pass
         if os.path.exists(temp_path):
             os.remove(temp_path)
