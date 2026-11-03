@@ -165,6 +165,20 @@
       "gate_env": "VLLM_HUST_GDN_INPUT_NORM=1",
       "l3_numerical_guard": "passed",
       "serving_status": "verified_faster"
+    },
+    {
+      "id": "gdn_norm_gate",
+      "display_name": "gdn_norm_gate (vllm_ascend/ops/gdn.py:255)",
+      "layer": "plugin_carrier",
+      "directory": "ops/gdn_norm_gate",
+      "readme": "ops/gdn_norm_gate/README.md",
+      "report": "ops/gdn_norm_gate/REPORT.md",
+      "evidence": "ops/gdn_norm_gate/evidence.json",
+      "status": "integrated_plugin_measured",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_GDN_NORM_GATE=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "verified_faster"
     }
   ]
 }
