@@ -6,6 +6,7 @@ from __future__ import annotations
 from .base import OpCase
 from .gdn_input_norm import GdnInputNormDecodeCase
 from .gdn_norm_gate import GdnNormGateCase
+from .gdn_qkv_norm import GdnQkvNormCase
 from .gdn_split_ba import GdnSplitBaCase
 from .moe_shared_epilogue import MoeSharedEpilogueDecodeCase
 
@@ -14,6 +15,7 @@ CASE_REGISTRY: dict[str, type[OpCase]] = {
     GdnInputNormDecodeCase.name: GdnInputNormDecodeCase,
     GdnNormGateCase.name: GdnNormGateCase,
     GdnSplitBaCase.name: GdnSplitBaCase,
+    GdnQkvNormCase.name: GdnQkvNormCase,
 }
 
 
