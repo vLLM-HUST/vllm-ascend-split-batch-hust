@@ -25,7 +25,7 @@ VLLM_HUST_GDN_UNPACK_MAXROWS        行数上限，默认 4096
 | 仓库 | `vLLM-HUST/vllm-ascend-hust` |
 | Base | `based/split-batch-baseline`（`8039119f`） |
 | 分支 | `work/gdn-unpack-fused` |
-| 提交 | `53701fb47`（实现）、`82e140a9a`（修复） |
+| 提交 | `53701fb47`（实现）、`82e140a9a`（修复），已通过 PR #68 合入基线，合并提交 `201adc93a` |
 | 改动 | 3 文件，+551 / −26 |
 
 ## 收益
