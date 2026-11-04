@@ -2,7 +2,7 @@
 
 分支 `0.28/comm-overlap-free-attribution` 的窗口证据与交付语料（365 + 66 + 18 件（三批）：
 算子 A/B 与 L0 地板 JSON、L3 捕获、opstat 副本、窗口回执、hazard 源码 vintage、
-host-proposals 载体包（patches/orig/OWNERSHIP）、撤回套组含配对取证
+host-proposals 提案目录（patches/orig/OWNERSHIP）、撤回套组含配对取证
 (`host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019`)、
 comm-mechanism/trace 验证运行、OPT-truth 探针）已按 custody 政策冻结于：
 

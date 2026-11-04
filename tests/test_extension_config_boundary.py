@@ -19,14 +19,14 @@
   （`extension-manager/src/vllm_hust_ext/cli.py:185-187` 的 `isinstance(..., dict)`），
   随后把 dict 原样存进 `ExtensionConfig.configuration`；**没有** per-bundle schema，
   未知键不会被拒绝、也不会被解释。
-- **本仓**：没有任何载体读 `configuration`（`src/**` 无 `.configuration` 访问，
+- **本仓**：没有任何插件实现模块读 `configuration`（`src/**` 无 `.configuration` 访问，
   也无 `VLLM_HUST_EXT_CONFIG`），全部门控走 **env**（35 处 `os.getenv`/`os.environ`）。
 
 所以"配置 schema / 未知配置拒绝"这条缺口在本仓的实际形态是**边界声明**，不是可加的校验：
 schema 属于上游框架、而本仓不消费该字段。这里把边界变成可执行判据，防止将来有人悄悄
 引入一条未声明的配置契约（那才会真的出现"未知键改变行为"）：
 
-1. 本仓载体的门控面只有 env（源码级扫描）；
+1. 本仓插件实现模块的门控面只有 env（源码级扫描）；
 2. 未知 `configuration` 键**不改变** `extension check` 的任何判定（对照实验）；
 3. 管理器生命周期（configure → enable → disable → forget）只写元数据，
    **从不 import 本仓实现模块**（`sys.modules` 审计），未知键在往返中原样保留。
@@ -49,7 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC = REPO_ROOT / "src" / "vllm_ascend_split_batch"
 BUNDLE_ID = "org.vllm-hust.fia-demask"
 
-#: 实现载体模块名：生命周期命令不应 import 它们（发现只读元数据）。
+#: 插件实现模块名：生命周期命令不应 import 它们（发现只读元数据）。
 IMPLEMENTATION_MODULES = (
     "vllm_ascend_split_batch.fia_demask_plugin",
     "vllm_ascend_split_batch.planner",
@@ -189,20 +189,20 @@ def _assert_version_dependent_states(states: list[str], *, enabled: bool) -> Non
     """只对**不依赖宿主环境**的 state 做绝对断言，其余按三支分别断言。
 
     `check` 的 states 里,`installed`/`discovered` 恒在;`enabled` 只反映**用户开关**,
-    与宿主状态无关。其余 state 由"宿主可不可用 + 版本命不命中点钉"决定 ——
+    与宿主状态无关。其余 state 由"宿主可不可用 + 版本是否匹配兼容约束"决定 ——
     2026-09-26 在三个环境里各实测一次,得到**三种**形态:
 
     | 环境 | states |
     |---|---|
     | 无宿主包(CI 的干净 runner) | `installed, discovered, configured, degraded` |
-    | 宿主版本命中点钉(`hust` env) | `installed, discovered, compatible, configured` |
-    | 宿主版本不命中点钉(隔离重编的新宿主) | `installed, discovered, incompatible` |
+    | 宿主版本匹配(`hust` env) | `installed, discovered, compatible, configured` |
+    | 宿主版本不匹配(隔离重编的新宿主) | `installed, discovered, incompatible` |
 
     三支都带用户开关决定的 `enabled`;`degraded` 支的 evidence 逐字是
     "host version is unavailable; compatibility is unverified"。
 
     本文件测的是**配置面边界**,不是版本兼容性;早期版本只写了后两种、写死 `configured`,
-    于是 CI 上的 `degraded` 支直接把三腿打红(2026-09-26 实测 run `36255078500`),已修。
+    于是 CI 上的 `degraded` 支直接把三组打红(2026-09-26 实测 run `36255078500`),已修。
     """
     assert "installed" in states and "discovered" in states, states
     assert ("enabled" in states) is enabled, states

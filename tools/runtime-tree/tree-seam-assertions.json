@@ -1,7 +1,7 @@
 {
  "schema": "opt-ops-tree-seam-assertions.v1",
  "updated_at": "2026-11-01",
- "note": "运行树接口面断言表（纯静态：定义点符号 / 调用点文案 两类）。用途: 起服前秒级发现「调用点在新、定义点在旧」或「载体依赖的宿主契约被上游改掉（静默失效）」。tree 默认 /vllm-workspace/vllm-ascend/vllm_ascend。本表在 scripts/（非归档根）→ 可改；改动须同步 L2 证据。2026-11-01: 随 runtime_source_patches 退役（issue #33 方案 A），原 4 条源码变换守卫条目（husk-rsp-*）删除；宿主修改一律走宿主 Fork 分支，不再有树内锚点需断言。",
+ "note": "运行树接口面断言表（纯静态：定义点符号 / 调用点文案 两类）。用途: 起服前秒级发现「调用点在新、定义点在旧」或「插件模块依赖的宿主接口被上游改掉（静默失效）」。tree 默认 /vllm-workspace/vllm-ascend/vllm_ascend。本表在 scripts/（非归档根）→ 可改；改动须同步 L2 证据。2026-11-01: 随 runtime_source_patches 退役（issue #33 方案 A），原 4 条源码变换守卫条目删除；宿主修改一律走宿主 Fork 分支，不再有树内锚点需断言。",
  "seams": [
   {
    "id": "d5-shared-experts-sp-input",
@@ -22,13 +22,13 @@
    "why": "W3F2 GDN in_proj 合并: 运行树补丁在 ops/gdn.py 加类, worker hook 在 model_runner_v1.py 里调它; 两侧任一缺失即起服失败。"
   },
   {
-   "id": "husk-plugin-load-model-seam",
+   "id": "gate-fp32-plugin-load-model-seam",
    "kind": "symbol",
    "definer": "worker/model_runner_v1.py",
    "symbol": "NPUModelRunner.load_model",
    "consumer": "/root/vllm-workspace/vllm-ascend-split-batch-hust/src/vllm_ascend_split_batch/gate_fp32_plugin.py",
    "call_token": "load_model",
-   "why": "husk gate-fp32 载体 wrap 的宿主接缝; 宿主改名即载体 fail-open 静默失效(不报错、收益归零)。"
+   "why": "gate-fp32 插件模块包装的宿主方法; 宿主改名即插件 fail-open 静默失效(不报错、收益归零)。"
   },
   {
    "id": "gate-fp32-consumer-contract",
@@ -37,7 +37,7 @@
    "symbol": null,
    "consumer": "ops/fused_moe/fused_moe.py",
    "call_token": "weight_fp32",
-   "why": "静默失效防线: gate-fp32 载体的全部收益依赖宿主消费者仍读 gate.weight_fp32; 上游去掉该读取 → 载体装了但没人读, fail-open 无感知。"
+   "why": "静默失效防线: gate-fp32 插件的全部收益依赖宿主消费者仍读 gate.weight_fp32; 上游去掉该读取 → 插件装了但没人读, fail-open 无感知。"
   }
  ]
 }

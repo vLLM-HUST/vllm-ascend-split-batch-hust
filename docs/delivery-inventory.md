@@ -44,6 +44,7 @@
 - **MoE 共享专家后置门控乘融合 (`moe_epilogue`)**：把 `AscendSharedExperts.part2` 里的广播乘换成单 kernel，保留宿主 `sigmoid`。算子层单次 3.64 → 1.34 µs，输出逐字一致；全链路 Mul 家族 −37.0 ms；端到端不可判定，不主张服务收益。见 [ops/moe_epilogue](../ops/moe_epilogue/REPORT.md)。
 - **Qwen Attention 纯文本 Split-QKV 与 RoPE 融合 (`qwen_text_split_qkv_fuse`)**：在纯文本路径下消除 Split、RMSNorm 与 RoPE 的多步离散调用，统一接驳至片上 UB 的 Triton 融合 Kernel。见 [ops/qwen_text_split_qkv_fuse](../ops/qwen_text_split_qkv_fuse/REPORT.md)。宿主分支 `work/qwen-text-split-qkv-fuse`。
 - **GDN 投影解包 / 混合 qkv 重排融合 (`gdn_split_fusion`)**：把投影分支的 split + reshape + chunk + 2×contiguous，以及 `rearrange_mixed_qkv` 的 split + 3×reshape + cat，各合成单 kernel；单仓库、单开关，prefill 全形状正收益。微基准 M=8 省 6.36 µs/层·step；图内归因两档负载分别省 5.00%（66k KV）与 5.05%（263k KV）；端到端 8/8 一致；服务端 8 / 12 轮的差异均落在同配置组间极差内，不主张收益。见 [ops/gdn_split_fusion](../ops/gdn_split_fusion/REPORT.md)。
+- **GDN Part 3 Output Norm 与 Rearrange 融合 (`gdn_output_norm_fusion`)**：在 GDN 输出端将 RMSNormGated 与 einops rearrange 融合为单步 Triton 算子，直接写入连续 2D 张量直通投影层。见 [ops/gdn_output_norm_fusion](../ops/gdn_output_norm_fusion/REPORT.md)。宿主分支 `work/gdn-output-norm-fusion`。
 
 探索与负性能留存算子索引：
 - **GDN QKV 单 pass 解包 (`gdn_qkv_unpack`)**：专属报告与证据结构见 [ops/gdn_qkv_unpack](../ops/gdn_qkv_unpack/REPORT.md)。910B2 实测因 Triton 启动发射开销慢于原生链，按规范留存负性能事实，保持未激活。
@@ -96,6 +97,10 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
      - `vllm-ascend-hust` 分支 `work/gdn-unpack-fused`（Commit `82e140a9a`，基于 `based/split-batch-baseline`，已通过 PR #68 合入基线，合并提交 `201adc93a`）：新增 `vllm_ascend/ops/gdn_epilogue.py`（两个 kernel + `torch.ops.vllm_ascend.gdn_unpack` / `gdn_rearrange`）；`gdn.py` 的投影分支（普通与 in_proj 合并两条）改用 `gdn_unpack`，并新增 `_rearrange_mixed_qkv` 覆盖、把 `_forward_core` 三处调用指过去。开关 `VLLM_HUST_GDN_UNPACK_FUSED=1`。
      - 早期跨仓库版本（`vllm-ascend-hust` 的 `work/gdn-split-fusion` `16e66804c` 与 `vllm-hust` 的 `work/gdn-rearrange-fusion` `8c9f165259`）保留作历史，未合入基线。
      - 插件仓内履约与证据：详见 [ops/gdn_split_fusion](../ops/gdn_split_fusion/REPORT.md)。
+  6. **GDN Part 3 Output Norm 与 Rearrange 融合** — 初始提交 `68c079081`（PR #69，合并提交 `0ee020516`），非连续 `z` 与动态行数免重编修复提交 `8499a55aa`（分支 `work/gdn-output-norm-fusion`，PR #70）
+     - `vllm_ascend/ops/gdn_epilogue.py`：新增 `gdn_output_norm_rearrange` 融合算子与门控 `is_output_norm_enabled()`，支持非连续列切片 `z` 的二维跨距视图并声明动态行数 `do_not_specialize`，由 `VLLM_HUST_GDN_OUTPUT_NORM_FUSED=1` 开启；关闭时保留原生多步分立链路。
+     - `vllm_ascend/ops/gdn.py`：在 Part 3 输出端对接融合算子，将输出直通 `self.out_proj`。
+     - 插件仓内履约与证据：详见 [ops/gdn_output_norm_fusion](../ops/gdn_output_norm_fusion/REPORT.md)。
 
 ## 4. 工具边界
 

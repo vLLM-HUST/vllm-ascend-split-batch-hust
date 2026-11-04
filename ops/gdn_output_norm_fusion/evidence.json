@@ -1,0 +1,119 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "gdn_output_norm_fusion",
+  "callsite": "vllm_ascend/ops/gdn.py:AscendGatedDeltaNetAttention.forward",
+  "environment": {
+    "device": "Ascend910B2",
+    "cann_version": "9.1.0",
+    "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+    "vllm_ascend_version": "0.25.1rc2.dev125+hust",
+    "model": "Qwen3.5-35B-A3B",
+    "dtype": "bf16"
+  },
+  "shape_facts": {
+    "phase": "decode",
+    "batch_size": 16,
+    "decode_tokens": 16,
+    "num_v_heads": 16,
+    "head_v_dim": 128,
+    "z_row_stride": 4096,
+    "cudagraph_mode": "FULL"
+  },
+  "l0_microbenchmark": {
+    "status": "completed_positive_speedup",
+    "conclusion": "fused norm-gate and rearrange writing directly to 2D contiguous buffer eliminates intermediate memory traffic, implicit contiguous copy on strided z, and Python view overhead",
+    "speedup": 9.65,
+    "native_median_us": 73.82,
+    "optimized_median_us": 7.65,
+    "measurement": "NPU graph, 20 repetitions packed per replay, single 910B2, strided z from mixed_qkvz slice [T, 16, 128] (TP=2 per-rank shape)",
+    "raw_measurements": {
+      "Tokens_1_H16_strided_z": {"native_us": 22.07, "candidate_us": 4.21, "speedup": 5.25},
+      "Tokens_8_H16_strided_z": {"native_us": 47.96, "candidate_us": 7.77, "speedup": 6.17},
+      "Tokens_16_H16_strided_z": {"native_us": 73.82, "candidate_us": 7.65, "speedup": 9.65},
+      "Tokens_32_H16_strided_z": {"native_us": 91.10, "candidate_us": 9.22, "speedup": 9.88},
+      "Tokens_64_H16_strided_z": {"native_us": 92.59, "candidate_us": 10.38, "speedup": 8.92},
+      "Tokens_128_H16_strided_z": {"native_us": 96.94, "candidate_us": 12.68, "speedup": 7.64}
+    },
+    "contiguous_h4_probe_measurements": {
+      "Tokens_1": {"native_us": 16.48, "candidate_us": 4.14, "speedup": 3.98},
+      "Tokens_4": {"native_us": 23.31, "candidate_us": 4.16, "speedup": 5.60},
+      "Tokens_8": {"native_us": 36.71, "candidate_us": 4.29, "speedup": 8.55},
+      "Tokens_16": {"native_us": 35.87, "candidate_us": 4.47, "speedup": 8.03},
+      "Tokens_32": {"native_us": 46.99, "candidate_us": 4.53, "speedup": 10.36},
+      "Tokens_64": {"native_us": 71.79, "candidate_us": 4.71, "speedup": 15.25},
+      "Tokens_128": {"native_us": 87.88, "candidate_us": 5.78, "speedup": 15.22}
+    }
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "metric": "exact_match",
+    "max_abs_diff": 0.0,
+    "serving_greedy_match": "8/8 exact match across 8 fixed prompts (max_tokens=256, temperature=0.0) between VLLM_HUST_GDN_OUTPUT_NORM_FUSED=0 and =1",
+    "note": "output is bitwise identical to discrete norm and rearrange chain with absolute zero difference across both contiguous and strided z inputs; 20/20 unit tests in tests/ut/ops/test_gdn_epilogue.py passed"
+  },
+  "l4_attribution": {
+    "call_count_expected": 15360,
+    "call_count_actual": 15360,
+    "window": "single-request 512-token generation window (30 GDN layers x 512 steps = 15360 calls, rank0 op_statistic.csv)",
+    "fused_kernel_name": "_output_norm_kernel",
+    "fused_kernel_total_ms": 43.43,
+    "fused_kernel_avg_us": 2.83,
+    "all_kernel_ms_before": 5743.34,
+    "all_kernel_ms_after": 5654.99,
+    "all_kernel_delta_ms": -88.35,
+    "all_kernel_delta_pct": -1.54,
+    "note": "Initial PR #69 required z.is_contiguous(), which evaluated to False on Qwen3.5 non-interleaved mixed_qkvz slice views and caused 0 fused calls. Commit 8499a55aa relaxed the check to unit last-dim stride and marked M as do_not_specialize, achieving 15360/15360 fused calls (100% hit rate, 0 fallback)."
+  },
+  "serving_end_to_end": {
+    "tested": true,
+    "status": "verified_faster",
+    "dataset": "random",
+    "random_input_len": 512,
+    "random_output_len": 256,
+    "num_prompts": 128,
+    "concurrency": 32,
+    "design": "2 independent full-restart runs per configuration with all other VLLM_HUST_* gates fixed to 0 and VLLM_DISABLE_COMPILE_CACHE=1",
+    "speedup": 1.0266,
+    "gen_rate_off_tok_s": 760.32,
+    "gen_rate_on_tok_s": 780.57,
+    "gen_rate_delta_pct": 2.66,
+    "total_rate_off_tok_s": 2311.78,
+    "total_rate_on_tok_s": 2373.38,
+    "total_rate_delta_pct": 2.66,
+    "mean_per_token_off_ms": 37.13,
+    "mean_per_token_on_ms": 36.30,
+    "mean_per_token_delta_pct": -2.24,
+    "median_per_token_off_ms": 38.09,
+    "median_per_token_on_ms": 37.03,
+    "median_per_token_delta_pct": -2.81,
+    "mean_first_token_off_ms": 1273.14,
+    "mean_first_token_on_ms": 1209.30,
+    "mean_first_token_delta_pct": -5.01,
+    "same_config_spread_pct": {
+      "off_gen_rate": 0.79,
+      "on_gen_rate": 0.96,
+      "off_mean_per_token": 0.13,
+      "on_mean_per_token": 2.51
+    },
+    "runs": {
+      "off_1": {"duration_s": 42.93, "gen_rate_tok_s": 763.31, "total_rate_tok_s": 2320.89, "mean_first_token_ms": 1236.65, "mean_per_token_ms": 37.11, "median_per_token_ms": 38.05},
+      "off_2": {"duration_s": 43.27, "gen_rate_tok_s": 757.32, "total_rate_tok_s": 2302.68, "mean_first_token_ms": 1309.63, "mean_per_token_ms": 37.16, "median_per_token_ms": 38.14},
+      "on_1": {"duration_s": 42.18, "gen_rate_tok_s": 776.81, "total_rate_tok_s": 2361.94, "mean_first_token_ms": 1142.30, "mean_per_token_ms": 36.76, "median_per_token_ms": 37.59},
+      "on_2": {"duration_s": 41.78, "gen_rate_tok_s": 784.33, "total_rate_tok_s": 2384.81, "mean_first_token_ms": 1276.30, "mean_per_token_ms": 35.85, "median_per_token_ms": 36.46}
+    }
+  },
+  "status": "integrated_host_fork_measured",
+  "default_enabled": false,
+  "evidence_fingerprint": {
+    "benchmark_script": "ops/gdn_output_norm_fusion/bench_l0.py",
+    "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
+    "host_fork_base_branch": "based/split-batch-baseline",
+    "host_fork_base_commit": "0ee020516",
+    "host_fork_dev_branch": "work/gdn-output-norm-fusion",
+    "host_initial_commit": "68c0790818dd15ff28b55d95713c2f0f4b3df66e",
+    "host_fork_pr": 69,
+    "host_merge_commit": "0ee02051620ccab1d505bcf9c1ce41e3ed715b04",
+    "host_fix_commit": "8499a55aa",
+    "baseline_state": "initial implementation merged into based/split-batch-baseline via PR #69; strided-z and dynamic-M fix on work/gdn-output-norm-fusion (8499a55aa)"
+  }
+}
