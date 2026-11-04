@@ -92,8 +92,8 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
   4. **Qwen Attention 纯文本 Split-QKV 与 RoPE 融合** — Commit `493ec93d243816217e15daaab480fbe073051981`（分支 `work/qwen-text-split-qkv-fuse`，PR #67，已合入 `based/split-batch-baseline`，合并提交 `d1014aadb`）
      - `vllm_ascend/patch/worker/patch_qwen3_5.py`：在纯文本 1D 模式下将 Split、RMSNorm 与 RoPE 接驳至已有 Triton 融合算子 `triton_split_qkv_rmsnorm_mrope`，由 `VLLM_HUST_SPLIT_QKV_ROPE_FUSED=1` 开启；关闭时保留原生多步离散链路。
      - 插件仓内履约与证据：详见 [ops/qwen_text_split_qkv_fuse](../ops/qwen_text_split_qkv_fuse/REPORT.md)。
-  5. **GDN Part 3 Output Norm 与 Rearrange 融合** — Commit `68c0790818dd15ff28b55d95713c2f0f4b3df66e`（分支 `work/gdn-output-norm-fusion`，PR #69，已合入 `based/split-batch-baseline`，合并提交 `0ee020516`）
-     - `vllm_ascend/ops/gdn_epilogue.py`：新增 `gdn_output_norm_rearrange` 融合算子与门控 `is_output_norm_enabled()`，由 `VLLM_HUST_GDN_OUTPUT_NORM_FUSED=1` 开启；关闭时保留原生多步分立链路。
+  5. **GDN Part 3 Output Norm 与 Rearrange 融合** — 初始提交 `68c079081`（PR #69，合并提交 `0ee020516`），非连续 `z` 与动态行数免重编修复提交 `8499a55aa`（分支 `work/gdn-output-norm-fusion`）
+     - `vllm_ascend/ops/gdn_epilogue.py`：新增 `gdn_output_norm_rearrange` 融合算子与门控 `is_output_norm_enabled()`，支持非连续列切片 `z` 的二维跨距视图并声明动态行数 `do_not_specialize`，由 `VLLM_HUST_GDN_OUTPUT_NORM_FUSED=1` 开启；关闭时保留原生多步分立链路。
      - `vllm_ascend/ops/gdn.py`：在 Part 3 输出端对接融合算子，将输出直通 `self.out_proj`。
      - 插件仓内履约与证据：详见 [ops/gdn_output_norm_fusion](../ops/gdn_output_norm_fusion/REPORT.md)。
 

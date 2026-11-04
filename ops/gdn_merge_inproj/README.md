@@ -32,4 +32,4 @@ Qwen3.5 GDN 层的输入投影由 `in_proj_qkvz` 与 `in_proj_ba` 两个权重�
 - 基线分支：`based/split-batch-baseline`（头 `ad82d77cb`）
 - 开发分支：`work/w3f2-inproj-merge`（宿主 PR #63），提交 `fcbc4458bb8afcc37441e602921ed45dcbe5e775`（cherry-pick 自旧分支 `work/issue20-w3f2-host` 的 `ce807cd7c`，树逐字节一致）
 - 结构化证据：[evidence.json](evidence.json)；验收报告：[REPORT.md](REPORT.md)
-- 配套插件载体：`gdn-merge-inproj` general plugin 仅承担注册与 fail-closed 探测，自身不合并权重（见 [docs/delivery-inventory.md](../../docs/delivery-inventory.md)）。
+- 配套插件入口：`gdn-merge-inproj` general plugin 仅承担注册与 fail-closed 探测，自身不合并权重（见 [docs/delivery-inventory.md](../../docs/delivery-inventory.md)）。

@@ -26,18 +26,18 @@
 
 ### 立项阶段的历史探针（另一形态，仅作对照）
 
-| 腿 | M=1 | M=8 | M=16 |
+| 实现方案 | M=1 | M=8 | M=16 |
 |---|---|---|---|
 | `stock3`（`sigmoid → mul → add`） | 3.16 | 6.30 | 6.96 |
 | `fused3`（三算子合一，未落地） | 1.27 | 1.80 | 2.43 |
 | `stock2`（`sigmoid → mul`） | 1.94 | 4.63 | 4.66 |
 | `fused2`（`sigmoid + mul` 合一，未落地） | 1.15 | 1.47 | 1.80 |
 
-这两条腿都不是最终交付形态。`fused3` 与 eager 三算子链的最大偏差 0.0156–0.0312（≈1 ulp），不满足逐位相等——因为当时拿 eager 三 aten op 当参考，而线上跑的是编译后已融合的图，两者本就不是同一舍入路径。**当前交付形态的 L0 已改由上表实测，逐位一致成立。**
+这两种方案都不是最终交付形态。`fused3` 与 eager 三算子链的最大偏差 0.0156–0.0312（≈1 ulp），不满足逐位相等——因为当时拿 eager 三 aten op 当参考，而线上跑的是编译后已融合的图，两者本就不是同一舍入路径。**当前交付形态的 L0 已改由上表实测，逐位一致成立。**
 
 ## 3. L3 数值正确性护栏
 
-- 方式：固定 8 条 prompt、`temperature=0`、`max_tokens=64`，开启与关闭两腿独立起服，逐条比对输出文本
+- 方式：固定 8 条 prompt、`temperature=0`、`max_tokens=64`，开启与关闭两组独立起服，逐条比对输出文本
 - 结果：**8/8 完全一致**
 - 额外的自算 sigmoid 方案（不保留宿主 `Sigmoid`）只有 4/8 匹配，已否决
 
@@ -51,7 +51,7 @@
 |---|---|
 | 宿主代码 | `vllm_ascend` 取自宿主工作树的 N1 实现（overlay 到容器树，`PYTHONPATH` 前置） |
 | 服务参数 | TP2、`max_model_len=8192`、`cudagraph_mode=FULL`、capture `[1,2,4,8,16,32]`、APC off |
-| 两腿 | `VLLM_HUST_MOE_EPILOGUE` 未设 / `=1` |
+| 对照组别 | `VLLM_HUST_MOE_EPILOGUE` 未设 / `=1` |
 | 结果 | **8/8 逐条完全一致**（输出文件长度均 4756 字节） |
 
 产物：`records/l3host-off.json`、`records/l3host-on.json`。
@@ -64,7 +64,7 @@
 |---|---|
 | 基线 | `8039119f`（N1 `ace3d3842` + W3F2 `fcbc4458` + D4 `771b847d`） |
 | 加载方式 | 基线 checkout 直接经 `PYTHONPATH` 加载，无 overlay 打补丁 |
-| 两腿 | `VLLM_HUST_MOE_EPILOGUE` 未设 / `=1`，进程环境已核对 |
+| 对照组别 | `VLLM_HUST_MOE_EPILOGUE` 未设 / `=1`，进程环境已核对 |
 | 结果 | **8/8 逐条完全一致** |
 
 产物：`records/retest-off.json`、`records/retest-on.json`。

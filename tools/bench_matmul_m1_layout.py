@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""decode M=1 skinny GEMM 权重布局 A/B（kernel 领地 L0, matmulv2 m1 布局标尺续篇）。
+"""decode M=1 skinny GEMM 权重布局 A/B（纯算子 L0 微基准, matmulv2 m1 布局标尺续篇）。
 
 eager 链被 ~35µs host 提交地板钳住（1021-132409）, 无法仲裁 sub-launch-floor;
 本基准改用 **profiler 逐 kernel 设备时长**（与窗 1021-031741 kernel_details 同口径）
@@ -21,10 +21,10 @@ eager 链被 ~35µs host 提交地板钳住（1021-132409）, 无法仲裁 sub-l
 * ``nd_linear``  基线: ``F.linear(x, W)`` ND 行主序（现状）;
 * ``tnd_matmul`` 物理转置: ``x @ Wt``, ``Wt = W.t().contiguous()``（加载期一次性）;
 * ``nz_linear``  NZ 分形: ``npu_format_cast(W, FRACTAL_NZ)`` 后同 ``F.linear``
-  （torch_npu 不支持则如实记 error, fail-open 单臂）。
+  （torch_npu 不支持则如实记 error, fail-open 单个方案）。
 
-数值: 每臂 vs 基线 int16 视图 bitwise + max_abs_diff（记录不裁决; L3 才是数值门）。
-预声明门: in_proj 桶任一臂设备时长改进 ≥15% → 立 L3 候选; 否则 kernel 布局领地关闭。
+数值: 每个方案 vs 基线 int16 视图 bitwise + max_abs_diff（记录不裁决; L3 才是数值门）。
+预声明门: in_proj 桶任一方案设备时长改进 ≥15% → 立 L3 候选; 否则权重布局优化方向关闭。
 
 退出码：0 成功｜1 失败｜2 用法错。
 """
@@ -270,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         "goal": {
             "what": "权重布局(ND/物理转置/NZ)对 M=1 skinny GEMM 设备时长的影响",
             "arbiter": "profiler chrome-trace kernel 设备时长中位（与窗口 kernel_details 同口径）",
-            "gate": f"in_proj 任一臂改进 >= {args.gate_pct}% -> 立 L3 候选; 否则布局领地关闭",
+            "gate": f"in_proj 任一方案改进 >= {args.gate_pct}% -> 立 L3 候选; 否则权重布局优化方向关闭",
         },
         "hardware": {
             "device": "npu",
@@ -287,8 +287,8 @@ def main(argv: list[str] | None = None) -> int:
         "cells": [],
         "not_claimed": [
             "profiler 设备时长与 FULL 图模式非严格同构（含 profiling 开销差异），只比方向",
-            "bitwise 记录不裁决; 若中选臂非 bitwise, L3 风险升级须如实上报（F3 教训）",
-            "单变量=布局; 不含 kernel 模板替换（那属更进一步的新领地）",
+            "bitwise 记录不裁决; 若中选方案非 bitwise, L3 风险升级须如实上报（F3 教训）",
+            "单变量=布局; 不含 kernel 模板替换（那属独立的算子替换方向）",
         ],
     }
     ctx = {

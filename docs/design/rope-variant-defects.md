@@ -83,7 +83,7 @@
 | # | 形态 | 为什么这样取 |
 |---|---|---|
 | ① | 逐参复刻 10 参 `__init__` + `forward_oot` 委托 **`op_registry_oot["RotaryEmbedding"]`（缺失时退回模块级 `AscendRotaryEmbedding`）** | `CustomOp.__new__` 用宿主原参数实例化，签名必须一致；委托目标**跟随本 build 实际注册的基础 rope 类**（310P 档是 `AscendRotaryEmbedding310`，见 §6.3），而不是硬编码 910 类。委托在 `__init__`（模型加载期，注册之后）解析并缓存在实例上，避免每 forward 查表、保持 ACL graph 可捕获。仅 forward 改路：cache 生成端（`_compute_inv_freq` 三段式重映射）本身已在 fp32 内完成且单次舍入（探针 `recompute_max_abs=0`） |
-| ② | **镜像** `forward_triton` 方法体 + 补第 9 参；kernel 从 **fork 模块自身的 `triton_mrope`** 绑定 | fork 在方法**中间**硬编码了 8 参调用，`triton_mrope` 是模块全局、调用点没有任何 hook 可注入第 9 参；子类重述方法体是"零宿主改动"下最小可行载体。为避免"镜像悄悄过期"，`tests/test_rope_fix_drift.py` 做 **AST 等价断言**（镜像体去掉注入实参后必须与宿主方法体逐节点相等）。kernel 绑定取自调用点**同一个** `fork_rope.triton_mrope`（不再另走 `vllm...mrope` import 路径）；该绑定为 `None`（无 triton）时**不安装 ②** 并单条 warning——否则镜像体会在**模型 forward 期**调 `None` 硬失败，而不是 load 期 fail-open |
+| ② | **镜像** `forward_triton` 方法体 + 补第 9 参；kernel 从 **fork 模块自身的 `triton_mrope`** 绑定 | fork 在方法**中间**硬编码了 8 参调用，`triton_mrope` 是模块全局、调用点没有任何 hook 可注入第 9 参；子类重述方法体是"零宿主改动"下最小可行的插件实现模块。为避免"镜像悄悄过期"，`tests/test_rope_fix_drift.py` 做 **AST 等价断言**（镜像体去掉注入实参后必须与宿主方法体逐节点相等）。kernel 绑定取自调用点**同一个** `fork_rope.triton_mrope`（不再另走 `vllm...mrope` import 路径）；该绑定为 `None`（无 triton）时**不安装 ②** 并单条 warning——否则镜像体会在**模型 forward 期**调 `None` 硬失败，而不是 load 期 fail-open |
 | ③ | `def __init__(self, *args, truncate: bool = True, **kwargs)` 签名无关转发 | 只改缺省值这一件事；`*args/**kwargs` 让宿主 `get_rope` 的调用形态变化（新增关键字）不会把插件类打成 `TypeError`，而显式 `truncate` 仍原样透传（逃生舱保留） |
 
 ②的镜像体**不带 docstring**（docstring 会成为额外的 AST 节点），方法体内的注释
@@ -123,7 +123,7 @@
 - `upstream fixed defect ①/②/③ → drop the corresponding override`
   ——锚点还在、缺陷没了：**删掉对应覆写**（留着就是死代码/遮蔽上游修复）；
 - `anchor drifted → re-audit HOST_CONTRACT`
-  ——seam 被移位/改形/消失：**先重新审 HOST_CONTRACT 的载体小节**，再改 carrier。
+  ——seam 被移位/改形/消失：**先重新审 HOST_CONTRACT 的插件契约小节**，再改插件实现模块。
 
 镜像等价断言会**区分原因**：宿主调用点已补第 9 参时报 `upstream fixed defect ②`
 （覆写已冗余），其余情况报 `anchor drifted`。

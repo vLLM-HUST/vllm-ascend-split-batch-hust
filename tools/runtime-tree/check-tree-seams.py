@@ -3,7 +3,7 @@
 
 背景（2026-10-16 11:53 事故）: 运行树里「调用点已改、定义点未改」时, `py_compile` 一律通过,
 错误只能在起服后 2-5 min 由 Worker 抛出（AttributeError），一轮约 40min 浪费；
-另一类是「载体依赖的宿主契约被上游改掉」——不报错、只静默失效（fail-open），更难发现。
+另一类是「插件模块依赖的宿主接口被上游改掉」——不报错、只静默失效（fail-open），更难发现。
 
 两条判据（表见同目录 tree-seam-assertions.json）:
   kind=symbol : definer 文件里必须存在该符号（支持 `Class.method` 与顶层 `func`），
