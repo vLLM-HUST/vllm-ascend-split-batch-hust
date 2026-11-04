@@ -24,5 +24,6 @@
 
 - **仓库**：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
 - **Base 分支**：`based/split-batch-baseline`
-- **开发分支**：`work/qwen-text-split-qkv-fuse`
+- **开发分支**：`work/qwen-text-split-qkv-fuse`（PR #67）
 - **提交哈希**：`493ec93d243816217e15daaab480fbe073051981`
+- **合并提交**：`d1014aadb`（已合入 `based/split-batch-baseline`）

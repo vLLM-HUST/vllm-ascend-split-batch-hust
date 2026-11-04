@@ -4,7 +4,7 @@
 
 - **硬件拓扑**: Atlas 800T A2 (2×910B2, TP=2)
 - **软件栈版本**: CANN 9.1.0 / vllm `0.28.1.post1.dev143+gf18cf803c` / vllm-ascend `0.25.1rc2.dev125+hust`
-- **宿主 Fork 归属**: `vLLM-HUST/vllm-ascend-hust` @ `work/qwen-text-split-qkv-fuse` (Commit `493ec93d243816217e15daaab480fbe073051981`)，Base 分支为 `based/split-batch-baseline`
+- **宿主 Fork 归属**: `vLLM-HUST/vllm-ascend-hust` @ `work/qwen-text-split-qkv-fuse` (Commit `493ec93d243816217e15daaab480fbe073051981`，宿主 PR #67，合并提交 `d1014aadb`)，Base 分支为 `based/split-batch-baseline`
 - **模型与权重**: Qwen3.5-35B-A3B (bf16, ND 格式)
 - **执行相位**: Decode (Tokens 1, 8, 16, 32, 64, 128)
 - **门控开关**: `VLLM_HUST_SPLIT_QKV_ROPE_FUSED=1` (默认 `0`)

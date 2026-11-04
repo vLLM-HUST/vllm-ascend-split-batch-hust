@@ -88,7 +88,7 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
      - `vllm_ascend/ops/triton/moe_epilogue.py`：单 kernel 与运行期形状判定（≤32 行走融合，prefill 回退）。
      - `vllm_ascend/ops/register_custom_ops.py`：注册 `moe_gate_mul`（`PrivateUse1`）。
      - 插件仓内履约与证据：详见 [ops/moe_epilogue](../ops/moe_epilogue/REPORT.md)。
-  4. **Qwen Attention 纯文本 Split-QKV 与 RoPE 融合** — Commit `493ec93d243816217e15daaab480fbe073051981`（分支 `work/qwen-text-split-qkv-fuse`，基于 `based/split-batch-baseline`）
+  4. **Qwen Attention 纯文本 Split-QKV 与 RoPE 融合** — Commit `493ec93d243816217e15daaab480fbe073051981`（分支 `work/qwen-text-split-qkv-fuse`，PR #67，已合入 `based/split-batch-baseline`，合并提交 `d1014aadb`）
      - `vllm_ascend/patch/worker/patch_qwen3_5.py`：在纯文本 1D 模式下将 Split、RMSNorm 与 RoPE 接驳至已有 Triton 融合算子 `triton_split_qkv_rmsnorm_mrope`，由 `VLLM_HUST_SPLIT_QKV_ROPE_FUSED=1` 开启；关闭时保留原生多步离散链路。
      - 插件仓内履约与证据：详见 [ops/qwen_text_split_qkv_fuse](../ops/qwen_text_split_qkv_fuse/REPORT.md)。
 

@@ -62,6 +62,9 @@
     "host_fork_base_branch": "based/split-batch-baseline",
     "host_fork_base_commit": "ad82d77cb",
     "host_fork_dev_branch": "work/qwen-text-split-qkv-fuse",
-    "host_commit": "493ec93d243816217e15daaab480fbe073051981"
+    "host_commit": "493ec93d243816217e15daaab480fbe073051981",
+    "host_fork_pr": 67,
+    "host_merge_commit": "d1014aadb",
+    "baseline_state": "merged into based/split-batch-baseline via PR #67"
   }
 }
