@@ -7,7 +7,14 @@ import triton
 import triton.language as tl
 
 
-@triton.jit
+@triton.jit(
+    do_not_specialize=[
+        "M",
+        "stride_xm",
+        "stride_zm",
+        "stride_outm",
+    ]
+)
 def gdn_norm_gate_2d_kernel(
     x_ptr,
     z_ptr,
@@ -19,7 +26,7 @@ def gdn_norm_gate_2d_kernel(
     stride_zn,
     stride_outm,
     stride_outn,
-    M: tl.constexpr,
+    M,
     N: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,

@@ -47,7 +47,7 @@ def gdn_norm_gate_fused(
         z.stride(1),
         out.stride(0),
         out.stride(1),
-        M=M,
+        M,
         N=N,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,

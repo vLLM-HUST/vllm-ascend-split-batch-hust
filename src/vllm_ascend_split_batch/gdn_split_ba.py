@@ -43,7 +43,7 @@ def gdn_split_ba_fused(ba: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         b.stride(1),
         a.stride(0),
         a.stride(1),
-        M=M,
+        M,
         HALF=Half,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
