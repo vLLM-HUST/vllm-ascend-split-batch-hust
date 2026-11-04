@@ -1,17 +1,28 @@
 from __future__ import annotations
 
+import os
+import sys
+from pathlib import Path
+
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 # The package CI runs without numpy / torch / smolagents installed.
 # Mark the whole module to skip if optional dependencies are not present.
 pytest.importorskip("numpy", reason="op agent tests need numpy")
 pytest.importorskip("smolagents", reason="op agent tests need smolagents")
 
-from tools.op_agent.custody import verify_dir_checksum
-from tools.op_agent.evaluator import run_candidate_evaluation
-from tools.op_agent.guard import check_npu_environment
-from tools.op_agent.optimizer_loop import MockKernelModel, get_configured_model
-from tools.op_agent.qwen35_shapes import CANONICAL_CASES
+from tools.op_agent.custody import verify_dir_checksum  # noqa: E402
+from tools.op_agent.evaluator import run_candidate_evaluation  # noqa: E402
+from tools.op_agent.guard import check_npu_environment  # noqa: E402
+from tools.op_agent.optimizer_loop import (  # noqa: E402
+    MockKernelModel,
+    get_configured_model,
+)
+from tools.op_agent.qwen35_shapes import CANONICAL_CASES  # noqa: E402
 
 
 def test_guard_detection():
@@ -164,6 +175,7 @@ def test_case_registry_contract():
     assert "gdn_qkv_norm" in CASE_REGISTRY
     assert "gdn_input_norm_decode" in CASE_REGISTRY
     assert "gdn_norm_gate" in CASE_REGISTRY
+    assert "gdn_output_norm_fusion" in CASE_REGISTRY
     assert "gdn_split_ba" in CASE_REGISTRY
     assert "moe_shared_epilogue_decode" in CASE_REGISTRY
 
@@ -173,6 +185,9 @@ def test_case_registry_contract():
         assert tc["name"] == name
         assert isinstance(tc["callsite"], str)
         assert isinstance(tc["shape_facts"], dict)
+        assert isinstance(tc["workload_spec"], dict)
+        assert "primary_workload" in tc["workload_spec"]
+        assert "stress_workload" in tc["workload_spec"]
         assert callable(tc["input_gen_fn"])
         assert callable(tc["baseline_fn"])
         assert isinstance(tc["iters"], int)
@@ -200,3 +215,66 @@ def test_gdn_qkv_norm_case_cpu():
     assert q_norm.shape == (1, 16, 8, 128)
     assert k_norm.shape == (1, 16, 8, 128)
     assert v.shape == (1, 16, 16, 128)
+
+
+def test_gdn_output_norm_fusion_strided_view_and_recompile_veto():
+    from tools.op_agent.cases import get_case
+
+    case = get_case("gdn_output_norm_fusion")
+    tc = case.build_test_case(is_tp2_ready=False)
+    tc["iters"] = 4
+
+    # Verify non-contiguous column-sliced z layout on CPU numpy array
+    core_out, z, weight = tc["bucket_input_gen_fn"](8)
+    assert core_out.shape == (8, 16, 128)
+    assert z.shape == (8, 16, 128)
+    assert z.flags["C_CONTIGUOUS"] is False
+    out = tc["baseline_fn"](core_out, z, weight)
+    assert out.shape == (8, 2048)
+
+    # Candidate that passes multi-bucket L3 and dynamic shape probes
+    good_res = run_candidate_evaluation(case.get_baseline_code(), tc)
+    assert good_res["l3_passed"] is True
+    assert set(good_res["bucket_latencies_us"].keys()) == {1, 4, 8, 16, 32}
+
+    # Candidate simulating per-shape Triton JIT recompilation stall on T=97
+    stalling_code = (
+        "import time\n"
+        + case.get_baseline_code()
+        + "\n_orig = optimized_op\n"
+        + "def optimized_op(core_out, z, weight):\n"
+        + "    if z.shape[0] == 97:\n"
+        + "        time.sleep(0.06)\n"
+        + "    return _orig(core_out, z, weight)\n"
+    )
+    tc_strict = dict(tc, recompile_budget_ms=20.0)
+    veto_res = run_candidate_evaluation(stalling_code, tc_strict)
+    assert veto_res["l3_passed"] is False
+    assert veto_res.get("recompile_veto") is True
+    assert "RECOMPILE VETO" in veto_res["error"]
+    assert os.path.exists("ops") is True
+
+
+def test_pluggable_campaign_discover_and_guards(tmp_path):
+    from tools.op_agent.campaign import discover_hotspot_batch
+
+    stat_csv = tmp_path / "op_statistic.csv"
+    stat_csv.write_text(
+        "OP Type,Count,Total Time(us),Avg Time(us)\ngdn_split_ba_op,100,10.0,0.0001\n",
+        encoding="utf-8",
+    )
+    manifest_file = tmp_path / "batch.json"
+    manifest = discover_hotspot_batch(
+        output_manifest_path=str(manifest_file),
+        case_names=["moe_shared_epilogue_decode", "gdn_split_ba"],
+        op_statistic_csv=str(stat_csv),
+        min_graph_baseline_us=0.0,
+        iters=4,
+    )
+    assert manifest["schema"] == "op-agent-campaign-batch/v1"
+    assert len(manifest["candidates"]) == 2
+    by_name = {c["case_name"]: c for c in manifest["candidates"]}
+    # gdn_split_ba has a tiny fake CSV avg (0.0001 us), so the CSV cross-check guard
+    # flags it as `pending_review`
+    assert by_name["gdn_split_ba"]["status"] == "pending_review"
+    assert by_name["moe_shared_epilogue_decode"]["status"] == "approved"

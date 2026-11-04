@@ -17,6 +17,9 @@ class MoeSharedEpilogueDecodeCase(OpCase):
     phase = "decode"
     M: int = 32
     H: int = 2048
+    max_active_rows: int | None = 32
+    shape_buckets = (1, 8, 16, 32)
+    dynamic_shape_probes = (7, 23)
 
     def get_shape_facts(self) -> dict[str, Any]:
         return {"M": self.M, "Hidden": self.H, "phase": self.phase}
