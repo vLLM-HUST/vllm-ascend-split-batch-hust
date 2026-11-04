@@ -43,6 +43,7 @@
 - **GDN in_proj 输入投影权重加载期合并 (GDN 输入投影两次 MatMul 合一)**：专属报告与证据结构见 [ops/gdn_merge_inproj](../ops/gdn_merge_inproj/REPORT.md)。宿主分支 `work/w3f2-inproj-merge`（宿主 PR #63）。L0/L3/L4/端到端均未测，放行前必须补齐 L3 数值护栏。
 - **MoE 共享专家后置门控乘融合 (`moe_epilogue`)**：把 `AscendSharedExperts.part2` 里的广播乘换成单 kernel，保留宿主 `sigmoid`。算子层单次 3.64 → 1.34 µs，输出逐字一致；全链路 Mul 家族 −37.0 ms；端到端不可判定，不主张服务收益。见 [ops/moe_epilogue](../ops/moe_epilogue/REPORT.md)。
 - **Qwen Attention 纯文本 Split-QKV 与 RoPE 融合 (`qwen_text_split_qkv_fuse`)**：在纯文本路径下消除 Split、RMSNorm 与 RoPE 的多步离散调用，统一接驳至片上 UB 的 Triton 融合 Kernel。见 [ops/qwen_text_split_qkv_fuse](../ops/qwen_text_split_qkv_fuse/REPORT.md)。宿主分支 `work/qwen-text-split-qkv-fuse`。
+- **GDN Part 3 Output Norm 与 Rearrange 融合 (`gdn_output_norm_fusion`)**：在 GDN 输出端将 RMSNormGated 与 einops rearrange 融合为单步 Triton 算子，直接写入连续 2D 张量直通投影层。见 [ops/gdn_output_norm_fusion](../ops/gdn_output_norm_fusion/REPORT.md)。宿主分支 `work/gdn-output-norm-fusion`。
 
 探索与负性能留存算子索引：
 - **GDN QKV 单 pass 解包 (`gdn_qkv_unpack`)**：专属报告与证据结构见 [ops/gdn_qkv_unpack](../ops/gdn_qkv_unpack/REPORT.md)。910B2 实测因 Triton 启动发射开销慢于原生链，按规范留存负性能事实，保持未激活。
@@ -91,6 +92,10 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
   4. **Qwen Attention 纯文本 Split-QKV 与 RoPE 融合** — Commit `493ec93d243816217e15daaab480fbe073051981`（分支 `work/qwen-text-split-qkv-fuse`，PR #67，已合入 `based/split-batch-baseline`，合并提交 `d1014aadb`）
      - `vllm_ascend/patch/worker/patch_qwen3_5.py`：在纯文本 1D 模式下将 Split、RMSNorm 与 RoPE 接驳至已有 Triton 融合算子 `triton_split_qkv_rmsnorm_mrope`，由 `VLLM_HUST_SPLIT_QKV_ROPE_FUSED=1` 开启；关闭时保留原生多步离散链路。
      - 插件仓内履约与证据：详见 [ops/qwen_text_split_qkv_fuse](../ops/qwen_text_split_qkv_fuse/REPORT.md)。
+  5. **GDN Part 3 Output Norm 与 Rearrange 融合** — Commit `68c0790818dd15ff28b55d95713c2f0f4b3df66e`（分支 `work/gdn-output-norm-fusion`，基于 `based/split-batch-baseline`）
+     - `vllm_ascend/ops/gdn_epilogue.py`：新增 `gdn_output_norm_rearrange` 融合算子与门控 `is_output_norm_enabled()`，由 `VLLM_HUST_GDN_OUTPUT_NORM_FUSED=1` 开启；关闭时保留原生多步分立链路。
+     - `vllm_ascend/ops/gdn.py`：在 Part 3 输出端对接融合算子，将输出直通 `self.out_proj`。
+     - 插件仓内履约与证据：详见 [ops/gdn_output_norm_fusion](../ops/gdn_output_norm_fusion/REPORT.md)。
 
 ## 4. 工具边界
 
