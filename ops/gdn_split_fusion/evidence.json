@@ -252,21 +252,21 @@
     "input_output": "128 requests x (512 or 2048) in / 256 out",
     "cohort_512": {
       "kv_tokens": 66000,
-      "legs": 8,
-      "design": "two ABBA blocks of 4 legs",
+      "runs": 8,
+      "design": "two ABBA blocks of 4 runs",
       "tok_s_pct": 0.46,
       "per_token_ms_pct": -2.6,
-      "note": "both blocks positive; A-leg spread 4.18%"
+      "note": "both blocks positive; baseline-run spread 4.18%"
     },
     "cohort_2048": {
       "kv_tokens": 263000,
-      "legs": 12,
-      "design": "three ABBA blocks of 4 legs",
+      "runs": 12,
+      "design": "three ABBA blocks of 4 runs",
       "tok_s_pct": -1.27,
       "per_token_ms_pct": 1.78,
-      "note": "all three blocks negative; -3.17% before dropping one outlier leg; A-leg spread 4.29%"
+      "note": "all three blocks negative; -3.17% before dropping one outlier run; baseline-run spread 4.29%"
     },
-    "conclusion": "both cohorts sit inside their own leg spread, so neither a gain nor a loss is claimed. Operator-level saving is 5.00% (512) and 5.05% (2048), effectively equal, while the serving results differ in sign; that difference is noise rather than a load effect, so no load-dependent explanation is offered.",
+    "conclusion": "both cohorts sit inside their own run spread, so neither a gain nor a loss is claimed. Operator-level saving is 5.00% (512) and 5.05% (2048), effectively equal, while the serving results differ in sign; that difference is noise rather than a load effect, so no load-dependent explanation is offered.",
     "root_cause": "op_statistic sums 14518 ms of kernel time for a bench whose wall time is far shorter, so the kernels do not run back to back; removing 350 ms only widens the gaps."
   },
   "known_issue": "M=1 pays ~1.4us of custom-op dispatch overhead per component (~84us per step over 30 layers, about 0.13% of TPOT) because the shape gate must stay inside the op",
