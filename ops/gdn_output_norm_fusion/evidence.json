@@ -43,8 +43,8 @@
   },
   "l4_attribution": {
     "call_count_expected": 30,
-    "call_count_actual": 30,
-    "note": "30 GDN layers in Qwen3.5-35B-A3B"
+    "call_count_actual": null,
+    "note": "callsite fires once per GDN layer and Qwen3.5-35B-A3B has 30 GDN layers, so 30 calls per decode step are expected; runtime call counting has not been instrumented yet and closes together with the serving run"
   },
   "serving_end_to_end": {
     "tested": false,
@@ -60,6 +60,9 @@
     "host_fork_base_branch": "based/split-batch-baseline",
     "host_fork_base_commit": "201adc93a",
     "host_fork_dev_branch": "work/gdn-output-norm-fusion",
-    "host_commit": "68c0790818dd15ff28b55d95713c2f0f4b3df66e"
+    "host_commit": "68c0790818dd15ff28b55d95713c2f0f4b3df66e",
+    "host_fork_pr": 69,
+    "host_merge_commit": "0ee02051620ccab1d505bcf9c1ce41e3ed715b04",
+    "baseline_state": "merged into based/split-batch-baseline via PR #69"
   }
 }

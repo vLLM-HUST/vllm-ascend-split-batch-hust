@@ -25,5 +25,6 @@ GDN 前向执行路径属于宿主私有前向层（`AscendGatedDeltaNetAttentio
 
 - **仓库**：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
 - **Base 分支**：`based/split-batch-baseline`
-- **开发分支**：`work/gdn-output-norm-fusion`
+- **开发分支**：`work/gdn-output-norm-fusion`（PR #69）
 - **提交哈希**：`68c0790818dd15ff28b55d95713c2f0f4b3df66e`
+- **合并提交**：`0ee020516`（已合入 `based/split-batch-baseline`）

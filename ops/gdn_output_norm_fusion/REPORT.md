@@ -4,7 +4,7 @@
 
 - **硬件拓扑**: Atlas 800T A2 (2×910B2, TP=2)
 - **软件栈版本**: CANN 9.1.0 / vllm `0.28.1.post1.dev143+gf18cf803c` / vllm-ascend `0.25.1rc2.dev125+hust`
-- **宿主 Fork 归属**: `vLLM-HUST/vllm-ascend-hust` @ `work/gdn-output-norm-fusion` (Commit `68c0790818dd15ff28b55d95713c2f0f4b3df66e`)，Base 分支为 `based/split-batch-baseline`
+- **宿主 Fork 归属**: `vLLM-HUST/vllm-ascend-hust` @ `work/gdn-output-norm-fusion` (Commit `68c0790818dd15ff28b55d95713c2f0f4b3df66e`，宿主 PR #69，合并提交 `0ee020516`)，Base 分支为 `based/split-batch-baseline`
 - **模型与权重**: Qwen3.5-35B-A3B (bf16, ND 格式)
 - **执行相位**: Decode (Tokens 1, 4, 8, 16, 32, 64, 128)
 - **门控开关**: `VLLM_HUST_GDN_OUTPUT_NORM_FUSED=1` (默认 `0`)
@@ -25,6 +25,8 @@
 
 ## 4. 结论与交付标签
 
-- [x] 宿主层源码落地完成 (`vllm-ascend-hust` @ `work/gdn-output-norm-fusion`)
+- [x] 宿主层源码落地完成 (`vllm-ascend-hust` @ `work/gdn-output-norm-fusion`，宿主 PR #69 已合入 `based/split-batch-baseline`)
 - [x] L3 数值正确性护栏通过 (Max Diff = 0.0)
 - [x] default-off 门控就绪 (`VLLM_HUST_GDN_OUTPUT_NORM_FUSED=1`)
+- [ ] L4 运行期调用计数归因：未插桩，随服务端到端实测一并闭环
+- [ ] 服务端到端 A/B 实测：未执行，当前不主张任何服务收益
