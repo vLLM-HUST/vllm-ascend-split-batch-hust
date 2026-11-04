@@ -30,21 +30,6 @@ find_sharegpt_dataset() {
   return 1
 }
 
-find_mmlu_pro_dataset() {
-  local candidates=(
-    "${VLLM_HUST_DATASET_MMLU_PRO:-}"
-    "/root/operator-experiments/records/datasets/mmlupro-smoke4-5shot-cot-flat-repeat64-1017.jsonl"
-    "/root/operator-experiments/records/datasets/mmlupro-smoke4-5shot-cot-flat-repeat16-1017.jsonl"
-  )
-  for p in "${candidates[@]}"; do
-    if [[ -n "${p}" && -f "${p}" ]]; then
-      echo "${p}"
-      return 0
-    fi
-  done
-  return 1
-}
-
 echo "=========================================="
 echo "执行端到端评测 Workload: ${WORKLOAD}"
 echo "目标服务端口: ${PORT}"
@@ -114,28 +99,8 @@ case "${WORKLOAD}" in
         --result-dir "${OUT_DIR}" \
         --result-filename "result_long_prefix_${TAG}.json"
     ;;
-  mmlu-pro)
-    NP="${NUM_PROMPTS:-64}"
-    CONC="${CONCURRENCY:-16}"
-    if ! DATASET_PATH="$(find_mmlu_pro_dataset)"; then
-      echo "错误: 未找到本地 mmlu-pro JSONL 数据集，请设置 VLLM_HUST_DATASET_MMLU_PRO" >&2
-      exit 1
-    fi
-    echo "启动 mmlu-pro 真实思维链评测流负载 (${DATASET_PATH}, prompts=${NP}, conc=${CONC})..."
-    vllm bench serve \
-        --model "${MODEL}" \
-        --dataset-name custom \
-        --dataset-path "${DATASET_PATH}" \
-        --num-prompts "${NP}" \
-        --max-concurrency "${CONC}" \
-        --port "${PORT}" \
-        --percentile-metrics ttft,tpot,itl \
-        --save-result \
-        --result-dir "${OUT_DIR}" \
-        --result-filename "result_mmlu_pro_${TAG}.json"
-    ;;
   *)
-    echo "错误: 未知 Workload '${WORKLOAD}'。可选: random, sharegpt, long-prefix, mmlu-pro" >&2
+    echo "错误: 未知 Workload '${WORKLOAD}'。可选: random, sharegpt, long-prefix" >&2
     exit 1
     ;;
 esac

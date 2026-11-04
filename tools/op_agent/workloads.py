@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Standard serving workload catalog, characteristics, and operator fitness mapping.
 
-Models the four canonical container workloads (`random`, `sharegpt`,
-`long-prefix`, `mmlu-pro`) and maps operator shape/phase traits to primary
+Models the three canonical container workloads (`random`, `sharegpt`,
+`long-prefix`) and maps operator shape/phase traits to primary
 and dynamic-shape stress workloads without hardcoding large dataset files
 inside the Git repository.
 """
@@ -127,31 +127,6 @@ WORKLOAD_CATALOG: dict[str, WorkloadProfile] = {
             "--ignore-eos",
         ),
     ),
-    "mmlu-pro": WorkloadProfile(
-        workload_id="mmlu-pro",
-        dataset_kind="real_eval_cot_jsonl",
-        summary=(
-            "5-shot Chain-of-Thought evaluation workload matching the target "
-            "Qwen3.5-35B-A3B benchmark scenario."
-        ),
-        prompt_len_profile="medium-long 5-shot prompt (~1300 to 1500 tokens)",
-        output_len_profile="long reasoning generation (up to 2048 tokens)",
-        batch_token_behavior=(
-            "Sustained long-horizon decode interleaved with periodic 5-shot prefills."
-        ),
-        bottleneck_focus=(
-            "End-to-end reasoning evaluation completion and numerical stability"
-        ),
-        default_num_prompts=64,
-        default_concurrency=16,
-        ignore_eos=False,
-        recommended_for_phases=("decode", "mixed", "all"),
-        candidate_dataset_paths=(
-            "/root/operator-experiments/records/datasets/mmlupro-smoke4-5shot-cot-flat-repeat64-1017.jsonl",
-            "/root/operator-experiments/records/datasets/mmlupro-smoke4-5shot-cot-flat-repeat16-1017.jsonl",
-        ),
-        extra_bench_args=("--dataset-name", "custom"),
-    ),
 }
 
 
@@ -250,11 +225,6 @@ def build_bench_serve_cmd(
     ]
     if resolved_path is not None:
         cmd.extend(["--dataset-path", resolved_path])
-    elif workload_id == "mmlu-pro":
-        raise FileNotFoundError(
-            "mmlu-pro requires a local custom JSONL dataset; set "
-            "VLLM_HUST_DATASET_MMLU_PRO or pass dataset_path."
-        )
 
     cmd.extend(
         [

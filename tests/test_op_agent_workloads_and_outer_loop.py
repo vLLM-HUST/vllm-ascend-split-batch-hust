@@ -1,5 +1,5 @@
-"""Contract tests for workload selection (`random`, `sharegpt`, `long-prefix`,
-`mmlu-pro`) and the decoupled outer serving loop (`tools/op_agent/serving_loop.py`).
+"""Contract tests for workload selection (`random`, `sharegpt`, `long-prefix`)
+and the decoupled outer serving loop (`tools/op_agent/serving_loop.py`).
 
 Uses stdlib only so it runs in every dependency-free CI package environment.
 """
@@ -37,7 +37,7 @@ timeline_insight = _load_module(
 
 def test_canonical_workloads_present_and_characterized():
     catalog = workloads.WORKLOAD_CATALOG
-    for wid in ("random", "sharegpt", "long-prefix", "mmlu-pro"):
+    for wid in ("random", "sharegpt", "long-prefix"):
         assert wid in catalog
         prof = catalog[wid]
         assert prof.workload_id == wid
@@ -45,6 +45,8 @@ def test_canonical_workloads_present_and_characterized():
         assert prof.bottleneck_focus
         assert prof.default_num_prompts > 0
         assert prof.default_concurrency > 0
+
+    assert "mmlu-pro" not in catalog
 
 
 def test_operator_workload_selection_pairs_controlled_and_stress():
