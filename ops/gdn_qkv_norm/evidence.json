@@ -1,9 +1,15 @@
 {
-  "operator": "gdn_qkv_norm",
-  "callsite": "vllm_ascend/ops/gdn.py:480,619-620",
-  "model": "Qwen3.5-35B-A3B",
-  "precision": "torch.bfloat16",
-  "tp_size": 2,
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "gdn_qkv_norm",
+  "callsite": "vllm_ascend/ops/gdn.py:552-553,692-693",
+  "environment": {
+    "device": "Atlas 800T A2 (910B2)",
+    "cann_version": "9.1.0",
+    "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+    "model": "Qwen3.5-35B-A3B",
+    "dtype": "bfloat16",
+    "tp_size": 2
+  },
   "shape_facts": {
     "T": 16,
     "row_stride": 4096,
@@ -11,16 +17,71 @@
     "k": 1024,
     "v": 2048,
     "head_dim": 128,
-    "phase": "pure decode"
+    "phase": "pure decode",
+    "shape_buckets": [
+      1,
+      4,
+      8,
+      16,
+      32
+    ],
+    "dynamic_shape_probes": [
+      7,
+      97,
+      266
+    ]
   },
-  "l3_verification": {
-    "status": "passed",
+  "workload_selection": {
+    "primary_workload": "random",
+    "primary_concurrency": 32,
+    "stress_workload": "sharegpt",
+    "rationale": "General decode/epilogue operator: use controlled `random` (512 in / 256 out @ concurrency=32) to lock steady-state batch size and minimize run-to-run variance."
+  },
+  "l0_microbenchmark": {
+    "status": "completed_positive_speedup",
+    "timing_mode": "NPUGraph",
+    "native_median_us": 64.99,
+    "triton_baseline_median_us": 15.15,
+    "optimized_median_us": 6.81,
+    "speedup_vs_stock_chain": 9.54,
+    "speedup_vs_triton_baseline": 2.22,
+    "speedup": 9.54,
+    "bucket_triton_baseline_median_us": {
+      "1": 9.44,
+      "4": 13.7,
+      "8": 15.19,
+      "16": 15.11,
+      "32": 16.57
+    },
+    "bucket_optimized_median_us": {
+      "1": 3.72,
+      "4": 5.42,
+      "8": 6.32,
+      "16": 6.75,
+      "32": 8.01
+    },
+    "dynamic_shape_probe_ms": {
+      "7": 0.29,
+      "97": 0.3,
+      "266": 0.33
+    }
+  },
+  "l3_numerical_guard": {
+    "passed": true,
     "atol": 0.001,
     "rtol": 0.001
   },
-  "l0_benchmark": {
-    "baseline_median_us": 791.24,
-    "optimized_median_us": 247.09,
-    "speedup": 3.2
+  "l4_attribution": {
+    "status": "pending_outer_loop",
+    "call_count_expected": null,
+    "call_count_actual": null
+  },
+  "serving_end_to_end": {
+    "tested": false,
+    "status": "pending_outer_loop",
+    "primary_workload": "random",
+    "stress_workload": "sharegpt",
+    "concurrency": 32,
+    "speedup": null
   }
 }

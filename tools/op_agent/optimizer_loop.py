@@ -11,6 +11,7 @@ Customized for Qwen3.5-35B (TP=2) operator tuning under repo standards:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from typing import Any
@@ -161,19 +162,21 @@ class EvaluateKernelTool(Tool):
         if improved:
             BEST_RECORD["l0_median_us"] = latency
             BEST_RECORD["kernel_code"] = code_to_eval
+            BEST_RECORD["bucket_latencies_us"] = res.get("bucket_latencies_us", {})
 
         base_lat = CURRENT_TEST_CASE.get("baseline_latency", latency)
         speedup = round(base_lat / max(latency, 1e-6), 2)
 
-        return json.dumps(
-            {
-                "l3_passed": True,
-                "l0_median_us": latency,
-                "speedup": f"{speedup}x",
-                "improved": improved,
-                "best_so_far_us": BEST_RECORD["l0_median_us"],
-            }
-        )
+        payload: dict[str, Any] = {
+            "l3_passed": True,
+            "l0_median_us": latency,
+            "speedup": f"{speedup}x",
+            "improved": improved,
+            "best_so_far_us": BEST_RECORD["l0_median_us"],
+        }
+        if res.get("bucket_latencies_us"):
+            payload["bucket_latencies_us"] = res["bucket_latencies_us"]
+        return json.dumps(payload)
 
 
 class L3CheckTool(Tool):
@@ -372,7 +375,7 @@ def get_configured_model() -> Model:
     return OpenAIServerModel(**kwargs)
 
 
-def create_agent(model=None, tools=None):
+def create_agent(model=None, tools=None, max_steps: int = 10):
     if tools is None:
         tools = [
             WriteCandidateFileTool(),
@@ -389,12 +392,16 @@ def create_agent(model=None, tools=None):
     return CodeAgent(
         tools=tools,
         model=model,
-        max_steps=10,
+        max_steps=max_steps,
         add_base_tools=False,
     )
 
 
-def run_qwen35_optimization(case_name: str = "moe_shared_epilogue_decode", model=None):
+def run_qwen35_optimization(
+    case_name: str = "moe_shared_epilogue_decode",
+    model=None,
+    max_iters: int = 10,
+):
     global CURRENT_TEST_CASE, BEST_RECORD
     CURRENT_TEST_CASE = setup_qwen35_case(case_name)
 
@@ -434,6 +441,7 @@ def optimized_op(gate, out):
     CURRENT_TEST_CASE["baseline_latency"] = base_latency
     BEST_RECORD["l0_median_us"] = base_latency
     BEST_RECORD["kernel_code"] = baseline_code
+    BEST_RECORD["bucket_latencies_us"] = base_res.get("bucket_latencies_us", {})
 
     print(f"=== Baseline L0 Latency: {base_latency:.2f} µs ===")
 
@@ -445,7 +453,7 @@ def optimized_op(gate, out):
         SearchKnowledgeBaseTool(),
         ReadKnowledgeCardTool(),
     ]
-    agent = create_agent(model=model, tools=tools)
+    agent = create_agent(model=model, tools=tools, max_steps=max_iters)
 
     try:
         agent.run(task)
@@ -469,13 +477,34 @@ def optimized_op(gate, out):
             optimized_latency=BEST_RECORD["l0_median_us"],
             kernel_code=BEST_RECORD["kernel_code"],
             shape_facts=CURRENT_TEST_CASE["shape_facts"],
+            workload_spec=CURRENT_TEST_CASE.get("workload_spec"),
+            bucket_latencies_us=BEST_RECORD.get("bucket_latencies_us"),
         )
         ok, msg = verify_dir_checksum(out_dir)
-        print(f"✅ Delivered standard operator bundle into: {out_dir}")
-        print(f"🔒 Anti-drift Checksum Gate: {'PASS' if ok else 'FAIL'} ({msg})")
+        print(f"Delivered standard operator bundle into: {out_dir}")
+        print(f"Anti-drift Checksum Gate: {'PASS' if ok else 'FAIL'} ({msg})")
 
     return BEST_RECORD
 
 
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Inner-loop operator optimization harness (L3 + L0)."
+    )
+    parser.add_argument(
+        "--case",
+        default="moe_shared_epilogue_decode",
+        help="Registered OpCase name (see tools/op_agent/cases/__init__.py).",
+    )
+    parser.add_argument(
+        "--max-iters",
+        type=int,
+        default=10,
+        help="Maximum CodeAgent optimization steps.",
+    )
+    args = parser.parse_args(argv)
+    run_qwen35_optimization(case_name=args.case, max_iters=args.max_iters)
+
+
 if __name__ == "__main__":
-    run_qwen35_optimization()
+    main()

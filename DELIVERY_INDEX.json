@@ -154,7 +154,7 @@
     },
     {
       "id": "gdn_qkv_norm",
-      "display_name": "gdn_qkv_norm (vllm_ascend/ops/gdn.py:480,619-620)",
+      "display_name": "gdn_qkv_norm (vllm_ascend/ops/gdn.py:552-553,692-693)",
       "layer": "plugin_carrier",
       "directory": "ops/gdn_qkv_norm",
       "readme": "ops/gdn_qkv_norm/README.md",

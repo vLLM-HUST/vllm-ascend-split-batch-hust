@@ -1,44 +1,48 @@
-# 端到端服务评测负载规范 (Workloads Specification)
+# 端到端服务评测负载特征与选择规范 (Workloads Specification)
 
-本目录为 vLLM-Ascend 昇腾服务化端到端评测所支持的标准负载（Workload）定义库。用于为后续算法优化、批调度策略及算子融合提供统一、可复现的评测基准。
-
----
-
-## 1. 纳入的基准负载定义
-
-当前仓库正式纳入以下三类典型生产与基准负载：
-
-### 1.1 `random-input`（标准受控测试集）
-- **核心定位**：用于受控变量下的纯模型端到端延迟测定，排除上下文缓存命中等外界干扰。
-- **推荐配置**：
-  - 输入长度：`1024` tokens（固定）
-  - 输出长度：`256` tokens（固定）
-  - 并发度：`64`
-  - 请求总量：`256`
-- **核心指标**：首字延迟（TTFT）、每输出 Token 耗时（TPOT）、字间延迟（ITL）。
-
-### 1.2 `sharegpt`（真实多轮对话分布）
-- **核心定位**：用于模拟真实生产环境中长短不一的实际用户会话，评估连续批调度（Continuous Batching）的调度吞吐与长尾分布表现。
-- **数据来源**：ShareGPT 真实会话子集（`ShareGPT_V3_unfiltered_cleaned_split.json`）。
-- **推荐配置**：
-  - 数据格式：`--dataset-name sharegpt`
-  - 并发度：`32` / `64`
-  - 请求总量：`500`
-- **核心指标**：端到端请求处理速率（req/s）、输出 Token 速率（req/s 与 tok/s 表现）、P99 延迟。
-
-### 1.3 `long-prefix`（长前缀上下文复用测试集）
-- **核心定位**：评估在多请求共享长 System Prompt 或知识库文档时的 Prefill 耗时，以及 Prefix Caching（KV Cache 命中复用）机制生效下的端到端加速比。
-- **推荐配置**：
-  - 共享前缀长度：`2048` ~ `4096` tokens
-  - 增量 Query 长度：`128` tokens
-  - 输出长度：`128` tokens
-  - 并发度：`16` / `32`
-- **核心指标**：Cache 命中率、Cache 命中时的 TTFT 消除量、Prefill 阶段算子开销。
+本目录定义 vLLM-Ascend 服务化端到端评测（外环 `serving_loop`）的标准负载（Workload）库、张量形状分布特征及算子绑定规则。所有大体量原始数据集均在仓外容器持久路径隔离存放，由脚本与环境变量自动探测，严禁提交进 Git 仓库。
 
 ---
 
-## 2. 当前阶段执行策略
+## 1. 标准负载特征画像（数据分布 -> 内部张量形状特征）
 
-- **当前状态**：**纳入标准库归档，当前阶段暂不按全量矩阵执行**。
-- **说明**：当前阶段核心任务是验证基础算子（如 GDN Conv1d 预打包、Gate FP32 等）在 910B2 硬件上的单算子正确性与基础受控端到端收益。因此当前测试仅以受控的 `random-input` 为主。
-- 后续如需开展针对 KV 缓存复用或调度吞吐的专项验收，可按本目录各负载的脚本规范直接调用。
+| 负载标识 | 数据来源与长度形态 | 步间 Token 数 $T$ 与调度特征 | 系统瓶颈焦点 | 算子适配场景 |
+| :--- | :--- | :--- | :--- | :--- |
+| **`random`** | 内置定长合成数据（默认输入 `512`、输出 `256`、`--ignore-eos`） | 无长度方差；预热后解码步 $T$ 稳定锁死在并发桶（如 `16` 或 `32`），同组重复测量波动最小 | 稳态解码下的片外内存带宽、向量后处理与算子启动开销 | **解码算子主测基准**：用于干净测量解码与尾声融合算子（如 `gdn_output_norm_fusion`、`moe_epilogue`、`gate_fp32`）的纯净端到端差异 |
+| **`sharegpt`** | 真实多轮对话分布（离线 ShareGPT JSON，输入输出呈偏态长尾分布） | 请求异步到达与结束，分块预填充与解码高频交织，步间 $T$ 在动态范围内剧烈跳变 | 动态尺寸下的 Triton 即时编译卡顿风险、非对齐尾块掩码正确性、行数门控算子的实际命中比例 | **动态形状压力与鲁棒性验证**：所有算子进入整网验收时的必配压力负载，专门拦截漏写 `do_not_specialize` 引发的重编译毛刺与门控退化 |
+| **`long-prefix`** | 长上下文合成数据（默认输入 `2048`、输出 `128`、`--ignore-eos`） | 大尺寸分块预填充步占主导（$T$ 处于较大区间），矩阵乘与宽张量切片搬运占比高 | 预填充阶段的投影合并、宽张量解包/重排拷贝及前缀键值复用 | **预填充与宽张量搬运优化**：适用于 `gdn_split_fusion`、`gdn_merge_inproj`、长序列注意力掩码与位置编码融合 |
+| **`mmlu-pro`** | 目标评测集多轮思维链展平流（离线 JSONL，中等输入 + 长思维链输出） | 周期性多样本提示词预填充与超长周期持续解码并存 | 长思维链生成的整体完成耗时与端到端数值稳定性 | **目标业务真实流量复核**：用于验证算子在真实推理评测流量下的综合表现 |
+
+---
+
+## 2. 算子特征驱动的双负载绑定规则
+
+在内外环分离架构（见 [docs/op-agent-harness-spec.md](../docs/op-agent-harness-spec.md)）中，外环评测不再随意挑选单一负载，而是按算子生效条件绑定 **“主测受控负载 + 动态分布压力负载”**：
+
+1. **主测受控负载（`primary_workload`，用于判定端到端收益）**：
+   - **通用解码算子**（全行数生效）：绑定 `random`（默认并发 `32`），消除请求长度方差带来的调度噪声；
+   - **带行数上限门控的小批量解码算子**（如仅在小行数区间启用、大行数回退）：绑定低并发档位的 `random`，确保稳态步落在算子激活区间内；
+   - **预填充主导算子**：绑定 `long-prefix`，放大预填充张量计算与重排占比。
+2. **动态分布压力负载（`stress_workload`，用于检验真实流量稳定性）**：
+   - 统一配对 `sharegpt`（或 `mmlu-pro`），重点核查：① 动态 $T$ 下是否出现首次编译长尾毛刺；② L4 `op_statistic.csv` 中目标算子的实际命中率是否符合预期。
+
+---
+
+## 3. 执行方式与数据集路径约定
+
+通过 `workloads/run_workload.sh` 或 `python3 -m tools.op_agent.serving_loop plan` 生成并执行评测命令：
+
+```bash
+# 1. 查看指定算子的推荐负载配对与命令
+python3 -m tools.op_agent.serving_loop plan --op gdn_output_norm_fusion --gate-env VLLM_HUST_GDN_OUTPUT_NORM_FUSED=1 --phase decode
+
+# 2. 执行受控定长基准负载
+bash workloads/run_workload.sh random 8350 qwen35-35b /tmp/workload_results
+
+# 3. 执行真实长尾对话分布压力负载（自动探测容器内离线 ShareGPT JSON）
+bash workloads/run_workload.sh sharegpt 8350 qwen35-35b /tmp/workload_results
+```
+
+可通过环境变量显式指定仓外离线数据集路径：
+- `VLLM_HUST_DATASET_SHAREGPT`：覆盖本地 ShareGPT JSON 路径；
+- `VLLM_HUST_DATASET_MMLU_PRO`：覆盖本地 MMLU-Pro JSONL 路径。

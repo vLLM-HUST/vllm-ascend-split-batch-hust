@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 vLLM-HUST Project. All Rights Reserved.
-# 标准端到端负载执行脚本
+# 标准端到端服务评测负载执行入口（供外环 serving_loop 与手工验收统一调用）
 
 set -euo pipefail
 
@@ -8,8 +8,42 @@ WORKLOAD="${1:-random}"
 PORT="${2:-8350}"
 MODEL="${3:-qwen35-35b}"
 OUT_DIR="${4:-/tmp/workload_results}"
+CONCURRENCY="${CONCURRENCY:-}"
+NUM_PROMPTS="${NUM_PROMPTS:-}"
+TAG="${RUN_TAG:-$(date +%Y%m%d_%H%M%S)}"
 
 mkdir -p "${OUT_DIR}"
+
+find_sharegpt_dataset() {
+  local candidates=(
+    "${VLLM_HUST_DATASET_SHAREGPT:-}"
+    "/data/vllm-hust-benchmark/scripts/traces/evoscientist-workload-sharegpt.json"
+    "/vllm-workspace/bench/datasets/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json"
+    "/root/vllm-workspace/bench/datasets/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json"
+  )
+  for p in "${candidates[@]}"; do
+    if [[ -n "${p}" && -f "${p}" ]]; then
+      echo "${p}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_mmlu_pro_dataset() {
+  local candidates=(
+    "${VLLM_HUST_DATASET_MMLU_PRO:-}"
+    "/root/operator-experiments/records/datasets/mmlupro-smoke4-5shot-cot-flat-repeat64-1017.jsonl"
+    "/root/operator-experiments/records/datasets/mmlupro-smoke4-5shot-cot-flat-repeat16-1017.jsonl"
+  )
+  for p in "${candidates[@]}"; do
+    if [[ -n "${p}" && -f "${p}" ]]; then
+      echo "${p}"
+      return 0
+    fi
+  done
+  return 1
+}
 
 echo "=========================================="
 echo "执行端到端评测 Workload: ${WORKLOAD}"
@@ -20,61 +54,88 @@ echo "=========================================="
 
 case "${WORKLOAD}" in
   random)
-    echo "启动 random-input 标准受控负载 (1024 in / 256 out, 并发 64)..."
+    IN_LEN="${RANDOM_INPUT_LEN:-512}"
+    OUT_LEN="${RANDOM_OUTPUT_LEN:-256}"
+    NP="${NUM_PROMPTS:-128}"
+    CONC="${CONCURRENCY:-32}"
+    echo "启动 random 受控定长负载 (in=${IN_LEN}, out=${OUT_LEN}, prompts=${NP}, conc=${CONC})..."
     vllm bench serve \
-        --backend openai-chat \
         --model "${MODEL}" \
         --dataset-name random \
-        --random-input-len 1024 \
-        --random-output-len 256 \
-        --num-prompts 256 \
-        --max-concurrency 64 \
+        --random-input-len "${IN_LEN}" \
+        --random-output-len "${OUT_LEN}" \
+        --ignore-eos \
+        --num-prompts "${NP}" \
+        --max-concurrency "${CONC}" \
         --port "${PORT}" \
         --percentile-metrics ttft,tpot,itl \
         --save-result \
         --result-dir "${OUT_DIR}" \
-        --result-filename "result_random_$(date +%Y%m%d_%H%M%S).json"
+        --result-filename "result_random_${TAG}.json"
     ;;
   sharegpt)
-    echo "启动 sharegpt 真实对话负载 (长尾分布, 并发 64)..."
-    DATASET_PATH="/data/shared_models/huggingface_cache/hub/datasets--anon8231489123--ShareGPT_Vicuna_unfiltered"
-    if [ ! -d "${DATASET_PATH}" ]; then
-      echo "提示: 未检测到本地 sharegpt 数据集路径，使用在线/通用 sharegpt 模式"
-      DATASET_ARGS=(--dataset-name sharegpt)
-    else
+    NP="${NUM_PROMPTS:-256}"
+    CONC="${CONCURRENCY:-32}"
+    if DATASET_PATH="$(find_sharegpt_dataset)"; then
+      echo "检测到本地 ShareGPT 数据集: ${DATASET_PATH}"
       DATASET_ARGS=(--dataset-name sharegpt --dataset-path "${DATASET_PATH}")
+    else
+      echo "未检测到本地 ShareGPT 文件，使用默认 sharegpt 数据源"
+      DATASET_ARGS=(--dataset-name sharegpt)
     fi
     vllm bench serve \
-        --backend openai-chat \
         --model "${MODEL}" \
         "${DATASET_ARGS[@]}" \
-        --num-prompts 256 \
-        --max-concurrency 64 \
+        --num-prompts "${NP}" \
+        --max-concurrency "${CONC}" \
         --port "${PORT}" \
         --percentile-metrics ttft,tpot,itl \
         --save-result \
         --result-dir "${OUT_DIR}" \
-        --result-filename "result_sharegpt_$(date +%Y%m%d_%H%M%S).json"
+        --result-filename "result_sharegpt_${TAG}.json"
     ;;
   long-prefix)
-    echo "启动 long-prefix 前缀复用负载 (长前缀 2048 / 增量 128 / 输出 128)..."
-    # long-prefix: 使用较长输入与短输出模拟长上下文/KV复用场景
+    IN_LEN="${LONG_INPUT_LEN:-2048}"
+    OUT_LEN="${LONG_OUTPUT_LEN:-128}"
+    NP="${NUM_PROMPTS:-128}"
+    CONC="${CONCURRENCY:-32}"
+    echo "启动 long-prefix 长上下文负载 (in=${IN_LEN}, out=${OUT_LEN}, prompts=${NP}, conc=${CONC})..."
     vllm bench serve \
-        --backend openai-chat \
         --model "${MODEL}" \
         --dataset-name random \
-        --random-input-len 2048 \
-        --random-output-len 128 \
-        --num-prompts 128 \
-        --max-concurrency 32 \
+        --random-input-len "${IN_LEN}" \
+        --random-output-len "${OUT_LEN}" \
+        --ignore-eos \
+        --num-prompts "${NP}" \
+        --max-concurrency "${CONC}" \
         --port "${PORT}" \
         --percentile-metrics ttft,tpot,itl \
         --save-result \
         --result-dir "${OUT_DIR}" \
-        --result-filename "result_long_prefix_$(date +%Y%m%d_%H%M%S).json"
+        --result-filename "result_long_prefix_${TAG}.json"
+    ;;
+  mmlu-pro)
+    NP="${NUM_PROMPTS:-64}"
+    CONC="${CONCURRENCY:-16}"
+    if ! DATASET_PATH="$(find_mmlu_pro_dataset)"; then
+      echo "错误: 未找到本地 mmlu-pro JSONL 数据集，请设置 VLLM_HUST_DATASET_MMLU_PRO" >&2
+      exit 1
+    fi
+    echo "启动 mmlu-pro 真实思维链评测流负载 (${DATASET_PATH}, prompts=${NP}, conc=${CONC})..."
+    vllm bench serve \
+        --model "${MODEL}" \
+        --dataset-name custom \
+        --dataset-path "${DATASET_PATH}" \
+        --num-prompts "${NP}" \
+        --max-concurrency "${CONC}" \
+        --port "${PORT}" \
+        --percentile-metrics ttft,tpot,itl \
+        --save-result \
+        --result-dir "${OUT_DIR}" \
+        --result-filename "result_mmlu_pro_${TAG}.json"
     ;;
   *)
-    echo "错误: 未知 Workload '${WORKLOAD}'。可选: random, sharegpt, long-prefix"
+    echo "错误: 未知 Workload '${WORKLOAD}'。可选: random, sharegpt, long-prefix, mmlu-pro" >&2
     exit 1
     ;;
 esac

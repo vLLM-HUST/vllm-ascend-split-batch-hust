@@ -1,0 +1,211 @@
+name: Auto-merge PR (Raing5Days)
+
+on:
+  check_suite:
+    types: [completed]
+  workflow_run:
+    workflows:
+      - "Extension CI"
+      - "Custody policy tests"
+      - "Canonical evidence custody"
+      - "Benchmark-only data (organization)"
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Optional PR number to evaluate and merge"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+concurrency:
+  group: auto-merge-raing5days
+  cancel-in-progress: false
+
+jobs:
+  auto-merge:
+    name: Auto-merge eligible PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate and merge eligible PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          INPUT_PR: ${{ inputs.pr_number || '' }}
+          ALLOWED_LOGIN: "Raing5Days"
+        run: |
+          python3 - <<'PY'
+          import fnmatch
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPOSITORY"]
+          input_pr = os.environ.get("INPUT_PR", "").strip()
+          allowed_login = os.environ.get("ALLOWED_LOGIN", "Raing5Days").strip()
+
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "Content-Type": "application/json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+
+          def api(method: str, path: str, body: dict | None = None):
+              url = f"https://api.github.com/repos/{repo}{path}"
+              data = json.dumps(body).encode("utf-8") if body is not None else None
+              req = urllib.request.Request(url, data=data, headers=headers, method=method)
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return resp.status, json.loads(resp.read().decode("utf-8"))
+
+          def is_package_ci_ignored(filename: str) -> bool:
+              if filename.endswith(".md"):
+                  return True
+              for pat in (
+                  "docs/evidence/**/*.json",
+                  "docs/evidence/**/*.txt",
+                  "docs/evidence/**/*.log",
+                  "docs/evidence/*.json",
+                  "docs/evidence/*.txt",
+                  "docs/evidence/*.log",
+              ):
+                  if fnmatch.fnmatch(filename, pat):
+                      return True
+              return False
+
+          if input_pr:
+              if not input_pr.isdigit():
+                  raise SystemExit(f"Invalid pr_number: {input_pr!r}")
+              pr_numbers = [int(input_pr)]
+          else:
+              _, open_prs = api("GET", "/pulls?state=open&base=main&per_page=30")
+              pr_numbers = [
+                  p["number"]
+                  for p in open_prs
+                  if (p.get("user") or {}).get("login") == allowed_login
+              ]
+
+          if not pr_numbers:
+              print("No open candidate PRs found.")
+              raise SystemExit(0)
+
+          for num in pr_numbers:
+              print(f"=== Inspecting PR #{num} ===")
+              _, pr = api("GET", f"/pulls/{num}")
+
+              if pr.get("state") != "open" or pr.get("draft"):
+                  print(f"Skip PR #{num}: state={pr.get('state')}, draft={pr.get('draft')}")
+                  continue
+
+              if (pr.get("user") or {}).get("login") != allowed_login:
+                  print(f"Skip PR #{num}: author login is not {allowed_login}")
+                  continue
+
+              head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
+              base_repo = ((pr.get("base") or {}).get("repo") or {}).get("full_name")
+              if not head_repo or head_repo != base_repo:
+                  print(f"Skip PR #{num}: cross-repo PR ({head_repo} -> {base_repo})")
+                  continue
+
+              head_sha = pr["head"]["sha"]
+
+              # Verify every commit in the PR has committer == Raing5Days
+              _, commits = api("GET", f"/pulls/{num}/commits?per_page=100")
+              if not commits:
+                  print(f"Skip PR #{num}: no commits returned")
+                  continue
+
+              committer_ok = True
+              for c in commits:
+                  c_sha = c["sha"][:8]
+                  gh_committer = (c.get("committer") or {}).get("login")
+                  if gh_committer != allowed_login:
+                      print(
+                          f"Skip PR #{num}: commit {c_sha} committer.login={gh_committer!r} "
+                          f"!= {allowed_login!r}"
+                      )
+                      committer_ok = False
+                      break
+              if not committer_ok:
+                  continue
+
+              # Verify check-runs on head_sha are all completed and green
+              _, chk_data = api("GET", f"/commits/{head_sha}/check-runs?per_page=100")
+              check_runs = chk_data.get("check_runs", [])
+
+              # Ignore this auto-merge job itself
+              other_runs = [
+                  r for r in check_runs if r.get("name") != "Auto-merge eligible PRs"
+              ]
+              if not other_runs:
+                  print(f"Skip PR #{num}: no check-runs registered yet on {head_sha[:8]}")
+                  continue
+
+              pending = [r["name"] for r in other_runs if r.get("status") != "completed"]
+              if pending:
+                  print(f"Skip PR #{num}: checks still running: {pending}")
+                  continue
+
+              # Build latest conclusion per check name
+              latest_by_name: dict[str, str | None] = {}
+              for r in sorted(other_runs, key=lambda x: x.get("id", 0)):
+                  latest_by_name[r["name"]] = r.get("conclusion")
+
+              failed = {
+                  k: v
+                  for k, v in latest_by_name.items()
+                  if v not in ("success", "skipped", "neutral")
+              }
+              if failed:
+                  print(f"Skip PR #{num}: non-green checks: {failed}")
+                  continue
+
+              required_checks = {
+                  "Benchmark-only data (organization)",
+                  "Custody policy tests",
+                  "verify",
+              }
+              _, pr_files = api("GET", f"/pulls/{num}/files?per_page=100")
+              if any(not is_package_ci_ignored(f["filename"]) for f in pr_files):
+                  required_checks.update(
+                      {"package (3.10)", "package (3.12)", "package (3.14)"}
+                  )
+
+              missing_or_unsuccessful = [
+                  req_name
+                  for req_name in sorted(required_checks)
+                  if latest_by_name.get(req_name) != "success"
+              ]
+              if missing_or_unsuccessful:
+                  print(
+                      f"Skip PR #{num}: required checks not yet 'success': "
+                      f"{missing_or_unsuccessful}"
+                  )
+                  continue
+
+              if not pr.get("mergeable") or pr.get("mergeable_state") != "clean":
+                  print(
+                      f"Skip PR #{num}: mergeable={pr.get('mergeable')}, "
+                      f"mergeable_state={pr.get('mergeable_state')!r}"
+                  )
+                  continue
+
+              print(f"All gates green for PR #{num} ({head_sha[:8]}). Merging...")
+              try:
+                  status, merge_res = api(
+                      "PUT",
+                      f"/pulls/{num}/merge",
+                      {"sha": head_sha, "merge_method": "merge"},
+                  )
+                  print(f"Merged PR #{num} (HTTP {status}): {merge_res.get('message')}")
+              except urllib.error.HTTPError as e:
+                  err_body = e.read().decode("utf-8", errors="replace")
+                  print(f"Failed to merge PR #{num}: HTTP {e.code} {err_body}")
+                  raise
+          PY
