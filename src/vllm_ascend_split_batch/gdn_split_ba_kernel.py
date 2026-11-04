@@ -7,7 +7,14 @@ import triton
 import triton.language as tl
 
 
-@triton.jit
+@triton.jit(
+    do_not_specialize=[
+        "M",
+        "stride_bam",
+        "stride_bm",
+        "stride_am",
+    ]
+)
 def gdn_split_ba_2d_kernel(
     ba_ptr,
     b_ptr,
@@ -18,7 +25,7 @@ def gdn_split_ba_2d_kernel(
     stride_bn,
     stride_am,
     stride_an,
-    M: tl.constexpr,
+    M,
     HALF: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
