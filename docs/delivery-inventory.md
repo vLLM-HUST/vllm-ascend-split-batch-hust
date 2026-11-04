@@ -88,7 +88,7 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
      - `vllm_ascend/ops/register_custom_ops.py`：注册 `moe_gate_mul`（`PrivateUse1`）。
      - 插件仓内履约与证据：详见 [ops/moe_epilogue](../ops/moe_epilogue/REPORT.md)。
   4. **GDN 投影解包 / 混合 qkv 重排融合** — 单宿主仓库
-     - `vllm-ascend-hust` 分支 `work/gdn-unpack-fused`（Commit `53701fb47`，基于 `based/split-batch-baseline`）：新增 `vllm_ascend/ops/gdn_epilogue.py`（两个 kernel + `torch.ops.vllm_ascend.gdn_unpack` / `gdn_rearrange`）；`gdn.py` 的投影分支（普通与 in_proj 合并两条）改用 `gdn_unpack`，并新增 `_rearrange_mixed_qkv` 覆盖、把 `_forward_core` 三处调用指过去。开关 `VLLM_HUST_GDN_UNPACK_FUSED=1`。
+     - `vllm-ascend-hust` 分支 `work/gdn-unpack-fused`（Commit `82e140a9a`，基于 `based/split-batch-baseline`，已通过 PR #68 合入基线，合并提交 `201adc93a`）：新增 `vllm_ascend/ops/gdn_epilogue.py`（两个 kernel + `torch.ops.vllm_ascend.gdn_unpack` / `gdn_rearrange`）；`gdn.py` 的投影分支（普通与 in_proj 合并两条）改用 `gdn_unpack`，并新增 `_rearrange_mixed_qkv` 覆盖、把 `_forward_core` 三处调用指过去。开关 `VLLM_HUST_GDN_UNPACK_FUSED=1`。
      - 早期跨仓库版本（`vllm-ascend-hust` 的 `work/gdn-split-fusion` `16e66804c` 与 `vllm-hust` 的 `work/gdn-rearrange-fusion` `8c9f165259`）保留作历史，未合入基线。
      - 插件仓内履约与证据：详见 [ops/gdn_split_fusion](../ops/gdn_split_fusion/REPORT.md)。
 

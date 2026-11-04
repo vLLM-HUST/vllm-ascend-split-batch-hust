@@ -277,7 +277,9 @@
     "host_fork_base_branch": "based/split-batch-baseline",
     "host_fork_base_commit": "8039119fd",
     "host_fork_dev_branch": "work/gdn-unpack-fused",
-    "host_commit": "53701fb47",
-    "pending": "end-to-end numerics, in-graph attribution and serving A/B are all outstanding"
+    "host_commit": "82e140a9a",
+    "pending": "image rebuild only; end-to-end numerics, in-graph attribution and serving A/B are all done",
+    "host_merge_commit": "201adc93a",
+    "baseline_state": "merged into based/split-batch-baseline via PR #68"
   }
 }
