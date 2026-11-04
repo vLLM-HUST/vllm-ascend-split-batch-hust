@@ -111,6 +111,20 @@
       "serving_status": "negative_or_pending"
     },
     {
+      "id": "gdn_split_fusion",
+      "display_name": "GDN Split / Rearrange Copy Fusion",
+      "layer": "host_fork",
+      "directory": "ops/gdn_split_fusion",
+      "readme": "ops/gdn_split_fusion/README.md",
+      "report": "ops/gdn_split_fusion/REPORT.md",
+      "evidence": "ops/gdn_split_fusion/evidence.json",
+      "status": "default_off_serving_no_gain",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_GDN_UNPACK_FUSED=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "measured_no_gain"
+    },
+    {
       "id": "moe_epilogue",
       "display_name": "MoE Shared-Expert Epilogue Multiply Fusion",
       "layer": "host_fork",
