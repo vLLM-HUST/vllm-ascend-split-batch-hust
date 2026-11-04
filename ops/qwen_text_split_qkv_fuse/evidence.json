@@ -1,0 +1,70 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "qwen_text_split_qkv_fuse",
+  "callsite": "vllm_ascend/patch/worker/patch_qwen3_5.py:AscendQwen3NextAttention.forward",
+  "environment": {
+    "device": "Ascend910B2",
+    "cann_version": "9.1.0",
+    "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+    "vllm_ascend_version": "0.25.1rc2.dev125+hust",
+    "model": "Qwen3.5-35B-A3B",
+    "dtype": "bf16"
+  },
+  "shape_facts": {
+    "phase": "decode",
+    "batch_size": 16,
+    "prompt_tokens": 1024,
+    "decode_tokens": 16,
+    "head_size": 128,
+    "rotary_dim": 64,
+    "num_q_heads": 8,
+    "num_kv_heads": 2,
+    "cudagraph_mode": "FULL"
+  },
+  "l0_microbenchmark": {
+    "status": "completed_positive_speedup",
+    "conclusion": "fused kernel reduces multi-operator dispatch and intermediate memory traffic, yielding significant speedup in decode token sizes",
+    "speedup": 5.74,
+    "native_median_us": 32.8,
+    "optimized_median_us": 5.7,
+    "measurement": "NPU graph, 50 repetitions packed per replay, single 910B2",
+    "raw_measurements": {
+      "Tokens_1": {"native_us": 16.7, "candidate_us": 4.9, "speedup": 3.43},
+      "Tokens_8": {"native_us": 27.3, "candidate_us": 5.3, "speedup": 5.19},
+      "Tokens_16": {"native_us": 32.8, "candidate_us": 5.7, "speedup": 5.74},
+      "Tokens_32": {"native_us": 38.1, "candidate_us": 6.8, "speedup": 5.59},
+      "Tokens_64": {"native_us": 59.9, "candidate_us": 8.7, "speedup": 6.84},
+      "Tokens_128": {"native_us": 57.3, "candidate_us": 10.6, "speedup": 5.40}
+    }
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "metric": "allclose",
+    "max_abs_diff": 0.03125,
+    "note": "v and gate outputs are bitwise identical; q and k outputs differ by at most 0.03125 due to hardware intermediate rounding differences in rmsnorm"
+  },
+  "l4_attribution": {
+    "call_count_expected": 10,
+    "call_count_actual": 10,
+    "note": "10 full attention layers in Qwen3.5-35B-A3B"
+  },
+  "serving_end_to_end": {
+    "tested": false,
+    "concurrency": 16,
+    "speedup": 1.0,
+    "status": "pending_serving_run"
+  },
+  "status": "default_off_host_fork_measured",
+  "default_enabled": false,
+  "evidence_fingerprint": {
+    "benchmark_script": "ops/qwen_text_split_qkv_fuse/bench_l0.py",
+    "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
+    "host_fork_base_branch": "based/split-batch-baseline",
+    "host_fork_base_commit": "ad82d77cb",
+    "host_fork_dev_branch": "work/qwen-text-split-qkv-fuse",
+    "host_commit": "493ec93d243816217e15daaab480fbe073051981",
+    "host_fork_pr": 67,
+    "host_merge_commit": "d1014aadb",
+    "baseline_state": "merged into based/split-batch-baseline via PR #67"
+  }
+}

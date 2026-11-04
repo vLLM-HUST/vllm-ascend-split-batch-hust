@@ -156,3 +156,47 @@ def test_kb_in_memory_caching():
 
         if os.path.exists(tmp_name):
             os.remove(tmp_name)
+
+
+def test_case_registry_contract():
+    from tools.op_agent.cases import CASE_REGISTRY, get_case
+
+    assert "gdn_qkv_norm" in CASE_REGISTRY
+    assert "gdn_input_norm_decode" in CASE_REGISTRY
+    assert "gdn_norm_gate" in CASE_REGISTRY
+    assert "gdn_split_ba" in CASE_REGISTRY
+    assert "moe_shared_epilogue_decode" in CASE_REGISTRY
+
+    for name in CASE_REGISTRY:
+        case = get_case(name)
+        tc = case.build_test_case(is_tp2_ready=False)
+        assert tc["name"] == name
+        assert isinstance(tc["callsite"], str)
+        assert isinstance(tc["shape_facts"], dict)
+        assert callable(tc["input_gen_fn"])
+        assert callable(tc["baseline_fn"])
+        assert isinstance(tc["iters"], int)
+        assert isinstance(tc["required_cards"], int)
+
+        # Baseline execution on CPU mock data
+        inputs = tc["input_gen_fn"]()
+        out = tc["baseline_fn"](*inputs)
+        assert out is not None
+
+
+def test_gdn_qkv_norm_case_cpu():
+    from tools.op_agent.cases import get_case
+
+    case = get_case("gdn_qkv_norm")
+    tc = case.build_test_case(is_tp2_ready=False)
+    inputs = tc["input_gen_fn"]()
+    assert len(inputs) == 1
+    assert inputs[0].shape == (16, 4096)
+
+    out = tc["baseline_fn"](*inputs)
+    assert isinstance(out, tuple)
+    assert len(out) == 3
+    q_norm, k_norm, v = out
+    assert q_norm.shape == (1, 16, 8, 128)
+    assert k_norm.shape == (1, 16, 8, 128)
+    assert v.shape == (1, 16, 16, 128)
