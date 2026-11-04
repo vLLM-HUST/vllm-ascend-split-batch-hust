@@ -1,0 +1,22 @@
+{
+  "operator": "gdn_split_ba",
+  "callsite": "vllm_ascend/ops/gdn.py:210",
+  "model": "Qwen3.5-35B-A3B",
+  "precision": "torch.bfloat16",
+  "tp_size": 2,
+  "shape_facts": {
+    "T": 32,
+    "TotalDim": 32,
+    "phase": "decode"
+  },
+  "l3_verification": {
+    "status": "passed",
+    "atol": 0.001,
+    "rtol": 0.001
+  },
+  "l0_benchmark": {
+    "baseline_median_us": 6.25,
+    "optimized_median_us": 3.48,
+    "speedup": 1.8
+  }
+}

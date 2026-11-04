@@ -12,14 +12,17 @@
    - **严禁运行时打补丁**：严禁在仓内维护任何就地修改宿主运行环境的动态补丁脚本。
 2. **默认关闭（default-off）**：
    - 所有算子与优化能力必须由环境变量明确门控，未启用时与原生行为严格一致、零开销、零副作用。
-3. **元数据发现延迟导入（Lazy Import）**：
+3. **算子调优 Harness 规范**（详见 [docs/op-agent-harness-spec.md](docs/op-agent-harness-spec.md)）：
+   - 算子优化目标统一实现可插拔 `OpCase` 契约，执行短路评估、上下文修剪与单例知识库缓存，严禁硬编码特化逻辑。
+4. **元数据发现延迟导入（Lazy Import）**：
    - 插件对外暴露必须采用惰性加载机制，保证在包元数据发现和生命周期扫描期间，绝不触发重型实现模块的导入。
-4. **外部数据与知识库物理隔离**：
+5. **外部数据与知识库物理隔离**：
    - 原始采集数据、大体积性能分析 Trace、调试数据库及外部参考资料库一律在仓外物理隔离管理，严禁提交进 Git 仓库；
    - 仓内仅沉淀标准化的算子技术文档、结构化验收报告及权威索引清单。
-5. **执行环境路径隔离纪律**：
-   - 严禁在可能遮蔽已安装依赖的顶层或未隔离目录中执行命令，确保执行环境与依赖包路径清晰解耦。
-6. **宿主 Fork 必须定死基线分支（严禁在 main 上提 PR）**：
+6. **执行环境路径隔离纪律**：
+   - 严禁在可能遮蔽已安装依赖的顶层或未隔离目录中执行命令，确保执行环境与依赖包路径清晰解耦；
+   - 调优 Harness 与自动生成代码严格受限于仓库根目录内部，严禁引用或向仓外物理路径写文件。
+7. **宿主 Fork 必须定死基线分支（严禁在 main 上提 PR）**：
    - 两个宿主仓库在当前容器运行时中的基线分支定死如下，严禁以追新脱节的 `main` 为 Base：
      - `vLLM-HUST/vllm-ascend-hust`：Base 定死为 **`based/split-batch-baseline`**（锚定镜像 `74f0c0a27`，分支头 `ad82d77cb`，内容为镜像源码 + 3 个构建文件修复）；
      - `vLLM-HUST/vllm-hust`：Base 定死为 **`based/split-batch-baseline`**（锚定镜像 `f18cf803c`，当前与旧 `based/image-baseline` 指向同一 commit）；
@@ -39,6 +42,13 @@
 3. **注释与文档原则**：
    - 代码只写必需注释，不写解释性叙事或改动沿革；
    - 文档只写技术规范、判据与约束，不写心路历程。
+4. **推送前本地全绿与组织政策合规**（详见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) §5）：
+   - 推送或发 PR 前必须在本地完整跑通 §4 全部命令；CI package job 的 `ruff check .`、`ruff format --check .` 对 `ops/`、`docs/`、`tests/` 下新增文件同样生效，不得借排除清单绕过；
+   - CPU 门禁必须用隔离虚拟环境、清空 `PYTHONPATH` 并执行 CI 的 `pytest` 命令复验；不能只用 `python -m pytest` 或依赖本机预装包。仓内未安装工具按文件路径加载，不得为导入错误跳过守护测试；
+   - 组织工作流 `Benchmark-only data (organization)` 对 PR 变更文件执行 fail-closed 审查：文本新增行命中下行任一关键词后同行出现数字即拒绝：
+     `ttft`、`tpot`、`throughput`、`latency`、`tokens/s`、`实测`、`吞吐`、`延迟`；
+     度量数字一律落在结构化 `evidence.json`，行文与标题避免"关键词+数字"同段；
+   - 算子交付面由 `pytest -q tests/test_ops_delivery_policy.py` 把关；修改 `ops/<operator>/` 下被 `checksum.sha256` 覆盖的文件后，必须用 `tools/op_agent/custody.py` 重新生成指纹。
 
 ---
 
@@ -66,7 +76,7 @@ ruff check .
 ruff format --check .
 
 # 仓内关键契约与规范测试
-pytest -q tests/test_benchmark_standard.py tests/test_json_hygiene.py tests/test_document_custody.py
+pytest -q tests/test_benchmark_standard.py tests/test_json_hygiene.py tests/test_document_custody.py tests/test_ops_delivery_policy.py
 
 # 快速运行单算子测试
 pytest -q tests/test_gate_fp32_plugin.py

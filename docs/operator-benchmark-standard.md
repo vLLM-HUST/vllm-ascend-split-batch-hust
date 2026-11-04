@@ -172,3 +172,24 @@
   }
 }
 ```
+
+---
+
+## 5. 交付合规门禁（推送前逐条自检）
+
+算子交付内容（`ops/<operator>/`、`DELIVERY_INDEX.json`，以及 PR 里任何新增或修改的文本文件）在推送前必须满足：
+
+1. **代码风格零残余**：`ruff check .` 与 `ruff format --check .` 全绿。`ops/` 不在 ruff 排除清单内，`ops/<operator>/bench_l0.py` 等脚本与 `src/` 同标准。
+2. **组织基准数据政策合规**：组织工作流 `Benchmark-only data (organization)` 对 PR 的每个变更文件做 fail-closed 审查，命中即拒绝（判据镜像 vLLM-HUST/.github@0cfe5109551e9b1c30ff3a75a2d93ee6ba8c9aa4 的 `scripts/benchmark_data_policy.py`）：
+   - 路径判据：路径中任意目录段为 `data`/`datasets`/`results`/`evidence`/`receipts`/`runs`/`traces`，或文件后缀为 `.csv`/`.tsv`/`.jsonl`/`.ndjson`/`.parquet`/`.arrow`/`.log`/`.log.gz`/`.prom`；
+   - 行文判据：文本文件新增行命中下行任一关键词后，同一行 60 字符窗口内出现数字即拒绝：
+     `ttft`、`tpot`、`throughput`、`latency`、`tokens/s`、`实测`、`吞吐`、`延迟`；
+   - 写法要求：度量数字一律落在结构化 `evidence.json` 与验收报告表格字段；行文与标题避免"关键词+数字"同段（如标题写"硬件环境与单算子收益"，不写"硬件实测收益 (<硬件型号>)"）；
+   - 仓内把关：`pytest -q tests/test_ops_delivery_policy.py` 对 `ops/**` 与 `DELIVERY_INDEX.json` 全量扫描；`docs/evidence/**` 是有审查基线的存量债，新增文件严禁落入该类目录。
+3. **证据指纹同步**：修改 `ops/<operator>/` 下被 `checksum.sha256` 覆盖的文件后，必须重新生成并校验指纹：
+
+   ```bash
+   python3 -c "from tools.op_agent.custody import verify_dir_checksum, write_dir_checksum; path='ops/<operator>'; write_dir_checksum(path); ok, message=verify_dir_checksum(path); print(message); assert ok"
+   ```
+
+4. **隔离环境与 CI 命令一致**：CPU 门禁须在不继承系统包的虚拟环境中运行，只安装 CI 声明的依赖，并使用 `env -u PYTHONPATH <venv>/bin/pytest -q -m "not host_tree"` 验证。不得仅用 `python -m pytest` 的通过结果代替 CI 的 `pytest` 结果。测试加载仓内未安装的工具时，使用 `importlib.util.spec_from_file_location` 按文件路径加载，不依赖工作目录或外部 `PYTHONPATH`，也不为修复导入错误跳过守护测试。

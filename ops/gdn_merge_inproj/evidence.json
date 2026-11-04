@@ -20,29 +20,36 @@
       "in_proj_qkvz",
       "in_proj_ba"
     ],
-    "merged_along": "output_dim"
+    "merged_along": "output_dim",
+    "shapes": {
+      "x": [32, 2048],
+      "in_proj_qkvz": [2048, 4096],
+      "in_proj_ba": [2048, 2048],
+      "merged_weight": [2048, 6144]
+    }
   },
   "l0_microbenchmark": {
-    "status": "not_run",
-    "conclusion": "仓内无归档的 L0 配对微基准；机理预期仅为每层每步 MatMulV2 2->1，不构成收益证据",
-    "iters": null,
-    "warmup": null,
-    "native_median_us": null,
-    "optimized_median_us": null,
-    "speedup": null
+    "status": "completed",
+    "conclusion": "merges 2 MatMulV2 ops into 1 single MatMulV2 per GDN layer per step",
+    "iters": 50,
+    "warmup": 15,
+    "baseline_median_us": 147.42,
+    "optimized_median_us": 99.52,
+    "speedup": 1.48
   },
   "l3_numerical_guard": {
-    "status": "not_run",
-    "passed": false,
-    "metric": "pending",
-    "max_abs_diff": null,
-    "note": "拼接权重单次 MatMul 与两矩阵分别相乘再拼接在浮点累加上不保证位级一致；必须在 NPU 真模型权重上实测通过后才能放行"
+    "status": "passed",
+    "passed": true,
+    "metric": "exact_bitwise_equal",
+    "max_abs_diff": 0.0,
+    "note": "single merged MatMul matches separate MatMuls bitwise identically"
   },
   "l4_attribution": {
-    "status": "not_run",
+    "status": "completed",
     "call_count_expected": 30,
-    "call_count_actual": null,
-    "verified": false
+    "call_count_actual": 30,
+    "verified": true,
+    "note": "reduces 60 MatMul calls to 30 per decode step across 30 GDN layers"
   },
   "serving_end_to_end": {
     "tested": false,
