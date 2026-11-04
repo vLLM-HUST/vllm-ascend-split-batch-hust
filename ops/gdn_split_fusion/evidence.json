@@ -176,12 +176,6 @@
         "note": "the qkv/qkvz/ba splits collapse into the kernels"
       }
     },
-    "target_group": {
-      "off_ms": 633.5,
-      "on_ms": 283.3,
-      "saved_ms": 350.2,
-      "pct_of_all_kernels": 2.41
-    },
     "cohort_2048": {
       "caliber": "128 requests x 2048 in / 256 out @32, op_statistic over the whole bench window, rank0",
       "slice": {
@@ -215,7 +209,42 @@
       "on_ms": 14198.3,
       "delta_pct": -2.2
     },
-    "note": "the attributable saving covers Slice plus ConcatD replaced by the two kernels (633.5 -> 283.3 ms). The all-kernel delta is smaller because other operators drift in the opposite direction. 15324 calls = 30 layers x 511 steps."
+    "note": "the attributable saving covers Slice plus ConcatD replaced by the two kernels (633.5 -> 283.3 ms). The all-kernel delta is smaller because other operators drift in the opposite direction. 15324 calls = 30 layers x 511 steps.",
+    "pure_decode": {
+      "caliber": "32 requests, 366 input tokens total, 16384 output tokens",
+      "target_group": {
+        "off_ms": 633.5,
+        "on_ms": 283.3,
+        "saved_ms": 350.2,
+        "pct_of_all_kernels": 2.41
+      }
+    },
+    "cohort_512": {
+      "caliber": "128 requests x 512 in / 256 out @32, op_statistic over the whole bench window, rank0",
+      "slice": {
+        "off_count": 243583,
+        "off_ms": 3336.7,
+        "on_count": 52320,
+        "on_ms": 698.4
+      },
+      "concatd": {
+        "off_count": 33828,
+        "off_ms": 1142.2,
+        "on_count": 1221,
+        "on_ms": 172.1
+      },
+      "fused_kernels": {
+        "_unpack_kernel_ms": 611.1,
+        "_rearrange_kernel_ms": 599.1
+      },
+      "target_group": {
+        "off_ms": 4478.9,
+        "on_ms": 2080.6,
+        "saved_ms": 2398.3,
+        "pct_of_all_kernels": 5.0
+      },
+      "note": "device drift in this window: Cast +292.5 ms and MatMulV2 -817.4 ms moved in opposite directions, so only the within-window target group is comparable"
+    }
   },
   "serving_end_to_end": {
     "tested": true,
@@ -237,7 +266,7 @@
       "per_token_ms_pct": 1.78,
       "note": "all three blocks negative; -3.17% before dropping one outlier leg; A-leg spread 4.29%"
     },
-    "conclusion": "both cohorts fall inside their own leg spread, so neither a gain nor a loss is claimed. The operator saves more in the 2048 cohort (+5.05%) than in 512 (+2.41%), yet the serving result is slightly worse there.",
+    "conclusion": "both cohorts sit inside their own leg spread, so neither a gain nor a loss is claimed. Operator-level saving is 5.00% (512) and 5.05% (2048), effectively equal, while the serving results differ in sign; that difference is noise rather than a load effect, so no load-dependent explanation is offered.",
     "root_cause": "op_statistic sums 14518 ms of kernel time for a bench whose wall time is far shorter, so the kernels do not run back to back; removing 350 ms only widens the gaps."
   },
   "known_issue": "M=1 pays ~1.4us of custom-op dispatch overhead per component (~84us per step over 30 layers, about 0.13% of TPOT) because the shape gate must stay inside the op",
