@@ -21,19 +21,20 @@ FETCH = load("benchmark_evidence", "tools/benchmark_evidence.py")
 PATHS = load("evidence_paths", "bench/evidence_paths.py")
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "bench_fisampling_refresh_e2e.py",
-    ],
-)
-def test_active_harness_uses_external_output_guard(name):
-    tree = ast.parse((ROOT / "bench" / name).read_text())
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
-    assert any(
-        isinstance(node.func, ast.Name) and node.func.id == "output_directory"
-        for node in calls
-    )
+def test_active_harness_uses_external_output_guard():
+    bench_dir = ROOT / "bench"
+    active_bench_scripts = [
+        p.name
+        for p in bench_dir.glob("*.py")
+        if p.name != "evidence_paths.py" and not p.name.startswith("__")
+    ]
+    for name in active_bench_scripts:
+        tree = ast.parse((bench_dir / name).read_text())
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        assert any(
+            isinstance(node.func, ast.Name) and node.func.id == "output_directory"
+            for node in calls
+        )
 
 
 def test_only_reviewed_source_remains_in_evidence_directories():

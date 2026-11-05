@@ -27,82 +27,18 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PKG = REPO_ROOT / "src" / "vllm_ascend_split_batch"
-FIS = PKG / "fi_sampling"
-
-#: 与 `fi_sampling/ATTRIBUTION.md` / `PROVENANCE.md` 的表一致。改 vendored 字节时
-#: 必须同时更新这两处（收据刷新），否则本测试红 —— 这是设计意图。
-VENDORED_SHA256 = {
-    "api.py": "ca8dc05cfc8906d7ef7992aa6f872e732277c89432b58a6471e6ffd647dc7446",
-    "kernels.py": "8d0b20cca2559a2c4d893a96bc6c2398569eb2805258848f54ccde114b17d27e",
-    "npu_env.py": "04a3a122f66a74b7176cfaf7f3b1b701871bfe0e55e252fcf58f8a85b352a77a",
-    "pure.py": "923d7db26a704e778dfafb4bd74a2742364e6a5b8de250518bc08dfd6954ab08",
-}
-
-#: `api.py` 的**源侧** sha256（W2 快照）。它是四个文件里唯一被动过导入行的，所以不能直接
-#: 比对源文件；把 vendored 的两条相对导入还原成绝对导入后必须命中此值 —— 该命中同时证明
-#: "记录值为真" 与 "搬运只改了那两行"（PROVENANCE.md §4.1）。
-API_PY_SOURCE_SHA256 = (
-    "902884d6cd64c78b8b917f6404f51305a1f23a37760b80a005466b770918a03c"
-)
-#: vendoring 时的导入改写（源码 → vendored 的相对导入；逆变换即据此还原）。
-VENDORED_IMPORT_REWRITES = (
-    ("from fi_sampling.kernels import", "from .kernels import"),
-    ("from fi_sampling.npu_env import", "from .npu_env import"),
-)
 
 LICENSE_RE = re.compile(r"Apache License|SPDX-License-Identifier:\s*Apache-2\.0")
-
-
-def test_vendored_files_match_the_recorded_hashes() -> None:
-    for name, expected in VENDORED_SHA256.items():
-        path = FIS / name
-        assert path.is_file(), f"vendored file missing: {name}"
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        assert actual == expected, (
-            f"{name} changed: recorded {expected}, actual {actual}. "
-            "If the vendored copy was intentionally re-synced, update "
-            "PROVENANCE.md and fi_sampling/ATTRIBUTION.md in the same commit."
-        )
-
-
-def test_api_py_source_hash_is_recoverable() -> None:
-    """`api.py` 的源侧 hash 用逆变换复核（源包已漂移，不能直接比对）。
-
-    搬运只改了导入行，所以把相对导入还原成绝对导入后，字节必须等于 W2 源快照，
-    其 sha256 必须命中 `PROVENANCE.md` §4.1 记录的值。命中即同时证明：记录为真、
-    且搬运没有夹带其它编辑（例如把 W3 代码带进来）。
-    """
-    text = (FIS / "api.py").read_text(encoding="utf-8")
-    for source_form, vendored_form in VENDORED_IMPORT_REWRITES:
-        assert vendored_form in text, (
-            f"expected the vendored relative import {vendored_form!r} in api.py; "
-            "if the vendoring transform changed, update VENDORED_IMPORT_REWRITES "
-            "and PROVENANCE.md §4.1 together"
-        )
-        text = text.replace(vendored_form, source_form)
-    actual = hashlib.sha256(text.encode()).hexdigest()
-    assert actual == API_PY_SOURCE_SHA256, (
-        "api.py no longer reproduces the recorded W2 source hash "
-        f"(expected {API_PY_SOURCE_SHA256}, got {actual}). Either the vendored "
-        "bytes drifted, or the recorded source hash is wrong."
-    )
 
 
 def test_every_python_module_declares_a_license() -> None:
     missing = []
     for path in sorted(PKG.rglob("*.py")):
-        if path.parent == FIS:
-            # Vendored bytes are pinned by hash instead; see the note in
-            # fi_sampling/ATTRIBUTION.md ("Why there is no license header").
-            continue
         if not LICENSE_RE.search(path.read_text(encoding="utf-8")[:600]):
             missing.append(str(path.relative_to(REPO_ROOT)))
     assert not missing, f"module without a license declaration: {missing}"
@@ -122,58 +58,3 @@ def test_provenance_lists_every_archived_commit() -> None:
         "archived commit not referenced in PROVENANCE.md "
         f"(add it with its verification state): {missing}"
     )
-
-
-def test_vendored_attribution_notes_the_source_drift() -> None:
-    """源包已漂移这件事必须在文档里写明，不能沉默；且核对方法要写清。"""
-    text = (FIS / "ATTRIBUTION.md").read_text(encoding="utf-8")
-    assert "Revision anchor caveat" in text
-    provenance = (REPO_ROOT / "docs" / "PROVENANCE.md").read_text(encoding="utf-8")
-    assert "逆变换复核命中" in provenance, (
-        "PROVENANCE.md must record that api.py's source hash is verified by the "
-        "inverse import transform (not by a plain sha256 of the live source)"
-    )
-    assert "订正记录" in provenance, (
-        "PROVENANCE.md must keep the correction trail for the api.py verdict"
-    )
-
-
-#: W2 源侧冻结快照（`docs/evidence/fi-sampling-frozen-20260909/`）里记的源侧 hash。
-#: 与 `PROVENANCE.md` §4.1 的表同值：快照就是"让别人不必自己推逆变换"的那份字节。
-FROZEN_DIR = REPO_ROOT / "docs" / "evidence" / "fi-sampling-frozen-20260909"
-FROZEN_SOURCE_SHA256 = {
-    "api.py": API_PY_SOURCE_SHA256,
-    "kernels.py": "8d0b20cca2559a2c4d893a96bc6c2398569eb2805258848f54ccde114b17d27e",
-    "npu_env.py": "04a3a122f66a74b7176cfaf7f3b1b701871bfe0e55e252fcf58f8a85b352a77a",
-    "pure.py": "923d7db26a704e778dfafb4bd74a2742364e6a5b8de250518bc08dfd6954ab08",
-}
-
-
-def test_frozen_w2_snapshot_carries_the_recorded_source_bytes() -> None:
-    """入仓的源侧快照必须逐件命中 §4.1 记录值（改一个字节 ⇒ 红）。"""
-    manifest = (FROZEN_DIR / "FROZEN.sha256").read_text(encoding="utf-8")
-    recorded = dict(re.findall(r"^([0-9a-f]{64})  snapshot/(\S+)$", manifest, re.M))
-    recorded = {name: digest for digest, name in recorded.items()}
-    assert recorded == FROZEN_SOURCE_SHA256, (
-        "FROZEN.sha256 must list exactly the four recorded W2 source hashes; "
-        f"got {recorded}"
-    )
-    for name, expected in FROZEN_SOURCE_SHA256.items():
-        path = FROZEN_DIR / "snapshot" / name
-        assert path.is_file(), f"frozen snapshot file missing: {path}"
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        assert actual == expected, (
-            f"frozen snapshot {name} drifted: recorded {expected}, actual {actual}"
-        )
-
-
-def test_frozen_snapshot_is_reproducible_from_the_vendored_bytes() -> None:
-    """重建规则（逆变换）仍能从 vendored 字节产出这份快照（端到端自证）。"""
-    result = subprocess.run(
-        [sys.executable, str(FROZEN_DIR / "make_snapshot.py"), "--check"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "snapshot OK" in result.stdout

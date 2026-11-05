@@ -42,9 +42,7 @@ Registration and release gates are defined in `docs/release.md`.
 
 | Plugin | Existing coupling | Existing-interface assessment |
 |---|---|---|
-| fi-sampling | sampler module class binding | `TopKTopPSampler` inherits `nn.Module`, not `CustomOp`; its constructor does not consume the OOT registry |
 | rope-fix | occupied OOT entries plus registration wrapper/rebinding | Missing Llama3 key may use registration independently; replacing existing Ascend providers cannot use duplicate-rejecting `register_oot` directly |
-| fia-demask | global torch_npu operation proxies | Attention Backend is a broader boundary; metadata/workspace/graph parity must be demonstrated before replacing the proxy |
 | mlp-chunk | model-specific MLP forward | Not a narrow registered CustomOp; whole-model registration is not an equivalent adapter |
 | gate-fp32 | Runner load_model wrapper and weight cache | Load lifecycle, not operator dispatch; a worker subclass needs explicit deployment/composition and callsite validation |
 | gdn-merge-inproj | Runner load_model wrapper | No proven merged-weight forward consumer; retain fail-closed behavior, registration alone cannot repair reachability |
@@ -53,28 +51,6 @@ Registration and release gates are defined in `docs/release.md`.
 
 This inventory does not authorize new host patches, platform registration,
 whole-forward copying or changes to other plugins' gates/manifests.
-
-## fi_sampling component (implemented, default-off)
-
-The fi_sampling plugin (`fi_sampling_plugin.py`, `fi_sampling_route.py`) rides
-ONLY:
-
-- `vllm.general_plugins` entry point `fi-sampling` (`load()`).
-- vllm-ascend module attribute `vllm_ascend.sample.sampler.AscendTopKTopPSampler`
-  replaced by a subclass (`FiSamplingTopKTopPSampler`) whose `forward_native`
-  overrides the base; `AscendSampler.__init__` resolves that module attribute at
-  construction time, so no other host object is touched. Same variant-entry
-  pattern as the fork's own `vllm_ascend/_310p/sample/sampler.py`.
-- Read-only probes of `vllm.envs.VLLM_BATCH_INVARIANT` and
-  `vllm_ascend.ascend_config.get_ascend_config()` (`enable_reduce_sample`,
-  `enable_async_exponential`) for the fallback matrix.
-
-Default-off semantics: with `VLLM_HUST_FI_SAMPLING` unset `load()` returns
-before importing `vllm_ascend` or the vendored kernel package, so nothing is
-patched and `triton` is never imported. The host source trees are untouched and
-no `vllm.platform_plugins` entry is registered. Host-upgrade checklist item
-(see `docs/release.md` §4): `AscendTopKTopPSampler` name/`forward_native`
-signature and the `AscendSampler` construction site.
 
 ## rope_fix component (implemented, default-off, `import_only`)
 

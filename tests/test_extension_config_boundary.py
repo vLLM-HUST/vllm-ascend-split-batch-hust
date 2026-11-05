@@ -47,11 +47,11 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC = REPO_ROOT / "src" / "vllm_ascend_split_batch"
-BUNDLE_ID = "org.vllm-hust.fia-demask"
+BUNDLE_ID = "org.vllm-hust.gate-fp32"
 
 #: 插件实现模块名：生命周期命令不应 import 它们（发现只读元数据）。
 IMPLEMENTATION_MODULES = (
-    "vllm_ascend_split_batch.fia_demask_plugin",
+    "vllm_ascend_split_batch.gate_fp32_plugin",
     "vllm_ascend_split_batch.planner",
 )
 
@@ -164,8 +164,6 @@ def test_carriers_gate_on_env_not_on_extension_configuration() -> None:
     offenders = []
     getenv_hits = 0
     for path in sorted(SRC.rglob("*.py")):
-        if "fi_sampling" in path.parts:
-            continue  # vendored 字节由 hash 固定，不参与本判据
         text = path.read_text(encoding="utf-8")
         getenv_hits += len(re.findall(r"os\.(?:getenv|environ)", text))
         for lineno, line in enumerate(text.splitlines(), start=1):

@@ -11,19 +11,22 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from vllm_ascend_split_batch import gdn_qkv_norm as api  # noqa: E402
-from vllm_ascend_split_batch.gdn_qkv_unpack.reference import (  # noqa: E402
-    rearrange_mixed_qkv_reference,
-)
 
 
 def unpack(x):
-    return rearrange_mixed_qkv_reference(
-        x,
-        q_dim=1024,
-        v_dim=2048,
-        head_k_dim=128,
-        head_v_dim=128,
-    )
+    if x is None:
+        return None, None, None
+    seq_len = x.shape[0]
+    q_dim, k_dim, v_dim = 1024, 1024, 2048
+    head_k_dim, head_v_dim = 128, 128
+    query, key, value = torch.split(x, [q_dim, k_dim, v_dim], dim=-1)
+    fused = torch.cat([query.reshape(-1), key.reshape(-1), value.reshape(-1)], dim=0)
+    q_size = seq_len * q_dim
+    k_size = seq_len * k_dim
+    query = fused[0:q_size].view(1, seq_len, -1, head_k_dim)
+    key = fused[q_size : q_size + k_size].view(1, seq_len, -1, head_k_dim)
+    value = fused[q_size + k_size :].view(1, seq_len, -1, head_v_dim)
+    return query, key, value
 
 
 def norm(x):

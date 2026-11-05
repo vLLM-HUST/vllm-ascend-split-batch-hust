@@ -83,7 +83,6 @@ pytest -q tests/test_benchmark_standard.py tests/test_json_hygiene.py tests/test
 
 # 快速运行单算子测试
 pytest -q tests/test_gate_fp32_plugin.py
-pytest -q tests/test_fia_demask.py
 
 # 全量 CPU 门禁套件
 pytest -q -m "not host_tree"

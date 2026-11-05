@@ -72,7 +72,7 @@ python -m venv <新的仓外venv>
 <venv>/bin/python -c 'from importlib.metadata import version; print(version("vllm-ascend-split-batch"))'
 ```
 
-核对本包贡献的 9 个 general plugins、6 个 bundles 及全部 manifest。安装不需要 opt、知识库或个人脚本。管理器同环境可用时再核对 `extension list`、`inspect`；root planner 必须报告不可激活。
+核对本包贡献的 6 个 general plugins、5 个 bundles 及全部 manifest。安装不需要 opt、知识库或个人脚本。管理器同环境可用时再核对 `extension list`、`inspect`；root planner 必须报告不可激活。
 
 ## 3. 启用验证
 
@@ -82,7 +82,6 @@ python -m venv <新的仓外venv>
 
 - [ ] 按 [HOST_CONTRACT.md](HOST_CONTRACT.md) 核对当前组件实际消费的 seam。
 - [ ] `vllm.general_plugins` 加载顺序、冲突处理及关闭态零修改。
-- [ ] fi_sampling：sampler 构造点和 forward 签名、generator/logprobs/batch-invariant/reduce/async fallback。
 - [ ] rope-fix 与 AOT guard：运行 `host_tree` 漂移测试，缺源码树即失败；宿主已修复时不得继续覆盖。
 - [ ] tier-2 patch：基线/补丁/产物 SHA256、依赖顺序、完整回滚；漂移拒绝，不模糊套补丁。
 - [ ] 实际设备数值、dispatch、graph 与性能，缺一项即保留缺口。

@@ -9,12 +9,14 @@ from .gdn_norm_gate import GdnNormGateCase
 from .gdn_output_norm_fusion import GdnOutputNormFusionCase
 from .gdn_qkv_norm import GdnQkvNormCase
 from .gdn_split_ba import GdnSplitBaCase
+from .moe_gate_merge import MoeGateMergeCase
 from .moe_gating_routing import MoeGatingRoutingCase
 from .moe_shared_epilogue import MoeSharedEpilogueDecodeCase
 
 CASE_REGISTRY: dict[str, type[OpCase]] = {
     MoeSharedEpilogueDecodeCase.name: MoeSharedEpilogueDecodeCase,
     MoeGatingRoutingCase.name: MoeGatingRoutingCase,
+    MoeGateMergeCase.name: MoeGateMergeCase,
     GdnInputNormDecodeCase.name: GdnInputNormDecodeCase,
     GdnNormGateCase.name: GdnNormGateCase,
     GdnOutputNormFusionCase.name: GdnOutputNormFusionCase,
