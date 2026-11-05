@@ -316,17 +316,20 @@ def setup_qwen35_case(case_name: str = "moe_shared_epilogue_decode") -> dict[str
 class MockKernelModel(Model):
     """Mock Agent model demonstrating short-circuit auto-optimization."""
 
-    def __init__(self):
+    def __init__(self, candidates: list[str] | None = None):
         super().__init__()
         self.step = 0
-        self.candidates = [
-            # Candidate 1: Numerical failure
-            """def optimized_op(gate, out): return gate + out""",
-            # Candidate 2: Passes L3 and measures L0 directly
-            """def optimized_op(gate, out): return gate * out""",
-            # Candidate 3: Passes L3
-            """def optimized_op(gate, out): return out * gate""",
-        ]
+        if candidates is not None:
+            self.candidates = candidates
+        else:
+            self.candidates = [
+                # Candidate 1: Numerical failure
+                """def optimized_op(gate, out): return gate + out""",
+                # Candidate 2: Passes L3 and measures L0 directly
+                """def optimized_op(gate, out): return gate * out""",
+                # Candidate 3: Passes L3
+                """def optimized_op(gate, out): return out * gate""",
+            ]
 
     def generate(self, messages, stop_sequences=None, **kwargs) -> ChatMessage:
         self.step += 1
@@ -355,11 +358,11 @@ class MockKernelModel(Model):
         return ChatMessage(role="assistant", content=full_content)
 
 
-def get_configured_model() -> Model:
+def get_configured_model(candidates: list[str] | None = None) -> Model:
     """Instantiate LLM model based on environment variables."""
     model_id = os.environ.get("OP_AGENT_MODEL_ID")
     if not model_id:
-        return MockKernelModel()
+        return MockKernelModel(candidates=candidates)
 
     api_base = os.environ.get("OP_AGENT_API_BASE") or os.environ.get("OPENAI_BASE_URL")
     api_key = os.environ.get("OP_AGENT_API_KEY") or os.environ.get("OPENAI_API_KEY")
@@ -375,7 +378,12 @@ def get_configured_model() -> Model:
     return OpenAIServerModel(**kwargs)
 
 
-def create_agent(model=None, tools=None, max_steps: int = 10):
+def create_agent(
+    model=None,
+    tools=None,
+    max_steps: int = 10,
+    candidates: list[str] | None = None,
+):
     if tools is None:
         tools = [
             WriteCandidateFileTool(),
@@ -386,7 +394,7 @@ def create_agent(model=None, tools=None, max_steps: int = 10):
             ReadKnowledgeCardTool(),
         ]
     if model is None:
-        model = get_configured_model()
+        model = get_configured_model(candidates=candidates)
 
     # Preserves 100% prefix KV Cache hit rate by maintaining monotonic prompt history
     return CodeAgent(
@@ -453,7 +461,12 @@ def optimized_op(gate, out):
         SearchKnowledgeBaseTool(),
         ReadKnowledgeCardTool(),
     ]
-    agent = create_agent(model=model, tools=tools, max_steps=max_iters)
+    agent = create_agent(
+        model=model,
+        tools=tools,
+        max_steps=max_iters,
+        candidates=[baseline_code],
+    )
 
     try:
         agent.run(task)

@@ -67,36 +67,6 @@ Delivery gates: [docs/release.md](docs/release.md#算子-bundle-最短交付路�
 
 The published root planner remains `import_only` and cannot be activated. Current per-component discovery, activation, invocation and evidence status is recorded in [docs/delivery-inventory.md](docs/delivery-inventory.md); historical reports remain historical and are not current support claims. Unsupported configurations and invalid speculative requests must remain fail-closed and must not be crossed.
 
-## fi_gelu plugin (default-off, OOT registration)
-
-`fi-gelu` uses `vllm.general_plugins` for loading and
-`CustomOp.register_oot(name="GeluAndMul")` for execution selection. Enable with
-`VLLM_HUST_FI_GELU=1` before the first activation lookup/model construction;
-host factories may cache instances. The original host class is not
-modified; its constructor selects the provider subclass for new instances.
-The provider retains the host's `gelu_and_mul` compilation configuration name.
-
-Only NPU bf16 inputs with at least two dimensions, positive even last dimension
-and `approximate="none"` use the existing exact-erf kernel API. Other inputs and
-kernel failures delegate to the host. An occupied OOT key is never overwritten;
-unavailable registration or kernel dependencies leave the host path in place.
-Unset the environment variable and restart workers/recapture graphs to disable.
-`fi_gelu_plugin.uninstall()` removes only its own registration for future
-instances; it does not change existing instances or captured graphs.
-
-
-Registration checks and remaining-plugin migration boundaries are in
-[docs/HOST_CONTRACT.md](docs/HOST_CONTRACT.md). Device gates (real host import, real
-constructor dispatch, kernel numeric gate, ACL graph replay bit-exactness,
-fallback delegation) are closed by `tools/probe_gelu_device.py` and
-`tests/test_npu_w31_gelu_plugin.py`; results:
-[gelu-device-gate-20261020.json](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/411e14c5a67dac52b3bba51ac3f25e4c593fcc28/archive/dev-hub-20261022/split-batch-direction/manifest.json)
-(frozen custody original; see docs/evidence/README.md). The op-level microbench in that
-evidence is directional only (the fused kernel measured slower than the host
-native chain at the probed standalone shapes), so default-off remains correct.
-Serving-level L3 + compare and light L4 remain pending; historical kernel
-evidence does not validate this integration.
-
 ### Cohort scope (what our evidence does and does not cover)
 
 > Authority: [`docs/cohort-and-ownership.md`](docs/cohort-and-ownership.md) — the cohort boundary plus the four

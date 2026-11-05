@@ -24,10 +24,7 @@ PATHS = load("evidence_paths", "bench/evidence_paths.py")
 @pytest.mark.parametrize(
     "name",
     [
-        "bench_w31_e2e.py",
         "bench_fisampling_refresh_e2e.py",
-        "bench_w31_gelu.py",
-        "bench_w31_gelu_graph.py",
     ],
 )
 def test_active_harness_uses_external_output_guard(name):

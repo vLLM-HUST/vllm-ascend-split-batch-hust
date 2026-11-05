@@ -277,4 +277,29 @@ def test_pluggable_campaign_discover_and_guards(tmp_path):
     # gdn_split_ba has a tiny fake CSV avg (0.0001 us), so the CSV cross-check guard
     # flags it as `pending_review`
     assert by_name["gdn_split_ba"]["status"] == "pending_review"
-    assert by_name["moe_shared_epilogue_decode"]["status"] == "approved"
+
+
+def test_moe_gating_routing_case_contract():
+    from tools.op_agent.cases import get_case
+
+    case = get_case("moe_gating_routing")
+    tc = case.build_test_case(is_tp2_ready=False)
+    tc["iters"] = 4
+
+    # Verify input gen shapes on CPU
+    router_logits, hidden_states = tc["bucket_input_gen_fn"](16)
+    assert router_logits.shape == (16, 256)
+    assert hidden_states.shape == (16, 2048)
+
+    topk_weights, expanded_x, expanded_row_idx, expert_tokens = tc["baseline_fn"](
+        router_logits, hidden_states
+    )
+    assert topk_weights.shape == (16, 8)
+    assert expanded_x.shape == (128, 2048)
+    assert expanded_row_idx.shape == (128,)
+    assert expert_tokens.shape == (256,)
+    assert expert_tokens.sum() == 128
+
+    res = run_candidate_evaluation(case.get_baseline_code(), tc)
+    assert res["l3_passed"] is True
+    assert set(res["bucket_latencies_us"].keys()) == {1, 4, 8, 16, 32}

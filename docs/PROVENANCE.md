@@ -64,7 +64,7 @@
 |---|---|---|
 | `planner.py`（`plan_dual_pad` / `precheck_reason`） | Ascend #281 `worker/dual_pad_utils.py`、`tests/test_dual_pad_planner.py` | **语义参照**，按宿主无关重写；`import_only`，无执行面 |
 | `cascade_plugin.py` / `cascade_graph_plugin.py` / `cascade_runner_patch.py` | Ascend #282 的 `attention_v1.py` / `compilation/acl_graph*.py`、core #273 的 `forward_context.py` / `v1/cudagraph_dispatcher.py` | **行为参照**（两段式 cascade、图孪生、cudagraph key）；插件侧重写，宿主源码零改动 |
-| `fia_demask_plugin.py`、`rope_fix_plugin.py`、`zerocost_wiring.py`、`mlp_chunk_plugin.py`、`fi_gelu*`、`fi_sampling/` | 无对应 patch | **独立开发**，不是 legacy 搬运 |
+| `fia_demask_plugin.py`、`rope_fix_plugin.py`、`zerocost_wiring.py`、`mlp_chunk_plugin.py`、`fi_sampling/` | 无对应 patch | **独立开发**，不是 legacy 搬运 |
 | legacy 的 `inplace_split_*` 系列、`csrc/third_party/catlass` 子模块 pin、`examples/**` | Ascend #280/#282/#283 | **未迁移**（inplace 车道未进入本仓） |
 
 > 判定依据：legacy patch 中 **36 个路径有 32 个落在宿主树内**（`vllm/` 与 `vllm_ascend/`），
