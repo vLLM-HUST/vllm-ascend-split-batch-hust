@@ -10,12 +10,10 @@
 #   wait [timeout_s]      等待 /health 就绪（默认 1800s）
 #   l1 [iters]            L1 单请求延迟（~1 min, 对 per-op 改进最敏感）
 #   l2 [prompts] [conc]   L2 并发吞吐突发（默认 128 题 2048/256 @ 并发32, ~3-5 min; 0.28 里 range-ratio 0=定长）
-#                         LADDER_L2_LOAD=synthetic(默认)|mmlu-pro；mmlu-pro 需 LADDER_L2_DATASET=<prompt jsonl>
-#                         （export-mmlupro-prompts.py 产出；形状 = 5-shot CoT 展平 + thinking 长输出 @并发5）
+#                         LADDER_L2_LOAD=synthetic（唯一支持档位）
 #                         产物带 load_caliber/cohort（ladder-stamp.py）；两形态只比方向不比数值
 #   l3                    L3 数值护栏捕获（8 条固定 prompt 贪心输出）
 #   compare <A> <B>       L3 对比两次捕获（不一致 = 数值回归）
-#   smoke [N]             MMLU-Pro smoke N 题（默认 4, harness venv lm_eval）
 #   screen <tag>          plain serve 晋级筛选：L1×3 + L2×3 + L3×1，生成 screen.json；
 #                         LADDER_LOAD_CALIBER 可选（v4：仅导航，不再作门票）
 #                         screen.json 还带 carriers（载体记录轴: find_spec + vllm.general_plugins
@@ -24,7 +22,7 @@
 #   profile --tier light|deep [load_n]
 #                         L4 窗口：light 只交付目标算子/all-kernel/通信并删 DB；deep 额外交付
 #                         per-shape×dtype。两档都在交付后立即离线解析和瘦身。
-#                         负载口径 LADDER_PROFILE_LOAD=synthetic(默认)|mmlu-pro|external（后者用
+#                         负载口径 LADDER_PROFILE_LOAD=synthetic(默认)|external（后者用
 #                         LADDER_PROFILE_LOAD_CMD 跑任意自定负载）；
 #                         产物带形状事实(window_coverage)与权重标签(cohort)；不同形状/权重只比方向
 #   slim <asc|窗目录> [ts] [--opstat <p>]  解析后瘦身：抢救 csv + pt db + communication*.json 到
@@ -40,10 +38,10 @@
 #                             余下参数原样透传, 如 --sig 4 --decode-tokens 11912 --iters 100）
 #                             op=GdnQkvUnpack 走 tools/bench_gdn_qkv_unpack.py
 #                             （rearrange_mixed_qkv 配对 A/B; 落 <ts>-l0-gdn-qkv-unpack.json）
-#   run <tag> [steps]     一条龙: l1,l2,l3,smoke -> records/ladder/<tag>/（默认全四步）
-#                         产出: run.json 索引 + steps.log + smoke 目录 + 单页实验门禁报告
+#   run <tag> [steps]     一条龙: l1,l2,l3 -> records/ladder/<tag>/（默认全三步）
+#                         产出: run.json 索引 + steps.log + 单页实验门禁报告
 #                         （不再拷贝 l1/l2/l3 json; 权威产物是 records/ladder/<ts>-*.json）
-#   report <A> <B> [--json] 单页实验门禁报告（L1/L2/L3/L4/smoke + 口径/cohort 前提与告警;
+#   report <A> <B> [--json] 单页实验门禁报告（L1/L2/L3/L4 + 口径/cohort 前提与告警;
 #                         L3 不一致退出码 3, 可直接当门禁）
 #   logs [--dry-run]     日志收尾: gzip 已完结的 ladder-*.log（保留最近 LADDER_LOG_KEEP_DAYS=3 天
 #                        未压缩; 被 L2/KB 按绝对路径引用的见 logs/.log-cited, 一律跳过）
@@ -73,7 +71,6 @@ if [ ! -x "$PY" ]; then
   PY=$(command -v python3 || command -v python || printf '%s' "$PY")
 fi
 [ -x "$VLLM" ] || VLLM=$(dirname "$PY")/vllm
-HARNESS_LM_EVAL=/root/venvs/harness/bin/lm_eval
 PARSE_PYTHON=${LADDER_PARSE_PYTHON:-$PY}
 MODEL=${LADDER_MODEL:-/models/Qwen3.5-35B-A3B}
 # 路径兜底: 2026-10-13 实测 /models/Qwen3.5-35B-A3B 已不存在（模型在 modelscope 缓存里）,
@@ -879,11 +876,8 @@ cmd_l1() {
 
 cmd_l2() {
   local ts; ts=$(date +%m%d-%H%M%S)
-  # 2026-10-14 负载形态（两种形态属不同统计范围, 只比方向不比数值）:
-  #   synthetic（默认）合成固定协议: random 2048/256 定长 @并发 32 —— 算子 A/B 复现口径
-  #   mmlu-pro         MMLU-Pro 真实评测流量形状: 5-shot CoT prompt（展平）+ thinking 长输出
-  #                    @num_concurrent=5；需要 LADDER_L2_DATASET=<prompt jsonl>
-  #                    （由 scripts/export-mmlupro-prompts.py 从真实评测样本导出）
+  # 2026-10-14 负载形态: synthetic（唯一支持档位）合成固定协议:
+  #   random 2048/256 定长 @并发 32 —— 算子 A/B 复现口径
   # 产物一律带 load_caliber/cohort 标记（产物自证；否则口径门禁看不见它, 见 ladder-stamp.py）
   local load=${LADDER_L2_LOAD:-synthetic}
   local n conc outfile
@@ -894,16 +888,7 @@ cmd_l2() {
       outfile="${ts}-l2.json"
       ds=(--dataset-name random --num-prompts "$n"
           --random-input-len 2048 --random-output-len 256 --random-range-ratio 0) ;;
-    mmlu-pro)
-      : "${LADDER_L2_DATASET:?mmlu-pro 载荷需要 LADDER_L2_DATASET=<prompt jsonl>（export-mmlupro-prompts.py 产出）}"
-      [ -f "$LADDER_L2_DATASET" ] || { echo "LADDER_L2_DATASET 不存在: $LADDER_L2_DATASET"; return 1; }
-      local total; total=$(grep -c . "$LADDER_L2_DATASET")
-      n=${1:-$total}; conc=${2:-${LADDER_EVAL_CONC:-5}}
-      outfile="${ts}-l2-mmlupro.json"
-      ds=(--dataset-name custom --dataset-path "$LADDER_L2_DATASET"
-          --num-prompts "$n" --custom-output-len "${LADDER_L2_MAXTOK:-2048}")
-      extra=(--metric-percentiles 50,90,99) ;;
-    *) echo "未知 LADDER_L2_LOAD=$load（synthetic | mmlu-pro）"; return 1 ;;
+    *) echo "未知 LADDER_L2_LOAD=$load（仅支持 synthetic）"; return 1 ;;
   esac
   local args=(bench serve
     --backend openai-chat --endpoint /v1/chat/completions
@@ -921,22 +906,16 @@ cmd_l2() {
   [ "$rc" = "0" ] || { echo "L2 采集失败(rc=$rc), 不写口径标记"; return "$rc"; }
   local calib_id=${LADDER_LOAD_CALIBER:-} calib_detail=${LADDER_LOAD_CALIBER_DETAIL:-}
   local maxout=256
-  if [ "$load" = "mmlu-pro" ]; then maxout=${LADDER_L2_MAXTOK:-2048}; fi
   if [ -z "$calib_id" ]; then
-    if [ "$load" = "mmlu-pro" ]; then calib_id=mmlu-pro-eval-traffic
-    else calib_id=synthetic-fixed-protocol; fi
+    calib_id=synthetic-fixed-protocol
   fi
   if [ -z "$calib_detail" ]; then
-    if [ "$load" = "mmlu-pro" ]; then
-      calib_detail="MMLU-Pro 真实评测流量形状 L2（数据集实例=lm-eval mmlu_pro_smoke 样本展平 prompt: $LADDER_L2_DATASET）: 5-shot CoT 形状 / 单轮 / 无状态 / APC off / num_concurrent=$conc / max_tokens=$maxout / greedy seed=42"
-    else
-      calib_detail="合成固定协议 L2: random 2048/256 定长 @并发 $conc（算子 A/B 复现口径）"
-    fi
+    calib_detail="合成固定协议 L2: random 2048/256 定长 @并发 $conc（算子 A/B 复现口径）"
   fi
   "$PY" "$SCRIPTS/ladder-stamp.py" --file "$RECORDS/$outfile" \
     --load-caliber "$calib_id" --load-caliber-detail "$calib_detail" \
     --cohort-id "${LADDER_COHORT_ID:-028-qwen35-35b-a3b-tp2-fullgraph}" \
-    --run-note "L2 load=$load n=$n conc=$conc max_out=$maxout dataset=${LADDER_L2_DATASET:-random}"
+    --run-note "L2 load=$load n=$n conc=$conc max_out=$maxout"
 }
 
 cmd_l3() {
@@ -952,15 +931,6 @@ cmd_l3() {
 }
 
 cmd_compare() { "$PY" "$SCRIPTS/ladder-l3.py" compare "$1" "$2"; }
-
-cmd_smoke() {
-  local ts; ts=$(date +%m%d-%H%M%S)
-  if [ "${LADDER_RUN_ACTIVE:-0}" = "1" ]; then
-    "$SCRIPTS/run-smoke-eval.sh" "${1:-4}" "ladder-smoke-${ts}" "/dev/null"
-  else
-    "$SCRIPTS/run-smoke-eval.sh" "${1:-4}" "ladder-smoke-${ts}" "$LOGS/ladder-smoke-${ts}.log"
-  fi
-}
 
 cmd_l0() {
   local ts; ts=$(date +%m%d-%H%M%S)
@@ -1033,26 +1003,19 @@ PYEOF
   fi
   # 2026-10-14 负载口径（必须显式标注，跨口径不得外推算子占比）:
   #   synthetic（默认）   合成固定协议 = 重复定长 unit prompt × load_n，chat，max_tokens=128，定长 decode；
-  #                       适合算子 A/B 复现（单变量、可重复），**不代表 MMLU-Pro 真实流量结构**。
-  #   mmlu-pro            数据集派生（评测流量）= run-prof-load.sh（默认 lm-eval mmlu_pro_smoke 前 N 条、
-  #                       5-shot CoT、num_concurrent=5、max_gen_toks=2048）→ 长 prefill + 思考型长 decode。
+  #                       适合算子 A/B 复现（单变量、可重复）。
   #   external            任意自定负载 = 由 LADDER_PROFILE_LOAD_CMD 提供的命令（vllm bench serve /
-  #                       run-prof-load.sh <N> <task> <conc> / 自写客户端…）；用于新增"负载特征"（scenario）:
-  #                       长上下文 prefill / 多轮 chat / 别的数据集（mmlu_pro_local / HLE / SWE…）。
+  #                       自写客户端…）；用于新增"负载特征"（scenario）:
+  #                       长上下文 prefill / 多轮 chat / 别的数据集。
   #                       必须同时给 LADDER_LOAD_CALIBER=<已登记的口径 id>（先登记到 state/load-caliber.json）。
   # 两口径的算子占比/热点排名不可互相外推；窗口产物带 load_caliber 标记（ladder-opstat.py），
-  # 入库卡必须声明口径（opt note/ledger）。覆盖: LADDER_PROFILE_LOAD=mmlu-pro LADDER_PROFILE_MMLU_N=<n>。
+  # 入库卡必须声明口径（opt note/ledger）。覆盖: LADDER_PROFILE_LOAD=external。
   local load_mode=${LADDER_PROFILE_LOAD:-synthetic}
   local calib_id calib_detail
   case "$load_mode" in
     synthetic)
       calib_id="synthetic-fixed-protocol"
-      calib_detail="反复定长 unit prompt x${load_n} (chat, max_tokens=128, temperature=0, seed=42) — 算子 A/B 复现口径, 非 MMLU-Pro 流量"
-      ;;
-    mmlu-pro|mmlu_pro|mmlupro)
-      load_n=${LADDER_PROFILE_MMLU_N:-$load_n}
-      calib_id="mmlu-pro-eval-traffic"
-      calib_detail="lm-eval ${LADDER_EVAL_TASK:-mmlu_pro_smoke}(第一 ${load_n} 条, 5-shot CoT, num_concurrent=${LADDER_EVAL_CONC:-5}, max_gen_toks=2048, chat) — 数据集派生评测流量口径"
+      calib_detail="反复定长 unit prompt x${load_n} (chat, max_tokens=128, temperature=0, seed=42) — 算子 A/B 复现口径"
       ;;
     external)
       # 外部负载命令（v4：口径 id 可空，仅作导航）
@@ -1062,7 +1025,7 @@ PYEOF
       [ -n "$calib_id" ] && echo "   口径 id（导航，不设门）: $calib_id"
       ;;
     *)
-      echo "未知 LADDER_PROFILE_LOAD=$load_mode（synthetic | mmlu-pro | external）"; return 1 ;;
+      echo "未知 LADDER_PROFILE_LOAD=$load_mode（synthetic | external）"; return 1 ;;
   esac
   calib_detail="$calib_detail; capture_scope=$capture_scope; trace_tier=$tier; max_iterations=$max_iters"
   export LADDER_LOAD_CALIBER="$calib_id" LADDER_LOAD_CALIBER_DETAIL="$calib_detail"
@@ -1125,37 +1088,8 @@ json.dump({"schema": "opt-ops-load-exec.v1", "kind": "external", "cmd": cmd,
           open(out, "w"), ensure_ascii=False, indent=1)
 EOF
   else
-    # 数据集派生负载: 复用固化脚本（可传 task/并发/输出目录；默认 mmlu_pro_smoke / 5 / eval-prof-N）
-    # 本次窗口的评测输出落到窗口目录（$prof_dir/eval），供执行体记录与事后复核（不污染共享 eval 目录）
-    local eval_out="$prof_dir/eval"
-    mkdir -p "$eval_out"
-    if ! LADDER_EVAL_OUT="$eval_out" \
-         "$SCRIPTS/run-prof-load.sh" "$load_n" "${LADDER_EVAL_TASK:-mmlu_pro_smoke}" "${LADDER_EVAL_CONC:-5}"; then
-      echo "run-prof-load.sh 失败，停 profile 避免窗口作废"
-      curl -sf -X POST "http://127.0.0.1:${PORT}/stop_profile" || true; return 1
-    fi
-    # 执行体记录: 完成数 = 本次窗口 samples_*.jsonl 的样本行数（lm-eval 逐样本落盘, 非计划 N）
-    "$PY" - "$eval_out" "$exec_json" "$load_n" "${LADDER_EVAL_TASK:-mmlu_pro_smoke}" <<'PYEOF'
-import glob, json, os, sys, time
-eval_out, out, n, task = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
-samples = sorted(glob.glob(os.path.join(eval_out, "**", "samples_*.jsonl"), recursive=True),
-                 key=os.path.getmtime, reverse=True)
-results = sorted(glob.glob(os.path.join(eval_out, "**", "results_*.json"), recursive=True),
-                 key=os.path.getmtime, reverse=True)
-completed = None
-if samples:
-    with open(samples[0]) as f:
-        completed = sum(1 for line in f if line.strip())
-doc = {"schema": "opt-ops-load-exec.v1", "kind": "lm-eval", "task": task,
-       "requested": n, "completed": completed,
-       "samples_path": samples[0] if samples else "",
-       "results_path": results[0] if results else "",
-       "eval_out": eval_out,
-       "recorded_at": time.strftime("%FT%TZ", time.gmtime()),
-       "note": "lm-eval 逐样本完成记录（completed = samples 行数, 不是计划 N）"}
-json.dump(doc, open(out, "w"), ensure_ascii=False, indent=1)
-print(f"  执行体记录: completed={completed}/{n} -> {out}")
-PYEOF
+    echo "未知负载模式 $load_mode，停 profile 避免窗口作废"
+    curl -sf -X POST "http://127.0.0.1:${PORT}/stop_profile" || true; return 1
   fi
   curl -sf -X POST "http://127.0.0.1:${PORT}/stop_profile"
   metrics_snap "$prof_dir/metrics-after.txt"
@@ -1166,9 +1100,7 @@ PYEOF
     synthetic) man_task="synthetic-unit-prompt"; man_conc=$load_n; man_maxout=128
                man_ds="内置单元提示 ×${load_n}（无数据集文件; 负载特征=定长 prompt/128 输出）" ;;
     external)  man_task="external"; man_ds="${LADDER_PROFILE_LOAD_CMD:-}" ;;
-    *)         man_task="${LADDER_EVAL_TASK:-mmlu_pro_smoke}"; man_conc="${LADDER_EVAL_CONC:-5}"
-               man_maxout="${LADDER_PROFILE_MAXTOK:-2048}"
-               man_ds="lm-eval ${man_task} 前 ${load_n} 条（5-shot CoT 展平 prompt）" ;;
+    *)         man_task="unknown"; man_ds="未知负载模式" ;;
   esac
   MAN_LOAD_MODE="$load_mode" MAN_CALIBER="$calib_id" MAN_CALIBER_DETAIL="$calib_detail" \
   MAN_MODEL="$MODEL" MAN_N="$load_n" MAN_TASK="$man_task" MAN_DATASET="$man_ds" \
@@ -1802,7 +1734,7 @@ PYEOF
 
 cmd_run() {
   local tag=${1:?need tag}; shift
-  local steps=${1:-l1,l2,l3,smoke}
+  local steps=${1:-l1,l2,l3}
   local dir="$RECORDS/$tag"
   mkdir -p "$dir"
   echo "== ladder run '$tag' steps=$steps -> $dir =="
@@ -1817,14 +1749,10 @@ cmd_run() {
       l1) cmd_l1 | tee -a "$dir/steps.log" ;;
       l2) cmd_l2 | tee -a "$dir/steps.log" ;;
       l3) cmd_l3 | tee -a "$dir/steps.log" ;;
-      smoke) cmd_smoke 4 | tee -a "$dir/steps.log" ;;
       *) echo "未知 step: $step"; unset LADDER_RUN_ACTIVE; return 1 ;;
     esac
   done
   unset LADDER_RUN_ACTIVE
-  # 收拢: 只搬 smoke 产物目录（harness 自己写的目录, 单份）, 其余写索引
-  local smoke_out; smoke_out=$(ls -td "$RECORDS"/eval-ladder-smoke-* 2>/dev/null | head -1)
-  [ -n "$smoke_out" ] && mv "$smoke_out" "$dir/" 2>/dev/null || true
   "$PY" - "$dir" "$tag" "$steps" "${LADDER_LOAD_CALIBER:-unmarked}" "${LADDER_COHORT_ID:-028-qwen35-35b-a3b-tp2-fullgraph}" "${LADDER_RUN_NOTE:-}" <<'EOF'
 import glob, json, os, sys, time
 d, tag, steps, cal, coh, note = sys.argv[1:7]
@@ -1832,12 +1760,11 @@ def newest(pat):
     hits = sorted(glob.glob(f"{os.path.dirname(d)}/{pat}"), key=os.path.getmtime)
     return hits[-1] if hits else ""
 art = {"l1": newest("*-l1.json"), "l2": newest("*-l2.json"), "l3": newest("*-l3.json")}
-smoke = sorted(glob.glob(f"{d}/eval-ladder-smoke-*/**/results_*.json", recursive=True))
 doc = {"schema": "opt-ops-run-index.v1", "tag": tag, "steps": steps.split(","),
        "ts": time.strftime("%FT%TZ", time.gmtime()),
-       "artifacts": art | {"smoke_results": smoke[0] if smoke else ""},
+       "artifacts": art,
        "load_caliber": cal, "cohort": coh, "note": note,
-       "why": "run 目录只放索引 + steps.log + smoke 目录; 权威产物是 artifacts 指向的 records/ladder/<ts>-*.json（不再拷贝副本）"}
+       "why": "run 目录只放索引 + steps.log; 权威产物是 artifacts 指向的 records/ladder/<ts>-*.json（不再拷贝副本）"}
 json.dump(doc, open(f"{d}/run.json", "w"), ensure_ascii=False, indent=1)
 print(f"run 索引 -> {d}/run.json（权威产物: {os.path.basename(art['l1'] or '-')} / "
       f"{os.path.basename(art['l2'] or '-')} / {os.path.basename(art['l3'] or '-')}）")
@@ -1902,7 +1829,6 @@ case "${1:-help}" in
   l2) shift; cmd_l2 "$@" ;;
   l3) shift; cmd_l3 "$@" ;;
   compare) cmd_compare "$2" "$3" ;;
-  smoke) shift; cmd_smoke "$@" ;;
   l0) shift; cmd_l0 "$@" ;;
   screen) shift; cmd_screen "$@" ;;
   carriers) shift; carrier_probe_json "${1:-}" ;;

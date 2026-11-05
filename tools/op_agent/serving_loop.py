@@ -8,8 +8,8 @@ Decoupled from the sub-second inner operator loop (`optimizer_loop.py`):
   1. Serving greedy numerical consistency across fixed prompts (Serving L3).
   2. Profiler `op_statistic.csv` kernel call-count verification and all-kernel
      share / signal-to-noise gating (L4).
-  3. Workload-aware A/B serving comparison (`random`, `sharegpt`, `long-prefix`,
-     `mmlu-pro`) and structured evidence write-back with checksum refresh.
+  3. Workload-aware A/B serving comparison (`random`, `sharegpt`,
+     `long-prefix`) and structured evidence write-back with checksum refresh.
 """
 
 from __future__ import annotations

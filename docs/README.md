@@ -17,7 +17,8 @@
 | 9 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
 | 10 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
 | 11 | [op-agent-harness-spec.md](op-agent-harness-spec.md) | 算子调优 Harness (tools/op_agent) 架构与使用规范 |
-| 12 | [progress.md](progress.md) | 项目当前状态 |
+| 12 | [../tools/op_agent/README.md](../tools/op_agent/README.md) | 调优循环怎么跑起来、API key 如何接入(上手入口) |
+| 13 | [progress.md](progress.md) | 项目当前状态 |
 
 ## 单一事实源分工
 
