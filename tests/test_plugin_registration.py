@@ -31,7 +31,6 @@ def test_cascade_is_not_a_general_plugin():
     assert all("cascade" not in target for target in plugins.values())
     assert set(plugins) == {
         "fi-sampling",
-        "fi-gelu",
         "fia-demask",
         "aot-cache-guard",
         "mlp-chunk",
@@ -90,5 +89,5 @@ def test_installed_plugins_are_isolated_from_cascade(tmp_path, stale_env):
     assert report["status"] == "PASS"
     assert report["stale_cascade_env"] is stale_env
     assert report["forbidden_import_attempts"] == []
-    assert len(report["plugins"]) == 9
+    assert len(report["plugins"]) == 8
     assert len(report["removed_modules"]) == 5

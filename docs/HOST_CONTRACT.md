@@ -38,42 +38,10 @@ core cannot be matched internally by an outer FX rule. Layer-level replacement
 must not disguise a copied whole-forward implementation as operator registration.
 Registration and release gates are defined in `docs/release.md`.
 
-## fi_gelu component (default-off, registered OOT provider)
-
-- Loader: existing `vllm.general_plugins` entry `fi-gelu`; exact enable token
-  `VLLM_HUST_FI_GELU=1`. Disabled loading/installing imports no host/device stack.
-- Execution: `CustomOp.register_oot(name="GeluAndMul")`; `CustomOp.__new__` reads
-  the class-name key when the host constructs `GeluAndMul`. Only the plugin
-  subclass defines the adapter `forward_oot`; the host class is unchanged.
-- `register_oot` sets the provider's `name` to the class-name registry key.
-  The provider must restore its own `name` to the host's `gelu_and_mul` so that
-  `custom_ops` all/none and `+gelu_and_mul` / `-gelu_and_mul` retain their semantics.
-- Register before the first activation lookup/model construction; host factories
-  (`LazyDict`, Gemma's cached activation helper) can retain earlier instances.
-  The inspected model callsite is `GemmaMLP.__init__` → `_get_gemma_act_fn`
-  → `GeluAndMul`; its forward calls `self.act_fn(gate_up)`.
-  Missing host/API/registration or an occupied key leaves the existing provider
-  untouched. Kernel/input fallback delegates to the original host `forward_oot`.
-- `uninstall()` deletes only the still-owned registry entry; no public unregister
-  method exists in the inspected host. Future construction returns to the host;
-  existing instances remain bound. Production rollback requires restart/recapture.
-- Upgrade gate: verify the constructor lookup, registration duplicate guard,
-  dispatch, configuration name and Ascend registration list. A future Ascend
-  `GeluAndMul` provider requires re-audit, not overwrite or loader monkeypatch.
-- `tools/probe_gelu_device.py` is the on-device gate runner (real host import,
-  real registration/construction dispatch, numeric gate, ACL graph replay,
-  fallback delegation, directional L0 pair). It requires a working NPU stack.
-- `tools/probe_gelu_registration.py` executes the unmodified host class
-  definitions with real CPU PyTorch, controlled config/OOT platform and a stub
-  kernel. It proves the constructor → host forward → adapter path in this
-  harness, not normal host import, worker startup or device execution.
-  NPU gates remain in `tests/test_npu_w31_gelu_plugin.py`.
-
 ### Remaining-plugin registration migration boundaries
 
 | Plugin | Existing coupling | Existing-interface assessment |
 |---|---|---|
-| fi-gelu | activation class method | OOT constructor lookup is reachable; use `register_oot` on an unoccupied key |
 | fi-sampling | sampler module class binding | `TopKTopPSampler` inherits `nn.Module`, not `CustomOp`; its constructor does not consume the OOT registry |
 | rope-fix | occupied OOT entries plus registration wrapper/rebinding | Missing Llama3 key may use registration independently; replacing existing Ascend providers cannot use duplicate-rejecting `register_oot` directly |
 | fia-demask | global torch_npu operation proxies | Attention Backend is a broader boundary; metadata/workspace/graph parity must be demonstrated before replacing the proxy |

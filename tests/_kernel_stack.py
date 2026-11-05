@@ -14,7 +14,7 @@
 """Import guard for the tests that need the triton-ascend kernel stack.
 
 ``tests/_device_stack.py`` covers ``torch`` / ``torch_npu`` / ``vllm_ascend``;
-the fi_gelu kernel tests additionally import ``numpy`` and ``triton`` (the
+kernel tests additionally import ``numpy`` and ``triton`` (the
 patched triton that ships with triton-ascend -- never installable from PyPI on
 the CPU CI runner).  Importing this module skips the importing test module when
 any piece is missing, with the missing name in the skip reason:

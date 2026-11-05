@@ -109,15 +109,6 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
 
 ---
 
-### 算子 5：GELU and Mul Triton 融合算子 (`fi-gelu`)
-- **目录位置**：`ops/fi_gelu/`
-- **核心状态**：当前已知主模型 Qwen3.5 采用 SwiGLU 结构，该插件为负收益/不适用，保持 default-off。
-- **评测命令**（如需在支持模型如 Gemma 下复测）：
-  ```bash
-  cd /tmp && bash /root/vllm-workspace/vllm-ascend-split-batch-hust/bench/bench_w31_e2e.sh
-  ```
-- **数据回填**：保持其负收益与适用边界的客观记录，不强行主张性能加速。
-
 仓内已建立标准 Workload 目录 `workloads/`，包含 `random-input`、`sharegpt` 和 `long-prefix`。当前阶段主要使用受控 `random-input`；后续扩展压测可通过 `bash workloads/run_workload.sh <workload>` 直接执行。
 
 ---

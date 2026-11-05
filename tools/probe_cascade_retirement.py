@@ -55,7 +55,7 @@ def probe(stale_cascade_env=False):
     try:
         dist = importlib.metadata.distribution("vllm-ascend-split-batch")
         entries = [e for e in dist.entry_points if e.group == "vllm.general_plugins"]
-        assert len(entries) == 9
+        assert len(entries) == 8
         assert all("cascade" not in e.name + e.value for e in entries)
         assert not any("ascend-kernel" in r.lower() for r in (dist.requires or []))
         loaded = {}

@@ -41,20 +41,6 @@
       "serving_status": "verified_on_par_with_baseline"
     },
     {
-      "id": "fi_gelu",
-      "display_name": "GELU and Mul Triton Fused Kernel",
-      "layer": "plugin_carrier",
-      "directory": "ops/fi_gelu",
-      "readme": "ops/fi_gelu/README.md",
-      "report": "ops/fi_gelu/REPORT.md",
-      "evidence": "ops/fi_gelu/evidence.json",
-      "status": "default_off_negative_speedup",
-      "default_enabled": false,
-      "gate_env": "VLLM_HUST_FI_GELU=1",
-      "l3_numerical_guard": "passed",
-      "serving_status": "negative_or_pending"
-    },
-    {
       "id": "fia_demask",
       "display_name": "FlashInfer Attention Demask",
       "layer": "plugin_carrier",
