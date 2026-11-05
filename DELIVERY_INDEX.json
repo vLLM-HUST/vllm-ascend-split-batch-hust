@@ -41,34 +41,6 @@
       "serving_status": "verified_on_par_with_baseline"
     },
     {
-      "id": "fia_demask",
-      "display_name": "FlashInfer Attention Demask",
-      "layer": "plugin_carrier",
-      "directory": "ops/fia_demask",
-      "readme": "ops/fia_demask/README.md",
-      "report": "ops/fia_demask/REPORT.md",
-      "evidence": "ops/fia_demask/evidence.json",
-      "status": "default_off_inconclusive",
-      "default_enabled": false,
-      "gate_env": "VLLM_HUST_FIA_DEMASK=1",
-      "l3_numerical_guard": "passed",
-      "serving_status": "within_noise"
-    },
-    {
-      "id": "fi_sampling",
-      "display_name": "FlashInfer Sampling Triton Port",
-      "layer": "plugin_carrier",
-      "directory": "ops/fi_sampling",
-      "readme": "ops/fi_sampling/README.md",
-      "report": "ops/fi_sampling/REPORT.md",
-      "evidence": "ops/fi_sampling/evidence.json",
-      "status": "default_off_historical_direction",
-      "default_enabled": false,
-      "gate_env": "VLLM_HUST_FI_SAMPLING=1",
-      "l3_numerical_guard": "passed",
-      "serving_status": "pending_npu_refresh"
-    },
-    {
       "id": "gate_fp32",
       "display_name": "MoE Gate Weight FP32 Hoist",
       "layer": "plugin_carrier",
@@ -81,20 +53,6 @@
       "gate_env": "VLLM_HUST_GATE_FP32=1",
       "l3_numerical_guard": "passed",
       "serving_status": "verified_faster"
-    },
-    {
-      "id": "gdn_qkv_unpack",
-      "display_name": "GDN QKV Single-pass Unpack Kernel",
-      "layer": "plugin_carrier",
-      "directory": "ops/gdn_qkv_unpack",
-      "readme": "ops/gdn_qkv_unpack/README.md",
-      "report": "ops/gdn_qkv_unpack/REPORT.md",
-      "evidence": "ops/gdn_qkv_unpack/evidence.json",
-      "status": "default_off_negative_speedup",
-      "default_enabled": false,
-      "gate_env": "unexposed",
-      "l3_numerical_guard": "passed",
-      "serving_status": "negative_or_pending"
     },
     {
       "id": "gdn_split_fusion",
