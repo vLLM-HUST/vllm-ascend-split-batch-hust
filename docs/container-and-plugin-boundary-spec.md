@@ -64,7 +64,7 @@
   镜像预置的 `/vllm-workspace` 包含旧版的空目录或历史源码，若在该目录下执行 `python3` 或 `pytest`，Python 的搜索路径会将当前工作目录置于首位，从而严重遮蔽已安装的真正 Python 包，引发无法解释的符号缺失或属性报错。
 - **规范执行目录**：
   - 代码修改与测试开发：`cd /root/vllm-workspace/vllm-ascend-split-batch-hust`
-  - 端到端压测与基准运行：`cd /tmp`（配合显式绝对路径引用脚本，如 `bench/bench_fisampling_refresh_e2e.sh`）
+  - 端到端压测与基准运行：`cd /tmp`（配合显式绝对路径引用脚本，如 `tools/bench_*.py`）
 
 ### 2.4 外部知识库与原始数据物理隔离准则
 - **外部知识库定位**：`/root/cannbot-knowledge/`、`/root/research/` 等外部知识库是探索分析的参考资料库，不是代码库的一部分；
@@ -104,7 +104,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 │                                                                        │
 │  负责：                                                                 │
 │   1. 官方 vllm.general_plugins 注册与加载                               │
-│   2. 纯 Python / Triton-Ascend 融合算子实现 (如 fi-sampling)            │
+│   2. 纯 Python / Triton-Ascend 融合算子实现 (如 gdn_norm_gate)         │
 │   3. default-off 环境变量门控控制 (未开启时零差异、零导入、零开销)      │
 │   4. 算子调度策略与形状匹配选择 (op_selector)                           │
 │   5. 标准化四级评测验证与交付报告 (ops/<operator>/)                     │

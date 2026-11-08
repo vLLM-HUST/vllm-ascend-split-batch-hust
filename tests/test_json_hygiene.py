@@ -73,10 +73,10 @@ def test_delivery_index_matches_operator_directories():
 
 
 def test_packaging_extension_manifests_are_valid():
-    """验证 6 份 extension bundle json 规范合法。"""
+    """验证 5 份 extension bundle json 规范合法。"""
     manifest_paths = list(ROOT.glob("src/**/vllm-hust-extension-v0.2.json"))
-    assert len(manifest_paths) == 6, (
-        f"预期 6 份扩展 manifest，实际 {len(manifest_paths)}"
+    assert len(manifest_paths) == 5, (
+        f"预期 5 份扩展 manifest，实际 {len(manifest_paths)}"
     )
     for path in manifest_paths:
         data = json.loads(path.read_text(encoding="utf-8"))

@@ -85,30 +85,6 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
 
 ---
 
-### 算子 3：FlashInfer Attention Demask (`fia-demask`)
-- **目录位置**：`ops/fia_demask/`
-- **核心优化**：在纯 Decode（Q_S=1）场景跳过全 1 的注意力掩码张量准备与核函数加载。
-- **评测命令**：
-  ```bash
-  export VLLM_HUST_FIA_DEMASK=1
-  pytest tests/test_fia_demask.py -v
-  ```
-- **预期数据**：数值恒等；在端到端并发下测量微小加速比，若在噪声范围内（Within noise），则如实记录结论。
-
----
-
-### 算子 4：FlashInfer Sampling Triton 移植 (`fi-sampling`)
-- **目录位置**：`ops/fi_sampling/`
-- **核心优化**：使用针对昇腾 Triton 优化的采样算子替换分立的 Top-P / Top-K 宿主原生实现。
-- **评测命令**：
-  ```bash
-  # 使用官方预制驱动脚本（卡 7 隔离运行，离线模式）
-  cd /tmp && FISAMPLING_CARD=0 bash /root/vllm-workspace/vllm-ascend-split-batch-hust/bench/bench_fisampling_refresh_e2e.sh
-  ```
-- **数据回填**：从生成的日志和 json 提取当前 0.28 镜像与 Qwen3.5 栈下的实际速度提升。
-
----
-
 仓内已建立标准 Workload 目录 `workloads/`，包含 `random-input`、`sharegpt` 和 `long-prefix`。当前阶段主要使用受控 `random-input`；后续扩展压测可通过 `bash workloads/run_workload.sh <workload>` 直接执行。
 
 ---

@@ -13,13 +13,11 @@
 
 | 名称 | 可发现 | 可激活 | 真实调用 | 算子收益 | 服务收益 | 独立子目录与报告 |
 |---|---|---|---|---|---|---|
-| `fia-demask` | 是，general plugin + bundle | active，默认关闭 | 仅纯 decode 且 Q_S=1/请求 | A/B inconclusive；不主张收益 | 未证明 | [ops/fia_demask](../ops/fia_demask/REPORT.md) |
 | `rope-fix` | 是，general plugin + bundle | import_only | 无正式启用路径 | 未证明；不主张性能收益 | 未证明 | - |
 | `zerocost-wiring` | 是，general plugin + bundle | active，双开关默认关闭 | 依赖运行时门控 | A/B inconclusive | 未证明 | - |
 | `gate-fp32` | 是，general plugin + bundle | active，默认关闭 | 受支持权重加载/执行路径 | 有历史局部 Cast 外提记录；只适用于原形状与权重 | 未证明当前端到端服务收益 | - |
 | `gdn-merge-inproj` | 是，general plugin + bundle | import_only，fail-closed | 插件侧缺少安全消费 seam；不合并权重 | 插件自身无收益；实际权重合并由宿主层承载 | 未证明 | - |
 | `split-batch-full-graph` planner | 是，bundle | import_only，不可激活 | 仅纯规划函数；没有宿主执行面 | 不适用 | 未证明 | - |
-| `fi-sampling` | 是，general plugin | 无 bundle | 依赖运行时路由 | 历史 Qwen2.5/0.25 证据仅方向；当前域未证明 | 历史端到端差异在噪声内；不得外推 | [ops/fi_sampling](../ops/fi_sampling/REPORT.md) |
 | `aot-cache-guard` | 是，general plugin | 无 bundle | 宿主修复后 no-op | 不主张稳态收益 | 仅冷启动问题另行评估 | - |
 | `mlp-chunk` | 是，general plugin | 无 bundle，默认 chunks=1 | 仅配置启用时 | 目标是内存控制，不主张延迟收益 | 未证明容量/并发收益 | - |
 

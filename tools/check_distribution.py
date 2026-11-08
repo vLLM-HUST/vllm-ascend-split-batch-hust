@@ -1,4 +1,5 @@
 import argparse
+import configparser
 import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -21,6 +22,13 @@ def check(directory):
         }
     with zipfile.ZipFile(wheels[0]) as archive:
         wheel = set(archive.namelist())
+        entry_point_files = [
+            name for name in wheel if name.endswith(".dist-info/entry_points.txt")
+        ]
+        if len(entry_point_files) != 1:
+            raise ValueError("Missing plugin entry points")
+        entry_points = configparser.ConfigParser()
+        entry_points.read_string(archive.read(entry_point_files[0]).decode("utf-8"))
     for names in (source, wheel):
         for name in names:
             path = PurePosixPath(name)
@@ -37,10 +45,15 @@ def check(directory):
     actual = {name for name in source if name.startswith("src/")}
     if not expected or expected != actual:
         raise ValueError("sdist/wheel runtime source inventory differs")
-    if len([n for n in wheel if n.endswith("vllm-hust-extension-v0.2.json")]) != 6:
+    bundle_group = "vllm_hust.extension_bundles"
+    expected_manifests = (
+        len(entry_points[bundle_group]) if entry_points.has_section(bundle_group) else 0
+    )
+    packaged_manifests = len(
+        [n for n in wheel if n.endswith("vllm-hust-extension-v0.2.json")]
+    )
+    if expected_manifests == 0 or packaged_manifests != expected_manifests:
         raise ValueError("Missing extension manifests")
-    if not any(n.endswith("entry_points.txt") for n in wheel):
-        raise ValueError("Missing plugin entry points")
     print(
         "sdist and wheel: evidence-free, matching runtime inventory, manifests present"
     )

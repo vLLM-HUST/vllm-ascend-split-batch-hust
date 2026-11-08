@@ -65,7 +65,7 @@ Delivery gates: [docs/release.md](docs/release.md#算子-bundle-最短交付路�
 
 ## Capability and evidence status
 
-The published root planner remains `import_only` and cannot be activated. Current per-component discovery, activation, invocation and evidence status is recorded in [docs/delivery-inventory.md](docs/delivery-inventory.md); historical reports remain historical and are not current support claims. Unsupported configurations and invalid speculative requests must remain fail-closed and must not be crossed.
+The published root planner remains `import_only` and cannot be activated. Current per-component discovery, activation, invocation and evidence status is recorded in [docs/delivery-inventory.md](docs/delivery-inventory.md); historical reports remain historical and are not current support claims. Unsupported configurations and invalid speculative requests must remain fail-closed and must not be crossed. Performance variations within noise are documented as such.
 
 ### Cohort scope (what our evidence does and does not cover)
 
@@ -93,39 +93,6 @@ repository and are not current support or performance claims. See
 [docs/EVIDENCE.md](docs/EVIDENCE.md) for evidence custody and cohort boundaries. They must
 not be combined with the current 0.28/Qwen3.5 evidence.
 
-
-## fi_sampling plugin (default-off, evidence-only)
-
-Entry point: `vllm.general_plugins` ->
-`fi-sampling = vllm_ascend_split_batch.fi_sampling_plugin:load`.
-
-Routes the sampling step to the vendored `fi_sampling` triton-ascend kernels
-(flashinfer-semantics port, W2 package) by replacing the fork's
-`AscendTopKTopPSampler` with a subclass at plugin-load time. With
-`VLLM_HUST_FI_SAMPLING` unset nothing is imported or patched.
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `VLLM_HUST_FI_SAMPLING` | `0` | master switch |
-| `VLLM_HUST_FI_SAMPLING_SEED` | torch initial seed | fixed base seed (per-call advancing) |
-| `VLLM_HUST_FI_SAMPLING_JOINT_MIN_BATCH` | `256` | joint-cell batch floor (W2 bench knee) |
-| `VLLM_HUST_FI_SAMPLING_JOINT_MIN_K` | `32` | joint-cell top-k floor |
-| `VLLM_HUST_FI_SAMPLING_K1_ARGMAX` | `1` | `0` keeps k=1 on the fork chain (tie-exact) |
-| `VLLM_HUST_FI_SAMPLING_TRACE` | `0` | per-step route trace + histogram |
-
-Routing: no top-k/top-p -> FI api1 kernel; k=1 on every row -> argmax;
-`B >= 256` with `k >= 32` and top-p -> FI joint kernel; everything else (and
-all five mandatory fallbacks: per-request generators, processed
-logits/logprobs modes, batch-invariant, reduce-sample, async-exponential)
-stays on the fork chain with no device sync.
-
-Evidence ([docs/evidence/w2b-fi-sampling/REPORT.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/w2b-fi-sampling/REPORT.md), Qwen2.5-Coder-14B, 910B2 —
-**historical Qwen2.5/0.25 domain**, see the cohort scope above):
-
-[Original sampling measurements and route observations](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/README.md#L193).
-The reported end-to-end difference was within noise. The joint route was not
-reachable in the long-context single-card shape. Neither observation is a new
-qualification; routing guards and the historical cohort boundary above remain.
 
 ## Extension framework
 
