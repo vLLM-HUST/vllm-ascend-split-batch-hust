@@ -85,33 +85,64 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
 
 ---
 
-仓内已建立标准 Workload 目录 `workloads/`，包含 `random-input`、`sharegpt` 和 `long-prefix`。当前阶段主要使用受控 `random-input`；后续扩展压测可通过 `bash workloads/run_workload.sh <workload>` 直接执行。
+## 4. 全链路端到端 Profiling 采集与多算子热点发现计划
+
+针对整网未见真实 Trace 产物的现状，通过外挂式采集与分析工具链完成从整网 Trace 到候选算子批次的闭环流转：
+
+### 4.1 CPU-Only 准备阶段（工程就绪）
+1. **Trace 解析与防呆预检演练**：
+   - 验证 `tools/op_agent/timeline_insight.py` 的子图折叠逻辑与 SVG 泳道图渲染；
+   - 验证 `tools/op_agent/campaign.py` discover 阶段的三项对抗性预检（剔除图内极小耗时伪热点、CSV 均值对账偏差过大拦截、每步预算排序）；
+2. **自动化起服与压测调用封装**：
+   - 验证 `workloads/run_workload.sh` 与 `tools/op_agent/serving_loop.py` 的参数组合（`random` 定长受控基准与 `sharegpt` 真实长尾压力分布）。
+
+### 4.2 NPU 2x 实测采集阶段（带卡执行）
+1. **真实整网 Trace 采集**：
+   - 在双卡 910B2 TP=2 环境下启动全基线服务（所有门控置 0）；
+   - 在 `random` 稳态解码（512 输入 / 256 输出 / 并发 32）与 `sharegpt` 长尾分布下，各采集一个代表性窗口（跳过预热，采集连续稳态步骤），生成 `kernel_details.csv` 与 `op_statistic.csv`；
+   - 原始 Trace 一律输出至仓外持久层（如 `/root/prof/`），严禁混入 Git 仓库。
+2. **外挂式子图聚类与批次审核单生成**：
+   ```bash
+   python3 -m tools.op_agent.campaign discover \
+       --out /tmp/campaign_batch.json \
+       --kernel-details-csv /root/prof/random_baseline/kernel_details.csv \
+       --op-statistic-csv /root/prof/random_baseline/op_statistic.csv \
+       --svg-out /tmp/timeline_hotspots.svg
+   ```
+   - 输出审查卡片（前后锚点、非锚点向量链、等待空泡、MTE2 片外搬运占比）；
+   - 审阅生成的 `campaign_batch.json` 批次清单，仅对确认具有算子优化潜力的项标记 `status: "approved"`。
 
 ---
 
-## 4. 评测成果回填与闭环更新流程
+## 5. 挂起算子外环补齐与闭环更新流程
 
-采集到真实硬件性能数字后，按以下三步完成成果落盘：
+针对当前 `evidence.json` 中标记为 `pending` 的算子（`qwen_text_split_qkv_fuse`、`gdn_qkv_norm`、`gdn_norm_gate`、`gdn_split_ba`），按以下标准化流程在 NPU 2x 环境下推进落地：
 
-### Step 1：更新各算子的 `evidence.json`
-将最新的硬件信息、测试 shape、L0 耗时比、L4 命中次数及端到端加速比更新至对应算子的 `ops/<operator>/evidence.json`。例如：
-```json
-"l0_microbenchmark": {
-  "status": "passed",
-  "speedup": 1.12
-},
-"serving_end_to_end": {
-  "tested": true,
-  "speedup": 1.04
-}
-```
+### Step 1：执行 Serving L3 贪心对拍
+通过 `tools/op_agent/serving_loop.py` 内置的 8 条固定问答提示词（`temperature=0.0`），分别采集关闭门控（OFF）与开启门控（ON）的生成文本，断言 100% 逐字严格一致。
 
-### Step 2：更新各算子的 `REPORT.md`
-在 `ops/<operator>/REPORT.md` 中填入规范结果表格，包含微基准对比、数值误差判定、L4 消除次数及端到端服务状态。
-
-### Step 3：更新根目录索引 `DELIVERY_INDEX.json`
-将各算子的 `serving_status` 从 `pending_npu_refresh` 调整为 `measured_speedup`、`within_noise` 或 `negative_speedup`，并运行合规测试校验：
+### Step 2：解析 `op_statistic.csv` 核验 L4 归因与信噪比
 ```bash
-pytest tests/test_benchmark_standard.py tests/test_json_hygiene.py -v
+python3 -m tools.op_agent.serving_loop parse-l4 \
+    --csv /root/prof/eval_op/op_statistic.csv \
+    --kernel <target_kernel_name> \
+    --expected-calls <expected_count>
 ```
-确保全量 JSON 校验与结构索引测试持续保持全绿。
+核验融合内核命中率达 100% 且零静默回退，评估其在整网所有算子总耗时中的占比是否跨过信噪比门槛。
+
+### Step 3：独立起服 A/B 压测与成果自动回填
+对关闭组与开启组各执行多轮独立起服平衡压测（主测 `random`，复核 `sharegpt`），并汇总回填交付证据与刷新指纹：
+```bash
+python3 -m tools.op_agent.serving_loop summarize-ab \
+    --workload random \
+    --off /tmp/off_1.json /tmp/off_2.json \
+    --on /tmp/on_1.json /tmp/on_2.json \
+    --update-op-dir ops/<operator>
+```
+
+### Step 4：更新交付索引与合规校验
+将各算子的 `serving_status` 从 `pending` 调整为 `verified_faster` 或 `within_noise`，并运行合规测试校验：
+```bash
+pytest tests/test_benchmark_standard.py tests/test_json_hygiene.py tests/test_ops_delivery_policy.py -v
+```
+确保全量 JSON 校验、结构索引与防漂移门禁持续保持全绿。

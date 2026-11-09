@@ -70,12 +70,19 @@ class MoeGateMergeCase(OpCase):
 
     def get_baseline_code(self) -> str:
         return """
-import torch
-
 def optimized_op(x, router_w, shared_w):
-    router_logits = torch.matmul(x, router_w.t())
-    shared_gate = torch.matmul(x, shared_w.t())
-    return router_logits, shared_gate
+    if hasattr(x, "matmul"):
+        import torch
+
+        router_logits = torch.matmul(x, router_w.t())
+        shared_gate = torch.matmul(x, shared_w.t())
+        return router_logits, shared_gate
+    else:
+        import numpy as np
+
+        router_logits = np.matmul(x, router_w.T)
+        shared_gate = np.matmul(x, shared_w.T)
+        return router_logits, shared_gate
 """
 
     def get_task_prompt(self) -> str:
