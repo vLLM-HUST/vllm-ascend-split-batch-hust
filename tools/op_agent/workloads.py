@@ -91,6 +91,7 @@ WORKLOAD_CATALOG: dict[str, WorkloadProfile] = {
         ignore_eos=False,
         recommended_for_phases=("decode", "prefill", "mixed", "all"),
         candidate_dataset_paths=(
+            "/models/datasets/ShareGPT/ShareGPT_V3_unfiltered_cleaned_split.json",
             "/data/vllm-hust-benchmark/scripts/traces/evoscientist-workload-sharegpt.json",
             "/vllm-workspace/bench/datasets/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json",
             "/root/vllm-workspace/bench/datasets/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json",

@@ -46,6 +46,7 @@
 探索与负性能留存算子索引：
 - **GDN QKV 单 pass 解包 (`gdn_qkv_unpack`)**：专属报告与证据结构见 [ops/gdn_qkv_unpack](../ops/gdn_qkv_unpack/REPORT.md)。910B2 实测因 Triton 启动发射开销慢于原生链，按规范留存负性能事实，保持未激活。
 - **MoE 双门合并 (`moe_gate_merge`)**：专属报告与证据结构见 [ops/moe_gate_merge](../ops/moe_gate_merge/REPORT.md)。虽然纯 MatMul 有微弱加速，但非对齐切片搬运带来额外开销，流水线跑输原生分离方案，按规范留存负性能事实，不予集成。
+- **MoE Gating 与 Token Routing 融合 (`moe_gating_routing`)**：专属报告与证据结构见 [ops/moe_gating_routing](../ops/moe_gating_routing/REPORT.md)。宿主底层深度集成 CANN 专用硬件指令（`npu_moe_gating_top_k` 与 `npu_moe_init_routing_v2`），纯软件级分箱与散布搬运跑输专用硬件指令，按规范留存负性能事实，不予集成。
 
 
 Cascade 不属于当前发布组件：没有源码、注册入口或可执行路径。历史报告不代表当前能力。

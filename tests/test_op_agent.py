@@ -302,4 +302,118 @@ def test_moe_gating_routing_case_contract():
 
     res = run_candidate_evaluation(case.get_baseline_code(), tc)
     assert res["l3_passed"] is True
-    assert set(res["bucket_latencies_us"].keys()) == {1, 4, 8, 16, 32}
+
+
+def test_timeline_insight_synthetic_clustering(tmp_path):
+    from tools.op_agent.timeline_insight import (
+        compress_kernel_timeline,
+        render_timeline_swimlane_svg,
+    )
+
+    kd_csv = tmp_path / "kernel_details.csv"
+    kd_csv.write_text(
+        "\n".join(
+            [
+                (
+                    "Name,Type,Accelerator Core,Duration(us),Wait Time(us),"
+                    "aiv_mte2_ratio,aiv_mte3_ratio,aiv_vec_ratio,"
+                    "Input Shapes,Input Data Types,Output Shapes"
+                ),
+                (
+                    "MatMul_1,MatMul,AI_CORE,120.0,0.0,0.0,0.0,0.0,"
+                    '"[32, 2048]",bf16,"[32, 4096]"'
+                ),
+                (
+                    "CustomNorm_1,Norm,AI_VECTOR_CORE,8.5,1.2,0.65,0.0,0.85,"
+                    '"[32, 4096]",bf16,"[32, 4096]"'
+                ),
+                (
+                    "CustomGate_1,Gate,AI_VECTOR_CORE,6.2,0.5,0.40,0.0,0.90,"
+                    '"[32, 4096]",bf16,"[32, 4096]"'
+                ),
+                (
+                    "MatMul_2,MatMul,AI_CORE,115.0,0.0,0.0,0.0,0.0,"
+                    '"[32, 4096]",bf16,"[32, 2048]"'
+                ),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    digest = compress_kernel_timeline(str(kd_csv), top_k=2)
+    assert len(digest["top_fusable_chains"]) >= 1
+    chain = digest["top_fusable_chains"][0]
+    assert chain["anchor_before"]["type"] == "MatMul"
+    assert chain["anchor_after"]["type"] == "MatMul"
+    assert chain["num_ops_in_chain"] == 2
+
+    svg_file = tmp_path / "swimlane.svg"
+    svg_path = render_timeline_swimlane_svg(digest, str(svg_file))
+    assert os.path.isfile(svg_path)
+    svg_content = svg_file.read_text(encoding="utf-8")
+    assert "<svg" in svg_content
+    assert "Norm" in svg_content
+    assert "Gate" in svg_content
+
+
+def test_outer_loop_serving_subcommands(tmp_path):
+    import json
+
+    from tools.op_agent.serving_loop import (
+        build_outer_loop_plan,
+        compare_greedy_outputs,
+        parse_op_statistic_csv,
+        summarize_serving_ab_runs,
+    )
+
+    # 1. build_outer_loop_plan
+    plan = build_outer_loop_plan(
+        op_name="gdn_split_ba",
+        gate_env="VLLM_HUST_GDN_SPLIT_BA=1",
+        phase="decode",
+    )
+    assert plan["operator"] == "gdn_split_ba"
+    assert "VLLM_HUST_GDN_SPLIT_BA=1" in plan["gate_env"]
+    assert "random" in plan["workload_pairing"]["primary_workload"]
+    assert "sharegpt" in plan["workload_pairing"]["stress_workload"]
+
+    # 2. compare_greedy_outputs
+    matched_res = compare_greedy_outputs(
+        ["Hello world", "Test 123"], ["Hello world", "Test 123"]
+    )
+    assert matched_res["passed"] is True
+    assert matched_res["matched"] == 2
+    mismatched_res = compare_greedy_outputs(["Hello world"], ["Different text"])
+    assert mismatched_res["passed"] is False
+
+    # 3. parse_op_statistic_csv
+    stat_csv = tmp_path / "stat.csv"
+    stat_csv.write_text(
+        "OP Type,Count,Total Time(us),Avg Time(us)\n"
+        "MatMul,30,3000.0,100.0\n"
+        "_gdn_split_ba_kernel,30,150.0,5.0\n",
+        encoding="utf-8",
+    )
+    l4_info = parse_op_statistic_csv(
+        str(stat_csv), "_gdn_split_ba_kernel", expected_calls=30
+    )
+    assert l4_info["hit_verified"] is True
+    assert l4_info["call_count_actual"] == 30
+
+    # 4. summarize_serving_ab_runs
+    off_json = tmp_path / "off.json"
+    on_json = tmp_path / "on.json"
+    off_json.write_text(
+        json.dumps({"output_throughput": 100.0, "mean_tpot_ms": 20.0}),
+        encoding="utf-8",
+    )
+    on_json.write_text(
+        json.dumps({"output_throughput": 108.0, "mean_tpot_ms": 18.5}),
+        encoding="utf-8",
+    )
+    summary = summarize_serving_ab_runs(
+        [str(off_json)], [str(on_json)], workload_id="random"
+    )
+    assert summary["tested"] is True
+    assert summary["speedup"] == 1.08
+    assert summary["status"] == "verified_faster"

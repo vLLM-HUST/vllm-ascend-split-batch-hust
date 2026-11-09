@@ -167,6 +167,20 @@
       "serving_status": "negative_or_pending"
     },
     {
+      "id": "moe_gating_routing",
+      "display_name": "MoE Gating and Token Routing Composite Pattern",
+      "layer": "rejected_exploration",
+      "directory": "ops/moe_gating_routing",
+      "readme": "ops/moe_gating_routing/README.md",
+      "report": "ops/moe_gating_routing/REPORT.md",
+      "evidence": "ops/moe_gating_routing/evidence.json",
+      "status": "default_off_negative_speedup",
+      "default_enabled": false,
+      "gate_env": "unexposed",
+      "l3_numerical_guard": "passed",
+      "serving_status": "negative_or_pending"
+    },
+    {
       "id": "qwen_text_split_qkv_fuse",
       "display_name": "Qwen Text Attention Split-QKV RoPE Fusion",
       "layer": "host_fork",

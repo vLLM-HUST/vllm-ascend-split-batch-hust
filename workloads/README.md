@@ -40,6 +40,12 @@ bash workloads/run_workload.sh random 8350 qwen35-35b /tmp/workload_results
 
 # 3. 执行真实长尾对话分布压力负载（自动探测容器内离线 ShareGPT JSON）
 bash workloads/run_workload.sh sharegpt 8350 qwen35-35b /tmp/workload_results
+
+# 4. 一键执行端到端 Profiler 采集与热点子图折叠
+bash workloads/collect_profile.sh random 8350 qwen35-35b /root/prof/random_trace
+
+# 5. 一键执行挂起算子外环对拍与成果回填
+bash workloads/evaluate_outer_loop.sh gdn_qkv_norm "VLLM_HUST_GDN_QKV_NORM=1" 8350 qwen35-35b /tmp/eval_qkv_norm
 ```
 
 可通过环境变量显式指定仓外离线数据集路径：

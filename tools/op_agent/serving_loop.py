@@ -350,6 +350,13 @@ def main(argv: list[str] | None = None) -> None:
     ab_p.add_argument("--on", nargs="+", required=True)
     ab_p.add_argument("--update-op-dir", default=None)
 
+    greedy_p = sub.add_parser(
+        "compare-greedy", help="Compare baseline vs candidate greedy text files."
+    )
+    greedy_p.add_argument("--baseline", required=True, help="Baseline JSON or TXT.")
+    greedy_p.add_argument("--candidate", required=True, help="Candidate JSON or TXT.")
+    greedy_p.add_argument("--update-op-dir", default=None)
+
     args = parser.parse_args(argv)
     if args.command == "plan":
         plan = build_outer_loop_plan(
@@ -377,6 +384,21 @@ def main(argv: list[str] | None = None) -> None:
         if args.update_op_dir:
             update_operator_outer_evidence(args.update_op_dir, serving_e2e=summary)
         print(json.dumps(summary, indent=2, ensure_ascii=False))
+    elif args.command == "compare-greedy":
+
+        def _load_lines(path: str) -> list[str]:
+            with open(path, encoding="utf-8") as f:
+                if path.endswith(".json"):
+                    content = json.load(f)
+                    return content if isinstance(content, list) else [str(content)]
+                return [line.rstrip("\r\n") for line in f if line.strip()]
+
+        base_texts = _load_lines(args.baseline)
+        cand_texts = _load_lines(args.candidate)
+        res = compare_greedy_outputs(base_texts, cand_texts)
+        if args.update_op_dir:
+            update_operator_outer_evidence(args.update_op_dir, serving_l3=res)
+        print(json.dumps(res, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
