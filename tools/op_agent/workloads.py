@@ -156,10 +156,17 @@ def select_workloads_for_operator(
     phase: str,
     max_active_rows: int | None = None,
 ) -> dict[str, Any]:
-    """Recommend primary A/B workload and dynamic-shape stress workload for an op.
+    """Recommend the workload set for an operator's outer-loop evaluation.
 
-    Separates controlled steady-state comparison (`primary_workload`) from
-    dynamic-batch / long-tail robustness verification (`stress_workload`).
+    Three roles, each answering a different question:
+
+    - `primary_workload`: controlled payload that decides the verdict.
+    - `stress_workload`: dynamic long-tail traffic that catches recompilation
+      spikes and gate misses.
+    - `cross_check_workload`: the opposite execution phase. An operator that wins
+      in its primary phase can still lose in the other one (extra weight
+      traffic, different kernel selection), so testing a single phase can hide
+      a net regression.
     """
     norm_phase = phase.lower().strip()
     if norm_phase in ("prefill", "prefill_heavy"):
@@ -169,6 +176,11 @@ def select_workloads_for_operator(
             "Prefill-oriented operator: use `long-prefix` (2048 in / 128 out) so "
             "large-T prefill steps dominate active device time."
         )
+        cross_check = "random"
+        cross_check_rationale = (
+            "Decode cross-check: confirm the prefill win does not cost steady-state "
+            "decode throughput."
+        )
     elif max_active_rows is not None and max_active_rows <= 32:
         primary = "random"
         concurrency = min(max_active_rows, 16)
@@ -176,6 +188,11 @@ def select_workloads_for_operator(
             f"Row-gated decode operator (active up to {max_active_rows} rows): use "
             f"controlled `random` at concurrency={concurrency} to stay inside the "
             "enabled decode bucket."
+        )
+        cross_check = "long-prefix"
+        cross_check_rationale = (
+            "Prefill cross-check: large-T prefill also exercises this call site, so "
+            "confirm the decode win does not regress prefill."
         )
     else:
         primary = "random"
@@ -185,12 +202,19 @@ def select_workloads_for_operator(
             "256 out @ concurrency=32) to lock steady-state batch size and minimize "
             "run-to-run variance."
         )
+        cross_check = "long-prefix"
+        cross_check_rationale = (
+            "Prefill cross-check: this call site runs during prefill too, and a "
+            "decode-only win can hide a prefill regression at large T."
+        )
 
     return {
         "primary_workload": primary,
         "primary_concurrency": concurrency,
         "stress_workload": "sharegpt",
+        "cross_check_workload": cross_check,
         "rationale": rationale,
+        "cross_check_rationale": cross_check_rationale,
     }
 
 

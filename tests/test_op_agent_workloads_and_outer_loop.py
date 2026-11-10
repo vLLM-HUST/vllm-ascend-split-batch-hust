@@ -50,22 +50,57 @@ def test_canonical_workloads_present_and_characterized():
 
 
 def test_operator_workload_selection_pairs_controlled_and_stress():
-    # Decode general op -> controlled random@32 + sharegpt stress
+    # Decode general op -> controlled random@32 + sharegpt stress + prefill cross-check
     dec = workloads.select_workloads_for_operator(phase="decode")
     assert dec["primary_workload"] == "random"
     assert dec["primary_concurrency"] == 32
     assert dec["stress_workload"] == "sharegpt"
+    assert dec["cross_check_workload"] == "long-prefix"
 
     # Row-gated decode op (active up to 32 rows) -> concurrency capped at 16
     gated = workloads.select_workloads_for_operator(phase="decode", max_active_rows=32)
     assert gated["primary_workload"] == "random"
     assert gated["primary_concurrency"] == 16
     assert gated["stress_workload"] == "sharegpt"
+    assert gated["cross_check_workload"] == "long-prefix"
 
-    # Prefill-heavy op -> long-prefix + sharegpt stress
+    # Prefill-heavy op -> long-prefix + sharegpt stress + decode cross-check
     pref = workloads.select_workloads_for_operator(phase="prefill")
     assert pref["primary_workload"] == "long-prefix"
     assert pref["stress_workload"] == "sharegpt"
+    assert pref["cross_check_workload"] == "random"
+
+
+def test_every_operator_covers_both_execution_phases():
+    """A single-phase evaluation can hide a regression in the other phase."""
+    for phase in ("decode", "prefill", "decode"):
+        pairing = workloads.select_workloads_for_operator(phase=phase)
+        ids = {
+            pairing["primary_workload"],
+            pairing["stress_workload"],
+            pairing["cross_check_workload"],
+        }
+        assert ids == {"random", "sharegpt", "long-prefix"}, ids
+        assert pairing["cross_check_rationale"]
+
+
+def test_outer_loop_plan_emits_all_three_workload_commands():
+    plan = serving_loop.build_outer_loop_plan(
+        op_name="demo_op",
+        gate_env="VLLM_HUST_DEMO=1",
+        phase="decode",
+        port=8350,
+        model="qwen35-35b",
+        out_dir="/tmp/plan_out",
+    )
+    assert plan["workload_pairing"]["primary_workload"] == "random"
+    assert plan["workload_pairing"]["cross_check_workload"] == "long-prefix"
+    for key in ("primary_bench_cmd", "stress_bench_cmd", "cross_check_bench_cmd"):
+        assert plan[key], key
+    assert (
+        "long-prefix" in plan["cross_check_bench_cmd"]
+        or "--random-input-len" in (plan["cross_check_bench_cmd"])
+    )
 
 
 def test_build_bench_serve_cmd_for_random_and_sharegpt(tmp_path):
