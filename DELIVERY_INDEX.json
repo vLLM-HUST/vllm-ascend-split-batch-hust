@@ -52,7 +52,7 @@
       "default_enabled": false,
       "gate_env": "VLLM_HUST_GATE_FP32=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "pending_outer_loop"
+      "serving_status": "within_noise"
     },
     {
       "id": "gdn_split_fusion",

@@ -12,7 +12,9 @@
     "tested_shapes": [
       [256, 2048]
     ],
-    "layers": 40
+    "layers": 40,
+    "phase": "decode",
+    "cudagraph_mode": "FULL_AND_PIECEWISE"
   },
   "l0_microbenchmark": {
     "status": "completed",
@@ -24,15 +26,52 @@
   "l3_numerical_guard": {
     "passed": true,
     "metric": "exact_bitwise_equal",
-    "probe_script": "tests/test_gate_fp32_plugin.py"
+    "probe_script": "tests/test_gate_fp32_plugin.py",
+    "serving_greedy_guard": {
+      "passed": true,
+      "matched": 8,
+      "total": 8,
+      "note": "Greedy text matched character for character across eight fixed prompts"
+    }
   },
   "l4_attribution": {
     "call_count_expected": 40,
     "call_count_actual": 40,
     "note": "one Cast elimination per MoE layer decode step"
   },
+  "l4_serving_elimination": {
+    "target_op": "Cast",
+    "off_calls_per_rank": 2164,
+    "on_calls_per_rank": 1524,
+    "removed_calls_per_rank": 640,
+    "removed_calls_total": 1280,
+    "expected_removed_per_rank": 640,
+    "verified": true,
+    "note": "40 MoE layers times 16 decode steps, matched exactly on both ranks"
+  },
   "serving_end_to_end": {
-    "tested": false,
-    "speedup": null
+    "tested": true,
+    "status": "within_noise",
+    "primary_workload": "random",
+    "stress_workload": "sharegpt",
+    "concurrency": 16,
+    "num_prompts": 128,
+    "num_runs_off": 2,
+    "num_runs_on": 2,
+    "speedup": 0.9984,
+    "gen_rate_off": 593.09,
+    "gen_rate_on": 592.11,
+    "gen_rate_delta_pct": -0.16,
+    "intra_group_spread_pct": {"off": 1.23, "on": 2.68},
+    "stress_result": {
+      "status": "verified_faster",
+      "speedup": 1.0168,
+      "gen_rate_off": 325.35,
+      "gen_rate_on": 330.81,
+      "gen_rate_delta_pct": 1.68,
+      "mean_step_delta_pct": -2.52,
+      "intra_group_spread_pct": {"off": 1.21, "on": 1.07}
+    },
+    "conclusion": "The controlled decode workload lands inside run-to-run spread, so no gain is claimed. The tail-prone conversation workload moved past its own spread and is recorded for reference only; the primary workload governs the verdict."
   }
 }
