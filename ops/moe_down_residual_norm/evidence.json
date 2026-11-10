@@ -1,0 +1,67 @@
+{
+  "$schema": "operator-benchmark-evidence/v1",
+  "operator_name": "moe_down_residual_norm",
+  "callsite": "vllm_ascend/ops/fused_moe/shared_experts.py:down_residual_norm",
+  "environment": {
+    "device": "Atlas 800T A2 (910B2)",
+    "cann_version": "9.1.0",
+    "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+    "model": "Qwen3.5-35B-A3B",
+    "dtype": "bfloat16",
+    "tp_size": 2
+  },
+  "shape_facts": {
+    "M": 32,
+    "K": 256,
+    "N": 2048,
+    "phase": "decode",
+    "hbm_rounds_unfused": 6,
+    "hbm_rounds_fused": 2,
+    "activation_saving_ratio": 0.667,
+    "shape_buckets": [
+      1,
+      8,
+      16,
+      32
+    ],
+    "dynamic_shape_probes": [
+      7,
+      23
+    ]
+  },
+  "workload_selection": {
+    "primary_workload": "random",
+    "primary_concurrency": 32,
+    "stress_workload": "sharegpt",
+    "rationale": "General decode/epilogue operator: use controlled `random` (512 in / 256 out @ concurrency=32) to lock steady-state batch size and minimize run-to-run variance."
+  },
+  "l0_microbenchmark": {
+    "native_median_us": 49.82,
+    "optimized_median_us": 42.33,
+    "speedup": 1.18,
+    "bucket_optimized_median_us": {
+      "1": 18.5,
+      "8": 28.72,
+      "16": 31.33,
+      "32": 42.74
+    }
+  },
+  "l3_numerical_guard": {
+    "passed": true,
+    "atol": 0.001,
+    "rtol": 0.001
+  },
+  "l4_attribution": {
+    "status": "pending_outer_loop",
+    "call_count_expected": null,
+    "call_count_actual": null
+  },
+  "serving_end_to_end": {
+    "tested": false,
+    "status": "pending_outer_loop",
+    "primary_workload": "random",
+    "stress_workload": "sharegpt",
+    "concurrency": 32,
+    "speedup": null
+  }
+}

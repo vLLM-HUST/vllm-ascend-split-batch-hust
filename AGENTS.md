@@ -29,8 +29,8 @@
    - 任何针对宿主源码的修改必须基于对应仓库的上述基线分支切分支，发起 PR 时的 Target / Base 分支必须指定为该基线分支；
    - 宿主侧算子的修改与收益必须在当前插件仓的 `ops/<operator>/` 与 `DELIVERY_INDEX.json`（标记 `layer: host_fork`）中登记验收报告与证据，实现全生命周期可追溯。
 8. **GitHub API 访问凭据配置**：
-   - 容器持久化环境变量文件 `/root/.env.local` 中配置了 GitHub API 鉴权凭据 `GITHUB_TOKEN`；
-   - 严禁将 Token 真实字面值提交至 Git 仓库或明文写入任何版本受控文档；需要调用 GitHub API 或进行自动化操作时，通过读取系统环境变量 `GITHUB_TOKEN` 或引用 `/root/.env.local` 接入。
+   - 容器持久化环境变量文件 `<凭据环境变量文件>` 中配置了 GitHub API 鉴权凭据 `GITHUB_TOKEN`；
+   - 严禁将 Token 真实字面值提交至 Git 仓库或明文写入任何版本受控文档；需要调用 GitHub API 或进行自动化操作时，通过读取系统环境变量 `GITHUB_TOKEN` 或引用 `<凭据环境变量文件>` 接入。
 
 ---
 

@@ -27,7 +27,7 @@ JSON，最后汇总成 `window.json` 与人读的 `SUMMARY.md`：
 
 用法::
 
-    export SPLIT_BATCH_RESULTS_DIR=/root/prof
+    export SPLIT_BATCH_RESULTS_DIR=<absolute dir outside the repo>
     python3 experiments/ascend910b-2card/run_baseline_window.py --stamp 1109-1400
     python3 experiments/ascend910b-2card/run_baseline_window.py --dry-run   # 只打印计划
 """
@@ -393,12 +393,21 @@ def snapshot_env(torch) -> dict:
 
 
 def _host_commits() -> dict:
-    """只读记录两个宿主仓库的 HEAD，缺失就记空值，不阻断窗口。"""
+    """Record the two host repos' HEADs; unset or missing repos record null.
+
+    Repo locations come from the environment so this file carries no absolute
+    path, and so the recorded fingerprint always points at the tree that was
+    actually imported rather than an image-side copy that may differ.
+    """
     result = {}
-    for name, path in (
-        ("vllm_ascend", "/vllm-workspace/vllm-ascend"),
-        ("vllm_hust", "/vllm-workspace/vllm"),
+    for name, env_key in (
+        ("vllm_ascend", "VLLM_ASCEND_REPO"),
+        ("vllm_hust", "VLLM_HUST_REPO"),
     ):
+        path = os.environ.get(env_key)
+        if not path:
+            result[name] = None
+            continue
         try:
             out = subprocess.run(
                 ["git", "-C", path, "rev-parse", "--short", "HEAD"],

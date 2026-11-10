@@ -5,10 +5,9 @@
 
 ## 1. 硬约束(违反即返工)
 
-1. **宿主只读**:`/vllm-workspace/vllm-hust` 与 `/vllm-workspace/vllm-ascend-hust`
+1. **宿主只读**:`$VLLM_ASCEND_REPO` 与 `$VLLM_HUST_REPO`
    禁止修改。宿主能力只走官方公开面:`vllm.general_plugins` entry point、
    `--worker-cls` 子类、`--additional-config`、官方 CLI/env。
-   (旧基线 `/vllm-workspace/vllm`、`/vllm-workspace/vllm-ascend` 已于 2026-09-10 删除。)
 2. **不注册 `vllm.platform_plugins`**(已被 vllm-ascend 的 AscendPlatform 占用)。
 3. **default-off**:任何新能力关闭时必须与原生行为零差异。新开关一律
    env-gated、默认缺省,patch 方法未开启时逐字委托原实现。
@@ -84,8 +83,7 @@ JSON/TXT/LOG 结果；混合源码改动、测试、workflow、依赖或打包�
 - commit 原子:一个逻辑变更一个 commit,不混格式化与功能修改。
 - message 用 conventional 风格:`feat(plugins): ...`、`fix(plugins): ...`、
   `docs: ...`、`test: ...`。
-- clone/push 统一走 **SSH over 443**(一次配置永久生效):流程见工作区
-  `/vllm-workspace/docs/git-remote-and-network.md`;gh-proxy 前缀仅留给 pip git 依赖。
+- clone/push 统一走 **SSH over 443**(一次配置永久生效);gh-proxy 前缀仅留给 pip git 依赖。
 
 ## 6. 文档更新义务
 

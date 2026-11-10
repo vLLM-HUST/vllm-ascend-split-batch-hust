@@ -19,8 +19,8 @@
 | 项 | 要求 | 校验动作 |
 |---|---|---|
 | 硬件 | 2 张 Ascend910B2，TP=2 | `python3 -c "from tools.op_agent.guard import check_npu_environment as c; print(c(2))"` |
-| 宿主基线 | `based/split-batch-baseline`；vllm-ascend `ad82d77cb`(镜像 `74f0c0a27`)、vllm-hust `f18cf803c` | `git -C /vllm-workspace/vllm-ascend rev-parse --short HEAD` |
-| 结果目录 | 必须在仓库外，`bench/evidence_paths.py` 会强制校验 | `export SPLIT_BATCH_RESULTS_DIR=/root/prof/<stamp>` |
+| 宿主基线 | `based/split-batch-baseline`；vllm-ascend `e59aaeef`、vllm-hust `f18cf803c` | `git -C "$VLLM_ASCEND_REPO" rev-parse --short HEAD` |
+| 结果目录 | 必须在仓库外，`bench/evidence_paths.py` 会强制校验 | `export SPLIT_BATCH_RESULTS_DIR=<仓库外的绝对目录>/<stamp>` |
 | 门控 | 全部 `VLLM_HUST_*=0` 起服后再逐项打开 | `tools/bench-ladder.sh carriers` |
 | 单变量 | 贪心采样、固定 seed、`--no-enable-prefix-caching`、固定并发与输入输出长度 | 见 `docs/npu-benchmark-execution-guide.md` |
 
@@ -47,7 +47,7 @@
 产物落在 `$SPLIT_BATCH_RESULTS_DIR/<stamp>/`（仓库外），并生成人读的 `SUMMARY.md`。
 
 ```bash
-export SPLIT_BATCH_RESULTS_DIR=/root/prof
+export SPLIT_BATCH_RESULTS_DIR=<仓库外的绝对目录>
 python3 experiments/ascend910b-2card/run_baseline_window.py --stamp 1109-1400
 # 只打印计划、不碰设备：--dry-run
 ```
@@ -263,7 +263,7 @@ python3 -m tools.op_agent.serving_loop greedy \
 
 # 3) L4 归因核对
 python3 -m tools.op_agent.serving_loop parse-l4 \
-    --csv /root/prof/<stamp>/op_statistic.csv --kernel <kernel_name> --expected-calls <n>
+    --csv <仓库外的绝对目录>/<stamp>/op_statistic.csv --kernel <kernel_name> --expected-calls <n>
 
 # 4) 刷新指纹
 python3 -c "from tools.op_agent.custody import write_dir_checksum as w; print(w('ops/<operator>'))"

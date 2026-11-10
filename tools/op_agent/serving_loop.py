@@ -292,12 +292,13 @@ def build_outer_loop_plan(
     model: str = "qwen35-35b",
     out_dir: str = "/tmp/outer_loop_results",
 ) -> dict[str, Any]:
-    """Generate outer-loop execution plan with primary & stress workload commands."""
+    """Generate the outer-loop plan: primary, stress and cross-check commands."""
     pairing = select_workloads_for_operator(
         phase=phase, max_active_rows=max_active_rows
     )
     primary_id = pairing["primary_workload"]
     stress_id = pairing["stress_workload"]
+    cross_check_id = pairing["cross_check_workload"]
 
     primary_cmd = build_bench_serve_cmd(
         workload_id=primary_id,
@@ -316,12 +317,22 @@ def build_outer_loop_plan(
         result_filename=f"{op_name}_{stress_id}.json",
         concurrency=stress_profile.default_concurrency,
     )
+    cross_check_profile = WORKLOAD_CATALOG[cross_check_id]
+    cross_check_cmd = build_bench_serve_cmd(
+        workload_id=cross_check_id,
+        port=port,
+        model=model,
+        result_dir=out_dir,
+        result_filename=f"{op_name}_{cross_check_id}.json",
+        concurrency=cross_check_profile.default_concurrency,
+    )
     return {
         "operator": op_name,
         "gate_env": gate_env,
         "workload_pairing": pairing,
         "primary_bench_cmd": primary_cmd,
         "stress_bench_cmd": stress_cmd,
+        "cross_check_bench_cmd": cross_check_cmd,
     }
 
 

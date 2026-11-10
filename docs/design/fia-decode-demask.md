@@ -2,7 +2,7 @@
 
 - 状态：**新能力，`import_only`**（未进 manifest `active`；三项证据见
   `../../docs/progress.md` 与
-  `/vllm-workspace/profiles/qwen14b-instruct-hotspot-20260910/probe-fia/E2E-mask-removal.md`）
+  该实验的探针报告（仓外归档））
 - 开关：`VLLM_HUST_FIA_DEMASK=1`（默认 0，不 patch、不注入、日志零输出）
 - 诊断：`VLLM_HUST_FIA_DEMASK_TRACE=1`（observe-only：只记录、不改调用；
   用于 OFF 腿取"mask 证据"，同样默认关）
@@ -48,7 +48,7 @@
     优化后的 atten_mask 矩阵 (2048\*2048)**"；
   - "sparse_mode 为 0 时 … **如果 atten_mask 未传入则不做 mask 操作**，
     忽略 pre_tokens 和 next_tokens（内部赋值为 INT_MAX）"。
-- 探针实测（`probe-fia/REPORT.md` §2.4）：`sparse_mode=3` **且不传 mask** 被
+- 探针结果（`probe-fia/REPORT.md` §2.4）：`sparse_mode=3` **且不传 mask** 被
   tiling 拒绝（`561002`）。所以 mask 不是"多余的可选输入"，而是宿主声明
   `sparse_mode=3` 时必须附带的模式模板 —— 宿主没有为 decode 特判，
   于是 decode 也承担模板路径成本（量化观察见 [原文](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-prose-source/snapshot/docs/design/fia-decode-demask.md#L50)）。**结论：不是 workaround，

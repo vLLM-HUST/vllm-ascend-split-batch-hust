@@ -118,6 +118,7 @@ def export_operator_delivery(
                 "status": "pending_outer_loop",
                 "primary_workload": workload_spec.get("primary_workload"),
                 "stress_workload": workload_spec.get("stress_workload"),
+                "cross_check_workload": workload_spec.get("cross_check_workload"),
                 "concurrency": workload_spec.get("primary_concurrency"),
                 "speedup": None,
             },
@@ -132,11 +133,13 @@ def export_operator_delivery(
     if not os.path.isfile(readme_path):
         primary_wl = workload_spec.get("primary_workload", "random")
         stress_wl = workload_spec.get("stress_workload", "sharegpt")
+        cross_wl = workload_spec.get("cross_check_workload", "long-prefix")
         readme_content = (
             f"# {op_name}\n\n"
             f"- **调用位置**: `{callsite}`\n"
             f"- **门控开关**: `{gate_env}`（默认关闭）\n"
-            f"- **外环主测负载**: `{primary_wl}`；动态形状压力负载: `{stress_wl}`\n"
+            f"- **外环主测负载**: `{primary_wl}`；动态形状压力负载: `{stress_wl}`；"
+            f"相位交叉检查负载: `{cross_wl}`\n"
             f"- **详细度量数据**: 见 `evidence.json`\n"
         )
         with open(readme_path, "w", encoding="utf-8") as f:
@@ -147,13 +150,15 @@ def export_operator_delivery(
     if not os.path.isfile(report_path):
         primary_wl = workload_spec.get("primary_workload", "random")
         stress_wl = workload_spec.get("stress_workload", "sharegpt")
+        cross_wl = workload_spec.get("cross_check_workload", "long-prefix")
         report_content = (
             f"# 算子验收报告: {op_name}\n\n"
             f"## 1. 形状事实与门控上下文\n\n"
             f"- 调用点: `{callsite}`\n"
             f"- 精度与并行策略: bfloat16，双卡张量并行\n"
             f"- 门控环境变量: `{gate_env}`（默认关闭）\n"
-            f"- 外环负载绑定: 主测 `{primary_wl}`，压力 `{stress_wl}`\n\n"
+            f"- 外环负载绑定: 主测 `{primary_wl}`，压力 `{stress_wl}`，"
+            f"相位交叉检查 `{cross_wl}`\n\n"
             f"## 2. 内环与外环验证结论\n\n"
             f"- L0 单算子微基准: 已通过内环重放验证，分桶数值见 `evidence.json`。\n"
             f"- L3 数值正确性护栏: 已通过容差与动态形状零重编译检查。\n"

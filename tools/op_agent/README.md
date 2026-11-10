@@ -58,7 +58,7 @@ python3 -m tools.op_agent.optimizer_loop
 | `OP_AGENT_API_BASE` | OpenAI 兼容服务地址，需带 `/v1` | 回退 `OPENAI_BASE_URL` |
 | `OP_AGENT_API_KEY` | 鉴权 key | 回退 `OPENAI_API_KEY` |
 
-**默认 key 的位置：`/root/.env.local`（仓库外的容器 PVC 持久层，非仓内文件）。**
+**默认 key 的位置：`<仓库外的凭据环境变量文件>`（容器持久层，非仓内文件）。**
 该文件由三个 `export OP_AGENT_*` 行组成。它符合"凭据不进 Git 仓库"的隔离规范，但有两点
 边界事实需要知道：
 
@@ -70,14 +70,14 @@ python3 -m tools.op_agent.optimizer_loop
 
 ```bash
 cd <仓库根目录>
-source /root/.env.local        # 载入 OP_AGENT_MODEL_ID / OP_AGENT_API_BASE / OP_AGENT_API_KEY
+source <仓库外的凭据环境变量文件>        # 载入 OP_AGENT_MODEL_ID / OP_AGENT_API_BASE / OP_AGENT_API_KEY
 python3 -m tools.op_agent.optimizer_loop
 ```
 
 校验是否加载成功（两条命令都应打印出模型名而非空）：
 
 ```bash
-source /root/.env.local && echo "$OP_AGENT_MODEL_ID"
+source <仓库外的凭据环境变量文件> && echo "$OP_AGENT_MODEL_ID"
 python3 -c "import os; print(os.environ.get('OP_AGENT_MODEL_ID', 'NOT LOADED'))"
 ```
 

@@ -36,42 +36,42 @@
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │ 持久化存储层 (Persistent Volume Claim, 挂载在 /root, 规格切换不丢失)       │
-│  - /root/vllm-workspace/vllm-ascend-split-batch-hust (插件 Git 仓库)    │
-│  - /root/host-trees/ (宿主 Fork 源码仓库：vllm-ascend, vllm-hust)       │
-│  - /root/ssh-debs/ (sshd 离线安装 deb 包)                               │
-│  - /root/.ssh/ (SSH 密钥对持久化备份)                                    │
-│  - /root/cannbot-knowledge/、/root/prof/ (外部知识库与原始性能 Trace)   │
+│  - <插件仓根目录> (插件 Git 仓库)    │
+│  - <宿主 Fork 检出根目录>/ (vllm-ascend, vllm-hust)       │
+│  - <离线 deb 目录>/ (sshd 离线安装 deb 包)                               │
+│  - <SSH 密钥目录>/ (持久化备份)                                    │
+│  - <外部知识库目录>/、<原始 Trace 目录>/ (外部知识库与原始性能 Trace)   │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 - **契约规则 1（Overlay 零信任）**：代码和关键测试基准**绝不**依赖 Overlay 层的临时文件；任何假设存在于 Overlay 层的修改在 Pod 重建后必须能够被幂等自愈。
 - **契约规则 2（PVC 持久化原则）**：所有重要的代码开发、基线分支、测试数据与文档**必须**存放在持久化存储（`/root`）路径下。
 
-### 2.2 规格切换与容器重建自愈规范 (`/root/start-sshd.sh`)
-当开发者或评测流程在网页端切换容器规格（例如从无卡规格切换为 `npu-2x` 规格）时，底层的容器镜像会被重新拉起。系统统一通过持久化的 `/root/start-sshd.sh` 脚本执行自愈，其职责边界定义如下：
+### 2.2 规格切换与容器重建自愈规范 (`<容器自愈脚本>`)
+当开发者或评测流程在网页端切换容器规格（例如从无卡规格切换为 `npu-2x` 规格）时，底层的容器镜像会被重新拉起。系统统一通过持久化的 `<容器自愈脚本>` 脚本执行自愈，其职责边界定义如下：
 
 | 自愈环节 | 执行动作 | 边界与约束 |
 |---|---|---|
-| **Step 1: 离线安装 SSHD** | 优先利用 `/root/ssh-debs/` 内的离线 deb 包重装 openssh-server | 杜绝外部网络拉取失败导致容器不可登录 |
+| **Step 1: 离线安装 SSHD** | 优先利用 `<离线 deb 目录>/` 内的离线 deb 包重装 openssh-server | 杜绝外部网络拉取失败导致容器不可登录 |
 | **Step 2: 恢复系统依赖** | 还原 `libwrap.so.0` 并创建 `sshd` privsep 系统用户 | 解决基础镜像中缺失底层库的 127 错误 |
 | **Step 3: 恢复主机密钥与权限** | 还原稳定的 host key，并将用户私钥权限严格纠正为 `600` | 解决平台每次重建容器将私钥误重置为 660 导致 git 权限被拒 |
 | **Step 4: 启动 SSHD** | 启动守护进程并在 22 端口监听 | 完成基础网络连接恢复 |
-| **Step 5: 插件包挂载** | 使用 `pip install -e /root/vllm-workspace/vllm-ascend-split-batch-hust --no-deps` 重新注册入口点 | 恢复 `vllm.general_plugins` 入口，防止新容器将环境变量判定为未知变量 |
+| **Step 5: 插件包挂载** | 使用 `pip install -e <插件仓根目录> --no-deps` 重新注册入口点 | 恢复 `vllm.general_plugins` 入口，防止新容器将环境变量判定为未知变量 |
 | **Step 6: 宿主层状态确认** | 声明宿主修改由宿主 Fork（`vllm-ascend-hust`）源码承载，进行只读检查 | **绝不**运行旧式的 `apply-runtime-patches.sh`；不自动拉起模型服务（避免占用 NPU 资源） |
 
 ### 2.3 执行工作目录规范 (CWD 隔离与遮蔽防护)
 - **严禁以 `/vllm-workspace` 为 CWD**：
   镜像预置的 `/vllm-workspace` 包含旧版的空目录或历史源码，若在该目录下执行 `python3` 或 `pytest`，Python 的搜索路径会将当前工作目录置于首位，从而严重遮蔽已安装的真正 Python 包，引发无法解释的符号缺失或属性报错。
 - **规范执行目录**：
-  - 代码修改与测试开发：`cd /root/vllm-workspace/vllm-ascend-split-batch-hust`
+  - 代码修改与测试开发：`cd <插件仓根目录>`
   - 端到端压测与基准运行：`cd /tmp`（配合显式绝对路径引用脚本，如 `tools/bench_*.py`）
 
 ### 2.4 外部知识库与原始数据物理隔离准则
-- **外部知识库定位**：`/root/cannbot-knowledge/`、`/root/research/` 等外部知识库是探索分析的参考资料库，不是代码库的一部分；
-- **原始 Trace 定位**：`/root/prof/` 中的全量 Profiler 数据库（`.db`）、文本日志（`.log`）体积极大（通常几百 MB 至数 GB），属于重型原始凭据；
+- **外部知识库定位**：`<外部知识库目录>/`、`<研究资料目录>/` 等外部知识库是探索分析的参考资料库，不是代码库的一部分；
+- **原始 Trace 定位**：`<原始 Trace 目录>/` 中的全量 Profiler 数据库（`.db`）、文本日志（`.log`）体积极大（通常几百 MB 至数 GB），属于重型原始凭据；
 - **物理隔离契约**：
   - **严禁**将上述目录或其下未结构化的文件直接 `git add` 提交到本插件仓中；
-  - 评测中产生的离线数据存留在 `/root/prof/` 或发布至统一的外部 benchmark 归档；
+  - 评测中产生的离线数据存留在 `<原始 Trace 目录>/` 或发布至统一的外部 benchmark 归档；
   - 仓内仅接收从原始数据中提取的结构化度量指标（以 JSON/Markdown 形式沉淀到 `ops/` 模块）。
 
 ---
@@ -116,7 +116,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 ### 3.2 宿主 Fork 层边界与沉淀清单
 针对模型私有前向、底层 C++ 算子和权重生命周期的修改，统一由宿主 Fork 承载：
 - **昇腾适配宿主 (`vllm-ascend-hust`)**：
-  - 本地路径：`/root/host-trees/vllm-ascend`
+  - 本地路径：`<宿主 Fork 检出目录>/vllm-ascend`
   - 远端仓库：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
   - **基线分支（Base Branch）**：**`based/split-batch-baseline`**（分支头 `ad82d77cb`，内容为镜像 Commit `74f0c0a27` / `0.25.1rc2.dev125+hust` 的宿主源码 + 3 个构建文件修复：`triton-ascend==3.2.2` 依赖对齐与 `setup.py` build-isolation 修复）
   - 开发分支：`work/w3f2-inproj-merge`（宿主 PR #63）与 `work/d4-conv-pack`（宿主 PR #64，叠层于 PR #63），均从新基线 `ad82d77cb` 派生；旧分支 `work/issue20-w3f2-host` 仅作历史溯源
@@ -124,12 +124,12 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
     - **GDN in_proj 权重加载期合并**（Commit `fcbc4458b`，cherry-pick 自 `ce807cd`）：实现 `process_weights_after_loading` Hook，在加载模型权重后合并 `in_proj_ba` 与 `in_proj_qkv`；
     - **GDN 卷积权重加载期预打包**（Commit `771b847da`，cherry-pick 自 `deb5ff`）：在模型加载期物化 `conv1d.weight` 为连续 `[4, 4096]` 格式，消除前向传播中的 `transpose(0, 1)`（消除每步冗余动态转置）。
 - **vLLM 核心宿主 (`vllm-hust`)**：
-  - 本地路径：`/root/host-trees/vllm-hust`
+  - 本地路径：`<宿主 Fork 检出目录>/vllm-hust`
   - 远端仓库：`git@github.com:vLLM-HUST/vllm-hust.git`
   - **基线分支（Base Branch）**：**`based/split-batch-baseline`**（锚定容器运行时镜像 Commit `f18cf803c` / `0.28.1.post1.dev143+gf18cf803c`；当前与旧 `based/image-baseline` 指向同一 commit，内容零差异）
 
 ### 3.3 插件层边界与标准公开接口
-- **代码位置**：`/root/vllm-workspace/vllm-ascend-split-batch-hust`
+- **代码位置**：`<插件仓根目录>`
 - **注册入口**：严格且仅使用 `pyproject.toml` 中的 `[project.entry-points."vllm.general_plugins"]`；
 - **禁止项**：
   - **严禁**注册 `vllm.platform_plugins`（已被昇腾平台占用）；
@@ -179,7 +179,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 ## 4. 证据文档规范与数据流转契约 (Evidence & Delivery Spec)
 
 ### 4.1 仓内算子模块化三件套规范
-每个受控算子在 [ops/](computer:///root/vllm-workspace/vllm-ascend-split-batch-hust/ops) 目录下建立独立子目录，包含且仅包含三个标准化文件：
+每个受控算子在 [ops/](ops/) 目录下建立独立子目录，包含且仅包含三个标准化文件：
 
 1. **`README.md`**：技术原理与边界说明
    - 登记 entry point、开关环境变量、优化机制、理论预期与适用边界。
@@ -191,7 +191,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
    - 记录可用于自动化审计与看板消费的指标字段及哈希指纹。
 
 ### 4.2 根目录索引 `DELIVERY_INDEX.json` 单一事实源
-- 根目录 [DELIVERY_INDEX.json](computer:///root/vllm-workspace/vllm-ascend-split-batch-hust/DELIVERY_INDEX.json) 是全仓算子交付的权威事实清单；
+- 根目录 [DELIVERY_INDEX.json](DELIVERY_INDEX.json) 是全仓算子交付的权威事实清单；
 - 记录基线环境（2×910B2 TP2, Qwen3.5-35B-A3B）、所有算子元数据及其当前实测状态；
 - 新增或调整算子状态时，必须同步更新该索引并通过测试校验。
 
