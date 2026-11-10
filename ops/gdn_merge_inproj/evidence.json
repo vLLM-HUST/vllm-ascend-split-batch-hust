@@ -22,10 +22,22 @@
     ],
     "merged_along": "output_dim",
     "shapes": {
-      "x": [32, 2048],
-      "in_proj_qkvz": [2048, 4096],
-      "in_proj_ba": [2048, 2048],
-      "merged_weight": [2048, 6144]
+      "x": [
+        32,
+        2048
+      ],
+      "in_proj_qkvz": [
+        2048,
+        4096
+      ],
+      "in_proj_ba": [
+        2048,
+        2048
+      ],
+      "merged_weight": [
+        2048,
+        6144
+      ]
     }
   },
   "l0_microbenchmark": {
@@ -66,5 +78,14 @@
     "host_commit": "fcbc4458bb8afcc37441e602921ed45dcbe5e775",
     "host_merge_state": "merged into based/split-batch-baseline (pr 63, 2026-11-01)",
     "host_commit_source": "cherry-pick of ce807cd7ce972b9a410663cebe10b7ea25fb2a31 (work/issue20-w3f2-host), tree-identical"
-  }
+  },
+  "superseded_by_host_fork": {
+    "host_operator": "AscendGatedDeltaNetAttention.process_weights_after_loading",
+    "host_container": "vllm_ascend/ops/gdn.py (W3-F2 merge)",
+    "host_gate_env": "VLLM_HUST_GDN_MERGE_INPROJ",
+    "host_branch": "based/split-batch-baseline",
+    "host_merge": "PR #63, commit fcbc4458b",
+    "reason": "The host already materializes the merged in_proj weight and consumes it as one matmul, which is exactly the seam the plugin carrier reported as missing. That blocker predates the host implementation and is now stale. Both carriers read the same env var, so the plugin one must stay inert."
+  },
+  "status": "superseded_by_host_fork"
 }
