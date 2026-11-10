@@ -4,7 +4,10 @@
 #
 # Usage:
 #   bash experiments/ascend910b-2card/run_d0_window.sh --dry-run
-#   SPLIT_BATCH_RESULTS_DIR=/root/prof bash experiments/ascend910b-2card/run_d0_window.sh
+#   SPLIT_BATCH_RESULTS_DIR=<abs dir outside the repo> \
+#   D0_PYTHON=<device venv python> \
+#   VLLM_ASCEND_REPO=<vllm-ascend checkout> VLLM_HUST_REPO=<vllm checkout> \
+#     bash experiments/ascend910b-2card/run_d0_window.sh
 #
 # Artifacts are written outside the repo (D0 plan section "回填位置").
 
@@ -13,8 +16,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-PYTHON="${D0_PYTHON:-/root/venvs/split-batch-runtime/bin/python}"
-RESULTS_DIR="${SPLIT_BATCH_RESULTS_DIR:-/root/prof}"
+# No absolute paths here on purpose: this file ships to other hosts, where a
+# hard-coded venv or checkout location silently records the wrong fingerprint.
+PYTHON="${D0_PYTHON:-python3}"
+RESULTS_DIR="${SPLIT_BATCH_RESULTS_DIR:-}"
 STAMP="${D0_STAMP:-$(date +%m%d-%H%M)}"
 DRY_RUN=0
 EXTRA_ARGS=()
@@ -37,6 +42,7 @@ echo "results:  ${RESULTS_DIR}/${STAMP}"
 echo "dry-run:  ${DRY_RUN}"
 
 case "${RESULTS_DIR}" in
+  "") echo "FAIL: SPLIT_BATCH_RESULTS_DIR must be set to an absolute path" >&2; exit 2 ;;
   /*) ;;
   *) echo "FAIL: SPLIT_BATCH_RESULTS_DIR must be absolute" >&2; exit 2 ;;
 esac
@@ -54,24 +60,27 @@ if [[ "${DRY_RUN}" != "1" && -e "${RESULTS_DIR}/${STAMP}" ]]; then
   fi
 fi
 
-for repo in /root/host-trees/vllm-ascend /root/host-trees/vllm-hust; do
+for repo in "${VLLM_ASCEND_REPO:-}" "${VLLM_HUST_REPO:-}"; do
+  [ -n "${repo}" ] || continue
   printf '%-32s %s %s\n' "$(basename "${repo}")" \
-    "$(git -C "${repo}" rev-parse --short HEAD)" \
-    "$(git -C "${repo}" rev-parse --abbrev-ref HEAD)"
+    "$(git -C "${repo}" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+    "$(git -C "${repo}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 done
 
 # D0 measures hardware constants only, so a feature branch does not invalidate
 # the numbers; the deviation is printed so the artifact records its provenance.
-host_branch="$(git -C /root/host-trees/vllm-ascend rev-parse --abbrev-ref HEAD)"
-if [[ "${host_branch}" != "based/split-batch-baseline" ]]; then
-  echo "NOTE: vllm-ascend is on '${host_branch}', not based/split-batch-baseline."
-  echo "      D0 constants are hardware-only; recorded for provenance."
+if [ -n "${VLLM_ASCEND_REPO:-}" ]; then
+  host_branch="$(git -C "${VLLM_ASCEND_REPO}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+  if [[ "${host_branch}" != "based/split-batch-baseline" ]]; then
+    echo "NOTE: vllm-ascend is on '${host_branch}', not based/split-batch-baseline."
+    echo "      D0 constants are hardware-only; recorded for provenance."
+  fi
 fi
 
 if [[ "${DRY_RUN}" != "1" ]]; then
   if ! "${PYTHON}" -c 'import torch, torch_npu' >/dev/null 2>&1; then
     echo "FAIL: ${PYTHON} cannot import torch / torch_npu." >&2
-    echo "      Set D0_PYTHON to the device venv (default /root/venvs/split-batch-runtime/bin/python)." >&2
+    echo "      Set D0_PYTHON to the device venv python." >&2
     exit 1
   fi
 

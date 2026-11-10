@@ -10,7 +10,7 @@
    - 宿主修改已随宿主 Fork 仓库（`vLLM-HUST/vllm-ascend-hust` @ `work/issue20-w3f2-host`）直出，容器内**禁止**运行任何动态打补丁脚本。
    - 本仓仅承载 Python/Triton 算子、default-off 门控、调度和验收凭据。
 2. **知识库与仓库严格隔离**：
-   - 原始分析数据库、大体积 Profiler Trace（如 `/root/prof/`）和外部知识库（`/root/cannbot-knowledge`）**严禁**混入 Git 仓库。
+   - 原始分析数据库、大体积 Profiler Trace（如 `<仓外结果目录>/`）和外部知识库（`<仓外知识库>`）**严禁**混入 Git 仓库。
    - Git 仓库内仅收录结构化结果：算子专属目录下的 `REPORT.md` 与 `evidence.json`，以及根目录索引 `DELIVERY_INDEX.json`。
 3. **四级评测阶梯原则**：
    - 必须严格遵循 `L0 纯算子微基准 -> L3 数值等价护栏 -> L4 调用链路归因 -> 服务端到端实测` 阶梯，任何数值失败必须保持 default-off。
@@ -24,7 +24,7 @@
 ### 第一步：容器自愈与环境恢复
 ```bash
 # 执行自愈脚本：自动恢复 SSHD、用户私钥权限、挂载 editable 插件包
-bash /root/start-sshd.sh
+bash <容器自愈脚本>
 ```
 自检输出需确认：
 - `sshd: running`
@@ -41,7 +41,7 @@ ls -la /dev/davinci*
 ### 第三步：宿主源码与 Python 依赖检查
 ```bash
 # 确认宿主 Fork 分支处于最新的开发基线
-git -C /root/host-trees/vllm-ascend branch -v
+git -C $VLLM_ASCEND_REPO branch -v
 # 确认 torch_npu、vllm、vllm_ascend 正常加载
 python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack OK')"
 ```
@@ -58,8 +58,8 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
 - **评测命令**：
   ```bash
   # 1. 运行 L3 数值核验与布局基准
-  python3 /root/vllm-workspace/vllm-ascend-split-batch-hust/tools/bench_matmul_m1_layout.py
-  python3 /root/vllm-workspace/vllm-ascend-split-batch-hust/tools/bench_gdn_l3.py
+  python3 tools/bench_matmul_m1_layout.py
+  python3 tools/bench_gdn_l3.py
   
   # 2. 验证 L4 归因与端到端消除效果 (开启门控)
   export VLLM_HUST_D4_CONV_PACK=1
@@ -79,7 +79,7 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
   pytest tests/test_gate_fp32_plugin.py -v
   
   # 2. 测量 L0/L4 收益
-  python3 /root/vllm-workspace/vllm-ascend-split-batch-hust/tools/bench_moe_init_m1.py
+  python3 tools/bench_moe_init_m1.py
   ```
 - **预期数据**：每步前向稳定消除 40 次类型转换调用，无额外内存开销。
 
@@ -100,13 +100,13 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
 1. **真实整网 Trace 采集**：
    - 在双卡 910B2 TP=2 环境下启动全基线服务（所有门控置 0）；
    - 在 `random` 稳态解码（512 输入 / 256 输出 / 并发 32）与 `sharegpt` 长尾分布下，各采集一个代表性窗口（跳过预热，采集连续稳态步骤），生成 `kernel_details.csv` 与 `op_statistic.csv`；
-   - 原始 Trace 一律输出至仓外持久层（如 `/root/prof/`），严禁混入 Git 仓库。
+   - 原始 Trace 一律输出至仓外持久层（如 `<仓外结果目录>/`），严禁混入 Git 仓库。
 2. **外挂式子图聚类与批次审核单生成**：
    ```bash
    python3 -m tools.op_agent.campaign discover \
        --out /tmp/campaign_batch.json \
-       --kernel-details-csv /root/prof/random_baseline/kernel_details.csv \
-       --op-statistic-csv /root/prof/random_baseline/op_statistic.csv \
+       --kernel-details-csv <仓外结果目录>/random_baseline/kernel_details.csv \
+       --op-statistic-csv <仓外结果目录>/random_baseline/op_statistic.csv \
        --svg-out /tmp/timeline_hotspots.svg
    ```
    - 输出审查卡片（前后锚点、非锚点向量链、等待空泡、MTE2 片外搬运占比）；
@@ -124,7 +124,7 @@ python3 -c "import torch, torch_npu, vllm, vllm_ascend; print('Environment Stack
 ### Step 2：解析 `op_statistic.csv` 核验 L4 归因与信噪比
 ```bash
 python3 -m tools.op_agent.serving_loop parse-l4 \
-    --csv /root/prof/eval_op/op_statistic.csv \
+    --csv <仓外结果目录>/eval_op/op_statistic.csv \
     --kernel <target_kernel_name> \
     --expected-calls <expected_count>
 ```

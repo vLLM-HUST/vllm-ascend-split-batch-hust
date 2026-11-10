@@ -46,7 +46,7 @@ bash workloads/run_workload.sh random 8350 qwen35-35b /tmp/workload_results
 bash workloads/run_workload.sh sharegpt 8350 qwen35-35b /tmp/workload_results
 
 # 4. 一键执行端到端 Profiler 采集与热点子图折叠
-bash workloads/collect_profile.sh random 8350 qwen35-35b /root/prof/random_trace
+bash workloads/collect_profile.sh random 8350 qwen35-35b <仓库外的绝对目录>/random_trace
 
 # 5. 使用显式配置启动真实采集，输出目录必须尚不存在
 SERVING_CONFIG=/path/to/collection_config.json \

@@ -105,7 +105,7 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
 - **交付运行时**：`src/vllm_ascend_split_batch/`、entry points 与必要的回退/门控。
 - **交付验证**：`tests/`、必要的算子基准 `tools/bench_*.py` 与宿主接口静态校验 `tools/runtime-tree/check-tree-seams.py`。
 - **无卡离线判据（不构成任何设备证据）**：`tools/analysis/ascend910b_static_audit.py`（按维度算出融合前后的搬运字节账、32 字节对齐审计、片上 SRAM 多级乒乓可行性）与 `tools/analysis/geglu_ftz_guard.py`（低精度舍入与次正规数截断的误差来源分解，给出 dtype 相对门禁判据）。两者的硬件常数都是输入参数，输出带 `assumption` 标记，只能支撑方向判断，不能替代带卡环境的分级验证；护栏为 `tests/test_ascend910b_static_audit.py`、`tests/test_geglu_ftz_guard.py`。
-- **外部工作台，不属于插件交付面**：opt 搜索/候选台账、一次性迁移工具、工作区 keeper 等已剥离至仓外归档 `/root/operator-cleanup-workbench-185f48f3.tar`，由 `tools/workbench-archive.json` 保留索引。
+- **外部工作台，不属于插件交付面**：opt 搜索/候选台账、一次性迁移工具、工作区 keeper 等已剥离至仓外归档 tar 包，由 `tools/workbench-archive.json` 保留索引。
 
 ## 5. 性能证据最小字段与评测阶梯
 
@@ -127,5 +127,5 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
 | PR-A (`cleanup/pr-a-delivery-inventory`) | 交付清单与单一事实源导航；确立两层架构分工 | 起点 `185f48f` (`origin/main`) | `pytest tests/test_document_custody.py` (5 passed)；Ruff PASS | 不升级任何历史收益主张；entry point 逐项对应 |
 | PR-B (`cleanup/pr-b-host-fork-migration`) | 废除仓内运行时打补丁工具；下沉权重合并与卷积权重预打包至宿主 Fork | PR-A | `pytest tests/test_runtime_patch_manifest_guard.py tests/test_runtime_tree_seams.py` (9 passed, 1 deselected)；`check-tree-seams.py --selftest` PASS | 宿主 Fork 分支 `work/issue20-w3f2-host` 已推送；插件仓零运行时打补丁脚本 |
 | PR-C (`cleanup/pr-c-capability-docs`) | 支持表、README、release/architecture/pitfalls/progress 过时操作清扫与 planner 边界 | PR-B | `pytest tests/test_document_custody.py` (6 passed)；Ruff PASS | Cascade 彻底撤除且无执行指南；root planner 明确不可激活 |
-| PR-D (`cleanup/pr-d-workbench-strip`) | 剥离 opt 搜索与外部工作台 helpers，保留归档索引 `workbench-archive.json` | PR-C | `pytest -q -m "not host_tree"` (401 passed, 23 skipped, 15 deselected)；tar sha256 逐项核验 PASS | 归档外部维护；测试不依赖 `/root/opt-ops` 与本地数据库 |
+| PR-D (`cleanup/pr-d-workbench-strip`) | 剥离 opt 搜索与外部工作台 helpers，保留归档索引 `workbench-archive.json` | PR-C | `pytest -q -m "not host_tree"` (401 passed, 23 skipped, 15 deselected)；tar sha256 逐项核验 PASS | 归档外部维护；测试不依赖仓外台账与本地数据库 |
 | PR-E (`cleanup/pr-e-integration-audit`) | 整体构建分发清单、打包与整体验收固化 | PR-D | `build` + `tools/check_distribution.py` + `twine check` 全部 PASS；全量 CPU 套件 401 passed | 当前环境无昇腾卡；不据此声称 NPU dispatch、正确性或服务收益通过 |
