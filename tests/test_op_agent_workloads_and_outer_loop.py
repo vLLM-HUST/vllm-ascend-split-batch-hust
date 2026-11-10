@@ -184,6 +184,60 @@ def test_outer_loop_ab_summary_and_evidence_writeback(tmp_path):
     assert ok is True, msg
 
 
+def test_real_collection_rejects_partial_benchmarks(tmp_path):
+    import pytest
+
+    collector = _load_module(
+        "tools.op_agent.serving_collect", "tools/op_agent/serving_collect.py"
+    )
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps({"completed": 127, "failed": 1}))
+    with pytest.raises(ValueError, match="Incomplete benchmark"):
+        collector.validate_benchmark(path, 128)
+
+
+def test_real_collection_stops_before_benchmark_on_greedy_mismatch(
+    tmp_path, monkeypatch
+):
+    import pytest
+
+    collector = _load_module(
+        "tools.op_agent.serving_collect", "tools/op_agent/serving_collect.py"
+    )
+    monkeypatch.setattr(collector, "collect_guard", lambda config, output, arm: [arm])
+    monkeypatch.setattr(
+        collector,
+        "verify_profiles",
+        lambda *args: pytest.fail("L3 failure must stop further evaluation"),
+    )
+    with pytest.raises(ValueError, match="Serving L3 failed"):
+        collector.run({}, tmp_path)
+    assert not json.loads((tmp_path / "serving_l3.json").read_text())["passed"]
+    assert not (tmp_path / "summary.json").exists()
+
+
+def test_real_collection_requires_off_absence_and_all_rank_on_counts(tmp_path):
+    import pytest
+
+    collector = _load_module(
+        "tools.op_agent.serving_collect", "tools/op_agent/serving_collect.py"
+    )
+    config = {"world_size": 2, "attention_layers": 10, "kernel": "target"}
+    for arm in ("off", "on"):
+        for rank in (0, 1):
+            path = tmp_path / f"guard_{arm}" / "profile" / str(rank)
+            path.mkdir(parents=True)
+            count = 160 if arm == "on" else 0
+            (path / "op_statistic.csv").write_text(
+                f"OP Type,Count,Total Time(us)\ntarget,{count},100\n"
+            )
+    collector.verify_profiles(config, tmp_path)
+    path = tmp_path / "guard_off/profile/0/op_statistic.csv"
+    path.write_text("OP Type,Count,Total Time(us)\ntarget,160,100\n")
+    with pytest.raises(ValueError, match="L4 attribution failed"):
+        collector.verify_profiles(config, tmp_path)
+
+
 def test_timeline_subgraph_compressor_and_svg_renderer(tmp_path):
     csv_path = tmp_path / "kernel_details.csv"
     rows = [
