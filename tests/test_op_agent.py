@@ -20,6 +20,7 @@ from tools.op_agent.custody import verify_dir_checksum  # noqa: E402
 from tools.op_agent.evaluator import run_candidate_evaluation  # noqa: E402
 from tools.op_agent.guard import check_npu_environment  # noqa: E402
 from tools.op_agent.optimizer_loop import (  # noqa: E402
+    EmptyResponseRetryingModel,
     MockKernelModel,
     get_configured_model,
 )
@@ -91,6 +92,7 @@ def test_llm_model_configuration(monkeypatch):
     monkeypatch.setenv("OP_AGENT_API_BASE", "http://localhost:8000/v1")
     monkeypatch.setenv("OP_AGENT_API_KEY", "dummy-key")
     m_custom = get_configured_model()
+    assert isinstance(m_custom, EmptyResponseRetryingModel)
     assert m_custom.model_id == "test-model"
 
 
@@ -123,22 +125,50 @@ def test_evaluate_kernel_short_circuit():
     assert res_good["l0_median_us"] > 0
     assert "speedup" in res_good
 
-    # Case 3: Pass-by-reference via WriteCandidateFileTool
+    # Case 3: Pass-by-reference stays inside the ignored candidate directory
     from tools.op_agent.optimizer_loop import WriteCandidateFileTool
 
     writer = WriteCandidateFileTool()
     cand_path = "ops/tmp_test_cand.py"
+    write_res = json.loads(writer.forward(cand_path, good_code))
+    assert write_res["status"] == "saved"
+    saved = write_res["file_path"]
+    assert "build/op_agent_candidates" in saved.replace("\\", "/")
+    assert not os.path.exists(ROOT / cand_path), "candidate must not land in ops/"
     try:
-        write_res = json.loads(writer.forward(cand_path, good_code))
-        assert write_res["status"] == "saved"
         res_file = json.loads(tool.forward(file_path=cand_path))
         assert res_file["l3_passed"] is True
         assert res_file["l0_median_us"] > 0
     finally:
-        import os
+        if os.path.exists(saved):
+            os.remove(saved)
 
-        if os.path.exists(cand_path):
-            os.remove(cand_path)
+
+def test_empty_model_response_is_retried_then_terminates():
+    from smolagents.models import ChatMessage
+
+    class FlakyModel:
+        model_id = "flaky"
+
+        def __init__(self, replies):
+            self.replies = list(replies)
+            self.calls = 0
+
+        def generate(self, messages, stop_sequences=None, **kwargs):
+            self.calls += 1
+            return ChatMessage(role="assistant", content=self.replies.pop(0))
+
+    recovered = FlakyModel(["", "   ", "```python\nfinal_answer('done')\n```"])
+    model = EmptyResponseRetryingModel(recovered, max_attempts=3)
+    message = model.generate([])
+    assert "final_answer" in message.content
+    assert recovered.calls == 3
+
+    exhausted = FlakyModel(["", None, ""])
+    model = EmptyResponseRetryingModel(exhausted, max_attempts=3)
+    message = model.generate([])
+    assert "final_answer" in message.content
+    assert exhausted.calls == 3
 
 
 def test_kb_in_memory_caching():

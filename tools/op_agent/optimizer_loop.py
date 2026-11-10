@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 from typing import Any
 
@@ -28,12 +29,38 @@ from tools.op_agent.guard import check_npu_environment
 from tools.op_agent.kb import query_ascend_kb, read_kb_card
 from tools.op_agent.qwen35_shapes import CANONICAL_CASES
 
+logger = logging.getLogger(__name__)
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+CANDIDATE_SUBDIR = os.path.join("build", "op_agent_candidates")
+
 CURRENT_TEST_CASE: dict[str, Any] = {}
 BEST_RECORD: dict[str, Any] = {
     "l0_median_us": float("inf"),
     "kernel_code": "",
     "iteration": 0,
 }
+
+
+def candidate_dir() -> str:
+    """Return the ignored directory that holds agent-authored candidates."""
+    path = os.path.join(REPO_ROOT, CANDIDATE_SUBDIR)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def resolve_candidate_path(file_path: str) -> str:
+    """Map any agent-supplied path onto the isolated candidate directory.
+
+    Candidate code is intermediate state, not delivery surface: keeping it out of
+    `ops/` stops every run from littering the repository with stray modules.
+    """
+    name = os.path.basename((file_path or "").strip().replace("\\", "/"))
+    if not name:
+        name = "candidate.py"
+    if not name.endswith(".py"):
+        name += ".py"
+    return os.path.join(candidate_dir(), name)
 
 
 class WriteCandidateFileTool(Tool):
@@ -48,7 +75,10 @@ class WriteCandidateFileTool(Tool):
     inputs = {
         "file_path": {
             "type": "string",
-            "description": "Destination file path, e.g. 'ops/tmp_cand.py'.",
+            "description": (
+                "Candidate file name, e.g. 'cand_a.py'. Only the base name is "
+                "used; files are always written under build/op_agent_candidates/."
+            ),
         },
         "content": {
             "type": "string",
@@ -58,29 +88,11 @@ class WriteCandidateFileTool(Tool):
     output_type = "string"
 
     def forward(self, file_path: str, content: str) -> str:
-        # Strictly forbid writing outside the workspace to keep environment safe
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        target_path = (
-            file_path
-            if os.path.isabs(file_path)
-            else os.path.join(repo_root, file_path)
-        )
-        norm_target = os.path.abspath(target_path)
-        if not norm_target.startswith(repo_root):
-            return json.dumps(
-                {
-                    "status": "error",
-                    "message": "Security: candidate path must stay inside workspace.",
-                }
-            )
-
+        target = resolve_candidate_path(file_path)
         try:
-            parent = os.path.dirname(norm_target)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-            with open(norm_target, "w", encoding="utf-8") as f:
+            with open(target, "w", encoding="utf-8") as f:
                 f.write(content)
-            return json.dumps({"status": "saved", "file_path": file_path})
+            return json.dumps({"status": "saved", "file_path": target})
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
 
@@ -123,14 +135,7 @@ class EvaluateKernelTool(Tool):
         # Resolve code: prefer pass-by-reference via file_path
         code_to_eval = ""
         if file_path:
-            repo_root = os.path.abspath(
-                os.path.join(os.path.dirname(__file__), "..", "..")
-            )
-            norm_target = os.path.abspath(
-                file_path
-                if os.path.isabs(file_path)
-                else os.path.join(repo_root, file_path)
-            )
+            norm_target = resolve_candidate_path(file_path)
             if not os.path.exists(norm_target):
                 return json.dumps(
                     {"l3_passed": False, "error": f"File not found: {file_path}"}
@@ -358,6 +363,41 @@ class MockKernelModel(Model):
         return ChatMessage(role="assistant", content=full_content)
 
 
+class EmptyResponseRetryingModel(Model):
+    """Retry empty completions before they reach the agent's code parser.
+
+    A blank completion previously surfaced as "expected string or bytes-like
+    object, got 'NoneType'" while parsing the code block, which wasted a full
+    step. Retry a few times, then emit a terminating answer so the loop ends
+    cleanly instead of raising.
+    """
+
+    def __init__(self, inner: Model, max_attempts: int = 3):
+        super().__init__(model_id=getattr(inner, "model_id", None))
+        self.inner = inner
+        self.max_attempts = max(1, max_attempts)
+
+    def generate(self, messages, stop_sequences=None, **kwargs) -> ChatMessage:
+        for attempt in range(1, self.max_attempts + 1):
+            result = self.inner.generate(
+                messages, stop_sequences=stop_sequences, **kwargs
+            )
+            content = getattr(result, "content", None)
+            if isinstance(content, str) and content.strip():
+                return result
+            logger.warning(
+                "Empty model response (attempt %d/%d); retrying.",
+                attempt,
+                self.max_attempts,
+            )
+        return ChatMessage(
+            role="assistant",
+            content=(
+                "```python\nfinal_answer('Model returned no content; stopping.')\n```"
+            ),
+        )
+
+
 def get_configured_model(candidates: list[str] | None = None) -> Model:
     """Instantiate LLM model based on environment variables."""
     model_id = os.environ.get("OP_AGENT_MODEL_ID")
@@ -375,7 +415,7 @@ def get_configured_model(candidates: list[str] | None = None) -> Model:
     if api_key:
         kwargs["api_key"] = api_key
 
-    return OpenAIServerModel(**kwargs)
+    return EmptyResponseRetryingModel(OpenAIServerModel(**kwargs))
 
 
 def create_agent(
