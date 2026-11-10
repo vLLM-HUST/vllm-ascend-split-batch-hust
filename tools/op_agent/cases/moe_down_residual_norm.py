@@ -133,8 +133,31 @@ def optimized_op(x, down_w, residual, norm_w):
 """.strip()
 
     def get_task_prompt(self) -> str:
-        return (
-            f"Implement on-chip closed-loop fusion for Down GEMM (Mx{self.K} -> "
-            f"Mx{self.N}) + Residual Add + RMSNorm. Accumulate GEMM tiles in UB, "
-            "add residual in-place, and apply RMSNorm before writing to HBM."
+        signatures = (
+            "Exact tensor signatures (bf16, keep shapes and argument order):\n"
+            f"  x: [{self.M}, {self.K}]\n"
+            f"  down_w: [{self.N}, {self.K}]\n"
+            f"  residual: [{self.M}, {self.N}]  <-- not [{self.M}, {self.K}]\n"
+            f"  norm_w: [{self.N}]\n"
+            f"  returns: [{self.M}, {self.N}]"
+        )
+        semantics = (
+            f"Reference semantics: h = x @ down_w.T + residual is "
+            f"[{self.M}, {self.N}]; out = h * rsqrt(mean(h*h, -1, keepdim=True) "
+            "+ 1e-6) * norm_w."
+        )
+        guidance = (
+            "Keep the entry point named optimized_op with the same argument order. "
+            "Accumulate GEMM tiles in UB, add residual in-place, and apply RMSNorm "
+            "before writing the result once to HBM. Submit one small single-purpose "
+            "code block per step so each evaluation finishes within the time limit."
+        )
+        return "\n".join(
+            (
+                "Implement on-chip closed-loop fusion for Down GEMM + "
+                "Residual Add + RMSNorm.",
+                signatures,
+                semantics,
+                guidance,
+            )
         )
