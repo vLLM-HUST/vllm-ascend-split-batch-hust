@@ -49,6 +49,7 @@ case "${WORKLOAD}" in
     BENCH_CMD=(
       vllm bench serve
       --model "${MODEL}"
+      --tokenizer "${VLLM_HUST_TOKENIZER:-${MODEL}}"
       --dataset-name random
       --random-input-len "${IN_LEN}"
       --random-output-len "${OUT_LEN}"
@@ -81,6 +82,7 @@ case "${WORKLOAD}" in
     BENCH_CMD=(
       vllm bench serve
       --model "${MODEL}"
+      --tokenizer "${VLLM_HUST_TOKENIZER:-${MODEL}}"
       "${DATASET_ARGS[@]}"
       --num-prompts "${NP}"
       --max-concurrency "${CONC}"
@@ -106,6 +108,7 @@ case "${WORKLOAD}" in
     BENCH_CMD=(
       vllm bench serve
       --model "${MODEL}"
+      --tokenizer "${VLLM_HUST_TOKENIZER:-${MODEL}}"
       --dataset-name random
       --random-input-len "${IN_LEN}"
       --random-output-len "${OUT_LEN}"

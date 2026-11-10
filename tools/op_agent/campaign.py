@@ -33,6 +33,7 @@ import sys
 from typing import Any
 
 from tools.op_agent.cases import CASE_REGISTRY, get_case
+from tools.op_agent.cases.dynamic_chain import DynamicVectorChainCase
 from tools.op_agent.evaluator import run_candidate_evaluation
 from tools.op_agent.guard import check_npu_environment
 from tools.op_agent.timeline_insight import (
@@ -49,6 +50,33 @@ def _infer_layer_count(case_name: str, callsite: str) -> int:
     if "moe" in combined or "shared_expert" in combined:
         return 40
     return 30
+
+
+def _load_delivered_op_ids(delivery_index_path: str | None = None) -> set[str]:
+    """Load operator ids that are already delivered or terminal from index."""
+    if delivery_index_path is None:
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        delivery_index_path = os.path.join(repo_root, "DELIVERY_INDEX.json")
+
+    if not os.path.isfile(delivery_index_path):
+        return set()
+
+    try:
+        with open(delivery_index_path, encoding="utf-8") as f:
+            data = json.load(f)
+        delivered: set[str] = set()
+        for op in data.get("operators", []):
+            op_id = op.get("id")
+            status = op.get("status", "")
+            # Skip already integrated or conclusively rejected/measured ops
+            is_terminal = status.startswith("integrated_") or status.startswith(
+                "default_off_"
+            )
+            if is_terminal and op_id:
+                delivered.add(op_id)
+        return delivered
+    except Exception:
+        return set()
 
 
 def _load_op_statistic_avg_map(op_stat_csv: str | None) -> dict[str, float]:
@@ -85,10 +113,31 @@ def discover_hotspot_batch(
     svg_output_path: str | None = None,
     min_graph_baseline_us: float = 1.5,
     iters: int = 20,
+    skip_delivered: bool = True,
+    delivery_index_path: str | None = None,
 ) -> dict[str, Any]:
     """Scan candidate cases + optional profiler timeline and emit a batch manifest."""
     hw = check_npu_environment(required_cards=1)
-    selected_names = case_names if case_names else sorted(CASE_REGISTRY.keys())
+    if case_names:
+        selected_names = list(case_names)
+    else:
+        all_names = sorted(CASE_REGISTRY.keys())
+        if skip_delivered:
+            delivered = _load_delivered_op_ids(delivery_index_path)
+
+            # Map canonical case names to delivery IDs
+            def _is_delivered(name: str) -> bool:
+                if name in delivered:
+                    return True
+                if name == "moe_shared_epilogue_decode" and "moe_epilogue" in delivered:
+                    return True
+                return bool(
+                    name == "gdn_input_norm_decode" and "gdn_input_norm" in delivered
+                )
+
+            selected_names = [n for n in all_names if not _is_delivered(n)]
+        else:
+            selected_names = all_names
     csv_avg_map = _load_op_statistic_avg_map(op_statistic_csv)
 
     timeline_digest: dict[str, Any] | None = None
@@ -101,6 +150,37 @@ def discover_hotspot_batch(
         rendered_svg = render_timeline_swimlane_svg(timeline_digest, svg_output_path)
 
     candidates: list[dict[str, Any]] = []
+
+    # Synthesize new OpCases from timeline insight vector sandwich chains
+    if timeline_digest and timeline_digest.get("top_fusable_chains"):
+        for chain_card in timeline_digest["top_fusable_chains"]:
+            dyn_case = DynamicVectorChainCase(chain_card)
+            tc = dyn_case.build_test_case(is_tp2_ready=hw.has_npu)
+            tc["iters"] = iters
+            base_code = dyn_case.get_baseline_code()
+            eval_res = run_candidate_evaluation(base_code, tc, iters=iters)
+            base_us = float(eval_res.get("l0_median_us", 0.0))
+            layers = _infer_layer_count(dyn_case.name, dyn_case.callsite)
+            step_budget_us = round(base_us * layers, 2)
+            candidates.append(
+                {
+                    "case_name": dyn_case.name,
+                    "callsite": dyn_case.callsite,
+                    "phase": dyn_case.phase,
+                    "layer_count": layers,
+                    "timing_mode": eval_res.get("timing_mode", "Eager"),
+                    "baseline_l0_median_us": base_us,
+                    "bucket_latencies_us": eval_res.get("bucket_latencies_us", {}),
+                    "estimated_step_budget_us": step_budget_us,
+                    "shape_facts": tc["shape_facts"],
+                    "workload_spec": tc.get("workload_spec", {}),
+                    "status": "approved",
+                    "guard_notes": [
+                        "Synthesized directly from timeline vector sandwich chain."
+                    ],
+                }
+            )
+
     for name in selected_names:
         op_case = get_case(name)
         tc = op_case.build_test_case(is_tp2_ready=hw.has_npu)
@@ -297,6 +377,17 @@ def main(argv: list[str] | None = None) -> None:
     disc_p.add_argument("--svg-out", default=None)
     disc_p.add_argument("--min-graph-us", type=float, default=1.5)
     disc_p.add_argument("--iters", type=int, default=20)
+    disc_p.add_argument(
+        "--include-delivered",
+        action="store_true",
+        default=False,
+        help="Include already delivered / terminal operators from DELIVERY_INDEX.json.",
+    )
+    disc_p.add_argument(
+        "--delivery-index",
+        default=None,
+        help="Optional path to DELIVERY_INDEX.json.",
+    )
 
     run_p = sub.add_parser(
         "run",
@@ -324,6 +415,8 @@ def main(argv: list[str] | None = None) -> None:
             svg_output_path=args.svg_out,
             min_graph_baseline_us=args.min_graph_us,
             iters=args.iters,
+            skip_delivered=not args.include_delivered,
+            delivery_index_path=args.delivery_index,
         )
         print(
             f"Generated batch manifest with {len(manifest['candidates'])} candidates: "

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -279,6 +280,36 @@ def test_pluggable_campaign_discover_and_guards(tmp_path):
     assert by_name["gdn_split_ba"]["status"] == "pending_review"
 
 
+def test_pluggable_campaign_skip_delivered_filter(tmp_path):
+    from tools.op_agent.campaign import discover_hotspot_batch
+
+    fake_delivery = tmp_path / "DELIVERY_INDEX.json"
+    fake_delivery.write_text(
+        json.dumps(
+            {
+                "operators": [
+                    {"id": "gdn_split_ba", "status": "integrated_plugin_measured"},
+                    {"id": "moe_gate_merge", "status": "default_off_negative_speedup"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_file = tmp_path / "batch.json"
+    manifest = discover_hotspot_batch(
+        output_manifest_path=str(manifest_file),
+        delivery_index_path=str(fake_delivery),
+        skip_delivered=True,
+        min_graph_baseline_us=0.0,
+        iters=2,
+    )
+    names = [c["case_name"] for c in manifest["candidates"]]
+    assert "gdn_split_ba" not in names
+    assert "moe_gate_merge" not in names
+    # Unfiltered cases should still be included
+    assert "moe_shared_epilogue_decode" in names
+
+
 def test_moe_gating_routing_case_contract():
     from tools.op_agent.cases import get_case
 
@@ -354,6 +385,57 @@ def test_timeline_insight_synthetic_clustering(tmp_path):
     assert "<svg" in svg_content
     assert "Norm" in svg_content
     assert "Gate" in svg_content
+
+
+def test_timeline_insight_synthesizes_dynamic_chain_candidate(tmp_path):
+    from tools.op_agent.campaign import discover_hotspot_batch
+
+    kd_csv = tmp_path / "kernel_details.csv"
+    kd_csv.write_text(
+        "\n".join(
+            [
+                (
+                    "Name,Type,Accelerator Core,Duration(us),Wait Time(us),"
+                    "aiv_mte2_ratio,aiv_mte3_ratio,aiv_vec_ratio,"
+                    "Input Shapes,Input Data Types,Output Shapes"
+                ),
+                (
+                    "MatMul_1,MatMul,AI_CORE,120.0,0.0,0.0,0.0,0.0,"
+                    '"[32, 2048]",bf16,"[32, 4096]"'
+                ),
+                (
+                    "CustomNorm_1,Norm,AI_VECTOR_CORE,8.5,1.2,0.65,0.0,0.85,"
+                    '"[32, 4096]",bf16,"[32, 4096]"'
+                ),
+                (
+                    "CustomGate_1,Gate,AI_VECTOR_CORE,6.2,0.5,0.40,0.0,0.90,"
+                    '"[32, 4096]",bf16,"[32, 4096]"'
+                ),
+                (
+                    "MatMul_2,MatMul,AI_CORE,115.0,0.0,0.0,0.0,0.0,"
+                    '"[32, 4096]",bf16,"[32, 2048]"'
+                ),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manifest_file = tmp_path / "batch.json"
+    manifest = discover_hotspot_batch(
+        output_manifest_path=str(manifest_file),
+        kernel_details_csv=str(kd_csv),
+        skip_delivered=True,
+        min_graph_baseline_us=0.0,
+        iters=2,
+    )
+    # Dynamic chain from the trace must appear even if static cases are delivered
+    candidates = manifest["candidates"]
+    assert len(candidates) >= 1
+    dyn_cand = [c for c in candidates if "dynamic_chain" in c["case_name"]][0]
+    assert dyn_cand["status"] == "approved"
+    assert "norm_gate" in dyn_cand["callsite"]
+    assert dyn_cand["shape_facts"]["M"] == 32
+    assert dyn_cand["shape_facts"]["Hidden"] == 4096
 
 
 def test_outer_loop_serving_subcommands(tmp_path):
