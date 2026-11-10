@@ -38,23 +38,51 @@
     }
   },
   "l3_numerical_guard": {
-    "passed": true,
+    "passed": false,
     "metric": "allclose",
+    "tolerance": {"atol": 1e-3, "rtol": 1e-3},
     "max_abs_diff": 0.03125,
-    "note": "v and gate outputs are bitwise identical; q and k outputs differ by at most 0.03125 due to hardware intermediate rounding differences in rmsnorm"
+    "note": "Single-token decode is bitwise identical and v/gate are bitwise identical at every size; q/k diverge beyond tolerance at 16 and 32 tokens because the fused kernel accumulates RMSNorm variance in Triton FP32",
+    "per_token_shape": {
+      "1": {"q_bitwise": true, "k_bitwise": true, "v_bitwise": true, "gate_bitwise": true, "allclose": true},
+      "16": {"q_max_abs_diff": 0.015625, "k_max_abs_diff": 0.015625, "v_bitwise": true, "gate_bitwise": true, "allclose": false},
+      "32": {"q_max_abs_diff": 0.03125, "k_max_abs_diff": 0.015625, "v_bitwise": true, "gate_bitwise": true, "allclose": false}
+    },
+    "serving_greedy_guard": {
+      "passed": false,
+      "matched": 1,
+      "total": 8,
+      "note": "Divergence begins at character 114 to 325, so prefill deviation is amplified autoregressively"
+    }
   },
   "l4_attribution": {
-    "call_count_expected": 10,
-    "call_count_actual": 10,
-    "note": "10 full attention layers in Qwen3.5-35B-A3B"
+    "call_count_expected": 160,
+    "call_count_actual": 160,
+    "verified": true,
+    "note": "Per-rank counts for 10 full attention layers; each rank reports its own op_statistic.csv. Disabled arm reports zero fused calls on both ranks"
   },
   "serving_end_to_end": {
-    "tested": false,
-    "concurrency": 16,
-    "speedup": 1.0,
-    "status": "pending_serving_run"
+    "tested": true,
+    "concurrency": 1,
+    "speedup": null,
+    "status": "l3_failed_default_off",
+    "rejected_single_token_variant": {
+      "cudagraph_mode": "FULL_AND_PIECEWISE",
+      "fused_calls": 0,
+      "reason": "Cudagraph pads inputs to capture sizes, so qkv.shape[0] is never one and the single-token guard never fires; parity passes only because the fused path is inactive",
+      "eager_mode": {
+        "fused_calls": 150,
+        "greedy_matched": 3,
+        "greedy_total": 8,
+        "verdict": "Fused path active and still not equivalent"
+      },
+      "host_branch": "work/qwen-split-qkv-decode-only",
+      "host_commit": "9f5b6d394",
+      "pushed": false
+    },
+    "open_question": "Operator-level single-token output is bitwise identical while end-to-end output diverges, pointing at output layout or downstream kernel selection rather than the kernel numerics"
   },
-  "status": "default_off_host_fork_measured",
+  "status": "default_off_serving_l3_failed",
   "default_enabled": false,
   "evidence_fingerprint": {
     "benchmark_script": "ops/qwen_text_split_qkv_fuse/bench_l0.py",

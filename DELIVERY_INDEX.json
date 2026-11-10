@@ -188,11 +188,11 @@
       "readme": "ops/qwen_text_split_qkv_fuse/README.md",
       "report": "ops/qwen_text_split_qkv_fuse/REPORT.md",
       "evidence": "ops/qwen_text_split_qkv_fuse/evidence.json",
-      "status": "default_off_host_fork_measured",
+      "status": "default_off_serving_l3_failed",
       "default_enabled": false,
       "gate_env": "VLLM_HUST_SPLIT_QKV_ROPE_FUSED=1",
-      "l3_numerical_guard": "passed",
-      "serving_status": "pending_serving_run"
+      "l3_numerical_guard": "failed",
+      "serving_status": "l3_failed_default_off"
     },
     {
       "id": "gdn_output_norm_fusion",
@@ -205,6 +205,48 @@
       "status": "integrated_host_fork_measured",
       "default_enabled": false,
       "gate_env": "VLLM_HUST_GDN_OUTPUT_NORM_FUSED=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "verified_faster"
+    },
+    {
+      "id": "moe_down_residual_norm",
+      "display_name": "MoE Down GEMM + Residual + RMSNorm Fusion (vllm_ascend/ops/fused_moe/shared_experts.py:down_residual_norm)",
+      "layer": "plugin_carrier",
+      "directory": "ops/moe_down_residual_norm",
+      "readme": "ops/moe_down_residual_norm/README.md",
+      "report": "ops/moe_down_residual_norm/REPORT.md",
+      "evidence": "ops/moe_down_residual_norm/evidence.json",
+      "status": "l0_measured_pending_outer_loop",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_MOE_DOWN_RESIDUAL_NORM=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "pending_outer_loop"
+    },
+    {
+      "id": "ffn_activation",
+      "display_name": "ffn_activation (vllm_ascend/ops/fused_moe/fused_moe.py:ffn_activation)",
+      "layer": "plugin_carrier",
+      "directory": "ops/ffn_activation",
+      "readme": "ops/ffn_activation/README.md",
+      "report": "ops/ffn_activation/REPORT.md",
+      "evidence": "ops/ffn_activation/evidence.json",
+      "status": "l0_measured_pending_outer_loop",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_FFN_ACTIVATION=1",
+      "l3_numerical_guard": "passed",
+      "serving_status": "pending_outer_loop"
+    },
+    {
+      "id": "moe_down_residual_norm",
+      "display_name": "moe_down_residual_norm (vllm_ascend/ops/fused_moe/shared_experts.py:down_residual_norm)",
+      "layer": "plugin_carrier",
+      "directory": "ops/moe_down_residual_norm",
+      "readme": "ops/moe_down_residual_norm/README.md",
+      "report": "ops/moe_down_residual_norm/REPORT.md",
+      "evidence": "ops/moe_down_residual_norm/evidence.json",
+      "status": "integrated_plugin_measured",
+      "default_enabled": false,
+      "gate_env": "VLLM_HUST_MOE_DOWN_RESIDUAL_NORM=1",
       "l3_numerical_guard": "passed",
       "serving_status": "verified_faster"
     }
