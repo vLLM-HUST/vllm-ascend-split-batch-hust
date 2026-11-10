@@ -63,5 +63,14 @@
     "stress_workload": "sharegpt",
     "concurrency": 32,
     "speedup": null
-  }
+  },
+  "superseded_by_host_fork": {
+    "host_operator": "gdn_output_norm_fusion",
+    "host_container": "vllm_ascend/ops/gdn_epilogue.py:_output_norm_kernel",
+    "host_gate_env": "VLLM_HUST_GDN_OUTPUT_NORM_FUSED",
+    "host_branch": "based/split-batch-baseline",
+    "host_merge": "PR #69 and #70, commits 68c079081 and 8499a55aa",
+    "reason": "The host kernel already evaluates y *= z * sigmoid(z), the same RMSNorm-times-silu expression this carrier targets, and it also fuses the following rearrange. This carrier has no caller, so it duplicates a shipped path. The host form carries a serving result; this one does not."
+  },
+  "status": "superseded_by_host_fork"
 }
