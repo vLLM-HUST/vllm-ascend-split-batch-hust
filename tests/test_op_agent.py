@@ -335,6 +335,38 @@ def test_moe_gating_routing_case_contract():
     assert res["l3_passed"] is True
 
 
+def test_moe_down_residual_norm_case_contract():
+    from tools.op_agent.cases import get_case
+
+    case = get_case("moe_down_residual_norm")
+    tc = case.build_test_case(is_tp2_ready=False)
+    tc["iters"] = 4
+    x, down_w, residual, norm_w = tc["input_gen_fn"]()
+    assert x.shape == (32, 256)
+    assert down_w.shape == (2048, 256)
+    assert residual.shape == (32, 2048)
+    assert norm_w.shape == (2048,)
+    out = tc["baseline_fn"](x, down_w, residual, norm_w)
+    assert out.shape == (32, 2048)
+    res = run_candidate_evaluation(case.get_baseline_code(), tc)
+    assert res["l3_passed"] is True
+
+
+def test_ffn_activation_case_contract():
+    from tools.op_agent.cases import get_case
+
+    case = get_case("ffn_activation")
+    tc = case.build_test_case(is_tp2_ready=False)
+    tc["iters"] = 4
+    gate, up = tc["input_gen_fn"]()
+    assert gate.shape == (32, 1024)
+    assert up.shape == (32, 1024)
+    out = tc["baseline_fn"](gate, up)
+    assert out.shape == (32, 1024)
+    res = run_candidate_evaluation(case.get_baseline_code(), tc)
+    assert res["l3_passed"] is True
+
+
 def test_timeline_insight_synthetic_clustering(tmp_path):
     from tools.op_agent.timeline_insight import (
         compress_kernel_timeline,
