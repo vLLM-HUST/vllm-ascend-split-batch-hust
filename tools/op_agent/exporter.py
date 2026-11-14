@@ -6,6 +6,12 @@ Generates or updates:
 2. REPORT.md (Organization-policy-compliant operator report without keyword+digit pairs)
 3. evidence.json (Machine-readable facts preserving outer-loop L4/Serving sections)
 4. bench_l0.py (Standalone reproducible microbenchmark)
+
+结论面纪律：`DELIVERY_INDEX.json` 是"能声称什么"的权威清单，内环导出**不自动登记**
+（`register_entry=False`）；需要登记时由调用方显式传入 `layer`，且只写事实字段，
+结论字段留 `pending`（见 `custody.register_delivery_index`）。
+门控名缺失时写 `unexposed`，不再按算子名推导 `VLLM_HUST_<NAME>`——推导出来的名字
+在代码里并不存在，会让索引与实物不符。
 """
 
 from __future__ import annotations
@@ -14,8 +20,16 @@ import json
 import os
 from typing import Any
 
-from tools.op_agent.custody import register_delivery_index, write_dir_checksum
+from tools.op_agent.custody import (
+    UNCLASSIFIED_LAYER,
+    UNEXPOSED_GATE,
+    register_delivery_index,
+    write_dir_checksum,
+)
 from tools.op_agent.workloads import select_workloads_for_operator
+
+#: 门控缺失时写进交付文档的说明；不要编造环境变量名。
+NO_GATE_TEXT = "未对外暴露（内环候选，未注册 general plugin 入口）"
 
 
 def export_operator_delivery(
@@ -29,11 +43,17 @@ def export_operator_delivery(
     workload_spec: dict[str, Any] | None = None,
     bucket_latencies_us: dict[int, float] | None = None,
     workspace_root: str | None = None,
+    register_entry: bool = False,
+    layer: str = UNCLASSIFIED_LAYER,
+    l3_passed: bool = True,
 ) -> str:
     """Export inner-loop operator delivery files into ops/<op_name>/.
 
     Preserves existing `l4_attribution` and `serving_end_to_end` sections in
     `evidence.json` when re-running inner-loop tuning on an existing operator.
+
+    `gate_env` 留空表示该候选还没有对外开关（写 `unexposed`）。索引登记只在
+    `register_entry=True` 时发生，且 `layer` 必须由调用方按实际归属给出。
     """
     if workspace_root is None:
         workspace_root = os.path.dirname(
@@ -43,8 +63,10 @@ def export_operator_delivery(
     os.makedirs(op_dir, exist_ok=True)
 
     speedup = baseline_latency / max(optimized_latency, 1e-6)
-    if not gate_env:
-        gate_env = f"VLLM_HUST_{op_name.upper()}=1"
+    gate_env = gate_env or UNEXPOSED_GATE
+    gate_line = (
+        f"`{gate_env}`（默认关闭）" if gate_env != UNEXPOSED_GATE else NO_GATE_TEXT
+    )
 
     phase = str(shape_facts.get("phase", "decode"))
     if workload_spec is None:
@@ -137,7 +159,7 @@ def export_operator_delivery(
         readme_content = (
             f"# {op_name}\n\n"
             f"- **调用位置**: `{callsite}`\n"
-            f"- **门控开关**: `{gate_env}`（默认关闭）\n"
+            f"- **门控开关**: {gate_line}\n"
             f"- **外环主测负载**: `{primary_wl}`；动态形状压力负载: `{stress_wl}`；"
             f"相位交叉检查负载: `{cross_wl}`\n"
             f"- **详细度量数据**: 见 `evidence.json`\n"
@@ -156,7 +178,7 @@ def export_operator_delivery(
             f"## 1. 形状事实与门控上下文\n\n"
             f"- 调用点: `{callsite}`\n"
             f"- 精度与并行策略: bfloat16，双卡张量并行\n"
-            f"- 门控环境变量: `{gate_env}`（默认关闭）\n"
+            f"- 门控环境变量: {gate_line}\n"
             f"- 外环负载绑定: 主测 `{primary_wl}`，压力 `{stress_wl}`，"
             f"相位交叉检查 `{cross_wl}`\n\n"
             f"## 2. 内环与外环验证结论\n\n"
@@ -170,13 +192,15 @@ def export_operator_delivery(
     # 5. Anti-drift Checksum
     write_dir_checksum(op_dir)
 
-    # 6. Auto register in DELIVERY_INDEX.json
-    register_delivery_index(
-        op_name=op_name,
-        callsite=callsite,
-        speedup=speedup,
-        gate_env=gate_env,
-        workspace_root=workspace_root,
-    )
+    # 6. 索引登记是显式动作：它不是内环产物，而是对外结论面的变更
+    if register_entry:
+        register_delivery_index(
+            op_name=op_name,
+            callsite=callsite,
+            gate_env=gate_env,
+            layer=layer,
+            l3_passed=l3_passed,
+            workspace_root=workspace_root,
+        )
 
     return op_dir

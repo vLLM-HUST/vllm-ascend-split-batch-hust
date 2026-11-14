@@ -27,7 +27,8 @@
    - **第三步（L0 分桶计时）**：基于 NPUGraph 重放测量默认形状与各解码桶耗时。
 3. **产物导出与外环字段保护（`tools/op_agent/exporter.py`）**：
    - 自动导出 `ops/<operator>/{bench_l0.py,evidence.json,README.md,REPORT.md}` 并调用 `custody.py` 写入 `checksum.sha256`；
-   - 若目录已有外环采集的 `l4_attribution` 或 `serving_end_to_end` 记录，重跑内环时保留已有外环证据不被清空。
+   - 若目录已有外环采集的 `l4_attribution` 或 `serving_end_to_end` 记录，重跑内环时保留已有外环证据不被清空；
+   - **不自动登记 `DELIVERY_INDEX.json`**：内环只有 L0 与 L3，推不出归属层、真实门控变量与服务结论。调用方未给门控时交付文档写"未对外暴露"，不按算子名推导环境变量；需要登记时显式传 `layer`，写入的结论字段一律 `pending_outer_loop`，且重跑保留人工已定的结论字段。
 
 ---
 

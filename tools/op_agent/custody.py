@@ -8,6 +8,26 @@ import json
 import os
 from typing import Any
 
+#: 该算子还没有对外门控开关时的写法（`DELIVERY_INDEX.json` 的既有词汇）。
+UNEXPOSED_GATE = "unexposed"
+
+#: 工具新登记时的占位归属层；必须在合入前改成真实层，否则门禁会拦。
+UNCLASSIFIED_LAYER = "unclassified"
+
+#: 内环只做了 L0 时的诚实状态与服务状态。
+L0_PENDING_STATUS = "l0_measured_pending_outer_loop"
+PENDING_SERVING_STATUS = "pending_outer_loop"
+
+#: 更新已有条目时保留的人工结论字段：内环重跑不得改写对外结论。
+PRESERVED_ON_UPDATE = (
+    "layer",
+    "status",
+    "serving_status",
+    "l3_numerical_guard",
+    "gate_env",
+    "default_enabled",
+)
+
 
 def calculate_dir_fingerprint(dir_path: str) -> dict[str, str]:
     """Calculate sha256 checksums of all evidence files in an operator directory."""
@@ -71,11 +91,22 @@ def verify_dir_checksum(dir_path: str) -> tuple[bool, str]:
 def register_delivery_index(
     op_name: str,
     callsite: str,
-    speedup: float,
-    gate_env: str,
+    gate_env: str = UNEXPOSED_GATE,
+    layer: str = UNCLASSIFIED_LAYER,
+    l3_passed: bool = True,
     workspace_root: str | None = None,
 ) -> bool:
-    """Register or update operator entry in repo's DELIVERY_INDEX.json."""
+    """Register or update an operator entry with facts only.
+
+    结论字段（`layer` / `status` / `serving_status` / `gate_env` /
+    `l3_numerical_guard`）一律不推断：局部 L0 加速比不能推出服务收益，
+    算子名也推不出真实门控变量。
+
+    - 新条目：写保守值 `layer=unclassified`、`status=l0_measured_pending_outer_loop`、
+      `serving_status=pending_outer_loop`、`gate_env=unexposed`；`layer` 必须在合入前
+      由人工改成真实归属，`tests/test_delivery_status_consistency.py` 会拦占位值。
+    - 已有条目：保留人工已定的结论字段，只刷新目录/证据路径与 `display_name`。
+    """
     if workspace_root is None:
         workspace_root = os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -92,25 +123,25 @@ def register_delivery_index(
         entry: dict[str, Any] = {
             "id": op_name,
             "display_name": f"{op_name} ({callsite})",
-            "layer": "plugin_carrier",
+            "layer": layer,
             "directory": f"ops/{op_name}",
             "readme": f"ops/{op_name}/README.md",
             "report": f"ops/{op_name}/REPORT.md",
             "evidence": f"ops/{op_name}/evidence.json",
-            "status": "integrated_plugin_measured"
-            if speedup > 1.0
-            else "default_off_negative_speedup",
+            "status": L0_PENDING_STATUS,
             "default_enabled": False,
-            "gate_env": gate_env,
-            "l3_numerical_guard": "passed",
-            "serving_status": "verified_faster"
-            if speedup > 1.0
-            else "negative_or_pending",
+            "gate_env": gate_env or UNEXPOSED_GATE,
+            "l3_numerical_guard": "passed" if l3_passed else "failed",
+            "serving_status": PENDING_SERVING_STATUS,
         }
 
-        # Update if exists, else append
         idx = next((i for i, op in enumerate(operators) if op.get("id") == op_name), -1)
         if idx >= 0:
+            # 人工已经定过的结论字段不得被内环重跑覆盖
+            current = operators[idx]
+            for key in PRESERVED_ON_UPDATE:
+                if key in current:
+                    entry[key] = current[key]
             operators[idx] = entry
         else:
             operators.append(entry)

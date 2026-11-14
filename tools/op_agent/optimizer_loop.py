@@ -536,6 +536,11 @@ def optimized_op(gate, out):
         ok, msg = verify_dir_checksum(out_dir)
         print(f"Delivered standard operator bundle into: {out_dir}")
         print(f"Anti-drift Checksum Gate: {'PASS' if ok else 'FAIL'} ({msg})")
+        print(
+            "DELIVERY_INDEX.json 未自动登记：索引是对外结论面，"
+            "请按实际归属补 layer/status 后人工登记"
+            "（见 docs/operator-benchmark-standard.md §3）。"
+        )
 
     return BEST_RECORD
 

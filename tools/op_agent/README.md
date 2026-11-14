@@ -21,7 +21,7 @@
 | `cases/__init__.py` | `CASE_REGISTRY` 注册表，通过 `get_case(case_name)` 动态加载 |
 | `qwen35_shapes.py` | Qwen3.5-35B-A3B (TP=2) 的形状事实与权重标签 |
 | `exporter.py` | 把内环胜出候选导出为 `ops/<op>/` 并保护已有的外环 L4/服务记录 |
-| `custody.py` | 生成并校验 `checksum.sha256` 防漂移指纹，登记 `DELIVERY_INDEX.json` |
+| `custody.py` | 生成并校验 `checksum.sha256` 防漂移指纹；`register_delivery_index` 只写事实字段，结论留 `pending_outer_loop` |
 
 当前已注册的 case：`moe_shared_epilogue_decode`、`gdn_input_norm_decode`、
 `gdn_norm_gate`、`gdn_output_norm_fusion`、`gdn_split_ba`、`gdn_qkv_norm`。
@@ -34,7 +34,13 @@
    - 用 `write_candidate_file` 把候选代码写到仓库内临时文件（按引用传递，不往对话里塞大段代码）；
    - 用 `evaluate_kernel(file_path=...)` 一次完成 L3 校验 + L0 计时，L3 不过直接短路返回错误；
    - 耗时优于历史最优就更新 `BEST_RECORD`；
-4. 结束后若最优优于基线，`exporter` 落盘交付目录，`custody` 生成指纹并写 `DELIVERY_INDEX.json`。
+4. 结束后若最优优于基线，`exporter` 落盘交付目录，`custody` 生成指纹。
+
+`DELIVERY_INDEX.json` **不在这一步自动写入**：索引是对外结论面，内环只有 L0 与
+L3，推不出 `layer`、真实门控变量与服务结论。需要登记时按实际归属人工补
+`layer`/`status`，脚本层面可调用
+`custody.register_delivery_index(..., register_entry=True, layer=...)` 显式写入，
+它只写事实并保留人工已定的结论字段。
 
 ## 3. 快速开始
 

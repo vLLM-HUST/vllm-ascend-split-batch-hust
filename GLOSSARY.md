@@ -142,7 +142,7 @@
 | 算子（operator） | 一次有明确 callsite 的等价替换或融合优化，以 `ops/<operator>/` 为一个交付单元。 | `ops/`；`DELIVERY_INDEX.json` 的 `operators[]` | 不要用"优化点"泛指 |
 | callsite | 算子被真实调用处的宿主位置（文件、方法、调用点）。可达性只认 callsite 证据。 | `ops/<operator>/evidence.json` 的 `callsite` | 不要与"接缝"互换（见 §4） |
 | 算子交付目录 | 一个算子的自洽目录：`README.md`、`REPORT.md`、`evidence.json` 为必备，`bench_l0.py` 为微基准脚本，另有 `checksum.sha256` 指纹。 | `ops/README.md`；`tests/test_ops_delivery_policy.py` | 不要只写"三件套"而漏掉指纹文件 |
-| layer | 算子的归属层：`host_fork`（宿主侧）、`plugin_carrier`（插件侧）、`rejected_exploration`（已否定的探索）。 | `DELIVERY_INDEX.json` 的 `layer` | 不要自造第四种层 |
+| layer | 算子的归属层：`host_fork`（宿主侧）、`plugin_carrier`（插件侧）、`rejected_exploration`（已否定的探索）。工具新登记时可能留下占位值 `unclassified`，合入前必须改成上面三种之一（门禁会拦）。 | `DELIVERY_INDEX.json` 的 `layer` | 不要把 `unclassified` 当成第四种层 |
 | status / serving_status | 索引里的交付状态与服务结论标签（如 `default_off_negative_speedup`、`verified_faster`、`within_noise`）。标签本身是术语，不得改写。 | `DELIVERY_INDEX.json` | 不要用"通过/不通过"替代标签 |
 | 形状事实（shape facts） | 张量维度、批量、输入输出规模、执行相位、专家分布等可复核的执行条件。 | `ops/<operator>/evidence.json` 的 `shape_facts`；`docs/operator-benchmark-standard.md` §1 | 不要用"典型形状" |
 | 权重标签 | 模型名 + 精度格式的组合，是可比性事实的另一半。 | `ops/<operator>/evidence.json` 的 `environment.model` / `dtype` | 不要只写模型族名 |

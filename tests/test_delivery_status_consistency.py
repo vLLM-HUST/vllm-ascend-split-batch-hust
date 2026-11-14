@@ -103,12 +103,18 @@ def _v1_entries() -> list[tuple[dict, dict]]:
 
 
 def test_index_uses_documented_vocabulary():
-    """`layer` / `default_enabled` / `gate_env` 只允许文档化取值。"""
+    """`layer` / `default_enabled` / `gate_env` 只允许文档化取值。
+
+    工具新登记时留下的占位值 `unclassified` 也会在这里报红：索引是对外结论面，
+    归属层必须在合入前由人工判定（见 GLOSSARY.md 的 `layer` 词条）。
+    """
     violations = []
     for entry in _index()["operators"]:
         op_id = entry["id"]
         if entry["layer"] not in ALLOWED_LAYERS:
-            violations.append(f"{op_id}: layer={entry['layer']!r}")
+            violations.append(
+                f"{op_id}: layer={entry['layer']!r}（占位值必须改成真实归属层）"
+            )
         if entry["default_enabled"] is not False:
             violations.append(f"{op_id}: default_enabled 必须为 false（default-off）")
         gate_env = entry["gate_env"]
