@@ -52,6 +52,11 @@
      `ttft`、`tpot`、`throughput`、`latency`、`tokens/s`、`实测`、`吞吐`、`延迟`；
      度量数字一律落在结构化 `evidence.json`，行文与标题避免"关键词+数字"同段；
    - 算子交付面由 `pytest -q tests/test_ops_delivery_policy.py` 把关；修改 `ops/<operator>/` 下被 `checksum.sha256` 覆盖的文件后，必须用 `tools/op_agent/custody.py` 重新生成指纹。
+5. **文档行文与仓库事实必须一致**（由 `pytest -q tests/test_doc_consistency.py` 与工作流 `Docs consistency` 把关）：
+   - 任何 Markdown 里写的"N 个插件 / N 个 bundle"必须等于 `pyproject.toml` 中 `vllm.general_plugins` 与 `vllm_hust.extension_bundles` 的实际条目数；改入口点必须同步改行文；
+   - `ops/<operator>/` 必须齐备 `README.md`、`REPORT.md`、`bench_l0.py`、`evidence.json`；未提供独立微基准脚本时按占位脚本交付（退出码 3 表示"无测量"），不得留空或伪造脚本；
+   - `GLOSSARY.md` 词条四列必须填满、术语不得重复、锚点里的路径必须真实存在，且必须被 `AGENTS.md` 与 `docs/README.md` 引用；
+   - 对外规范文档不得出现"关键词 + 数字"同段与 `AGENTS.md` §3.2 的禁用暗语；新增对外规范文档需登记进 `tests/test_doc_consistency.py` 的 `PROSE_SURFACE`。
 
 ---
 
@@ -68,6 +73,11 @@
    - 绝不夸大局部微基准收益，严禁将算子耗时直接外推为服务端到端收益，不掩盖任何发现的问题。
 4. **直奔主题、拒绝废话**：
    - 汇报直击核心结论与关键依据，给出清晰明确的下一步行动，不写冗长虚泛的铺垫、感叹或毫无意义的沿革叙事。
+5. **术语以 [GLOSSARY.md](GLOSSARY.md) 为准**：
+   - 统一语言（Ubiquitous Language）词表在 [GLOSSARY.md](GLOSSARY.md)，一律按其中的唯一写法与定义判据说话、命名代码与写文档；
+   - 一物一名、一名一物：不造同义词，不裸用同名异义词（如 `gate`、`L3`/`L4`），废止词不得复活；
+   - 引入新概念或新标签时，先按 `GLOSSARY.md` §1.4 登记词条与锚点，再改代码与文档；
+   - `GLOSSARY.md` 只定义词与判据，不承载数字、阈值与状态值，不得成为第二事实源。
 
 ---
 
@@ -84,6 +94,9 @@ pytest -q tests/test_benchmark_standard.py tests/test_json_hygiene.py tests/test
 # 快速运行单算子测试
 pytest -q tests/test_gate_fp32_plugin.py
 
+# 文档一致性门禁（术语表、数量陈述、算子目录契约、行文纪律；纯文本，秒级）
+pytest -q tests/test_doc_consistency.py
+
 # 全量 CPU 门禁套件
 pytest -q -m "not host_tree"
 ```
@@ -93,3 +106,9 @@ pytest -q -m "not host_tree"
 ## 5. 权威文档导航
 
 详细技术规范与权威文档均位于 [docs/README.md](docs/README.md)，请按单一事实源原则查阅与维护。
+
+| 主题 | 权威位置 |
+|---|---|
+| 术语唯一写法、定义判据、代码锚点、同名异义与废止词 | [GLOSSARY.md](GLOSSARY.md) |
+| 架构约束、开发规则、言行准则（本文件） | [AGENTS.md](AGENTS.md) |
+| 交付规范、架构契约、支持边界与发布检查 | [docs/README.md](docs/README.md) |

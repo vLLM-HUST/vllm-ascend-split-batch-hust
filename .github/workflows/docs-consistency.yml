@@ -1,0 +1,45 @@
+# 文档一致性门禁（纯文本，无设备/宿主依赖，秒级）。
+#
+# 为什么单独一个 workflow：`ci.yml` 的 push/pull_request 用 `paths-ignore:
+# '**/*.md'` 过滤纯 Markdown 变更（成本纪律见 docs/agent-guide.md §2），而术语表、
+# 数量陈述、算子目录契约恰恰只在 Markdown/目录变更里漂移，塞进那个 job 会被过滤掉。
+# 判据本体是 `tests/test_doc_consistency.py`，本地可单跑同一条命令。
+name: Docs consistency
+
+on:
+  push:
+    paths:
+      - '*.md'
+      - '**/*.md'
+      - 'pyproject.toml'
+      - 'ops/**'
+      - 'src/**/vllm-hust-extension-v0.2.json'
+      - 'tests/test_doc_consistency.py'
+      - '.github/workflows/docs-consistency.yml'
+  pull_request:
+    paths:
+      - '*.md'
+      - '**/*.md'
+      - 'pyproject.toml'
+      - 'ops/**'
+      - 'src/**/vllm-hust-extension-v0.2.json'
+      - 'tests/test_doc_consistency.py'
+      - '.github/workflows/docs-consistency.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: Docs consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest ruff
+      - run: ruff check tests/test_doc_consistency.py
+      - run: ruff format --check tests/test_doc_consistency.py
+      - run: pytest -q tests/test_doc_consistency.py

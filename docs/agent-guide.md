@@ -26,7 +26,7 @@
 
 | 改动类型 | 必要检查 | 不应自动运行 |
 |---|---|---|
-| 纯文档、结果、证据指针 | 相关格式、引用、哈希、Git 范围 | 全仓 pytest、模型 smoke、起服、L3、screen |
+| 纯文档、结果、证据指针 | 相关格式、引用、哈希、Git 范围；`pytest -q tests/test_doc_consistency.py` | 全仓 pytest、模型 smoke、起服、L3、screen |
 | 流程/工具，不改模型数值路径 | 受影响 CPU 回归、相关静态检查、有效失败码传播 | 模型 L3、模型/包加载 smoke、完整 screen |
 | 实际加载、执行分支、输入输出协议或比较语义 | 定向回归及对应正确性检查；加载变化才补对应加载 smoke | 无关模型测试、重复 smoke |
 | 算子、权重处理、调度执行顺序 | 定向测试、必要 L0、plain L3 + compare；成熟后必要 light L4 | 无端到端问题的 L1/L2 screen、反复 trace |
