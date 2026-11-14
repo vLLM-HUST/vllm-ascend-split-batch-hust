@@ -52,16 +52,21 @@
      `ttft`、`tpot`、`throughput`、`latency`、`tokens/s`、`实测`、`吞吐`、`延迟`；
      度量数字一律落在结构化 `evidence.json`，行文与标题避免"关键词+数字"同段；
    - 算子交付面由 `pytest -q tests/test_ops_delivery_policy.py` 把关；修改 `ops/<operator>/` 下被 `checksum.sha256` 覆盖的文件后，必须用 `tools/op_agent/custody.py` 重新生成指纹。
-5. **文档行文与仓库事实必须一致**（由 `pytest -q tests/test_doc_consistency.py` 与工作流 `Docs consistency` 把关）：
+5. **文档行文与仓库事实必须一致**（由 `pytest -q tests/test_doc_consistency.py` 与工作流 `Text invariants` 把关）：
    - 任何 Markdown 里写的"N 个插件 / N 个 bundle"必须等于 `pyproject.toml` 中 `vllm.general_plugins` 与 `vllm_hust.extension_bundles` 的实际条目数；改入口点必须同步改行文；
    - `ops/<operator>/` 必须齐备 `README.md`、`REPORT.md`、`bench_l0.py`、`evidence.json`；未提供独立微基准脚本时按占位脚本交付（退出码 3 表示"无测量"），不得留空或伪造脚本；
    - `GLOSSARY.md` 词条四列必须填满、术语不得重复、锚点里的路径必须真实存在，且必须被 `AGENTS.md` 与 `docs/README.md` 引用；
    - 对外规范文档不得出现"关键词 + 数字"同段与 `AGENTS.md` §3.2 的禁用暗语；新增对外规范文档需登记进 `tests/test_doc_consistency.py` 的 `PROSE_SURFACE`。
-6. **索引状态必须被证据支撑**（由 `pytest -q tests/test_delivery_status_consistency.py`、工作流 `Delivery status consistency` 与 `.pre-commit-config.yaml` 钩子把关）：
+6. **索引状态必须被证据支撑**（由 `pytest -q tests/test_delivery_status_consistency.py`、工作流 `Text invariants` 与 `.pre-commit-config.yaml` 钩子把关）：
    - `DELIVERY_INDEX.json` 的 `serving_status`、`l3_numerical_guard`、`status` 是结论标签，必须与同一算子的 `ops/<operator>/evidence.json` 同向；
    - `verified_faster` / `within_noise` / `verified_on_par_with_baseline` 要求 `serving_end_to_end.tested` 为真且有 `speedup` 数字；`pending_outer_loop` / `negative_or_pending` 不得出现 `tested: true`；
    - `l4_attribution` 仍为 `pending_outer_loop` 时不得给出服务收益结论；L3 失败一票否决，禁止任何服务收益标签；
    - 标签比证据走得远（如把 L0 加速比写成服务结论）属禁止项，发现即改索引或补证据，不得两边都留着。
+
+7. **仓库边界不变量**（由 `pytest -q tests/test_pitfall_guards.py` 与工作流 `Text invariants` 把关）：
+   - manifest 的宿主范围两端有界、不带 `+local`，`activation.environment` 是真实注入值；根 bundle 保持 `import_only` 且不注入环境变量；manifest `extension_version` 与包版本一致；sdist 只含运行时、元数据、README、许可与溯源；
+   - 仓内不得出现原始数据后缀文件、超过 2 MB 的被追踪文件与缓存/构建垃圾；对外行文不写死宿主工作区绝对路径；
+   - `plugin_carrier` 的门控变量必须在 `src/` 里真实存在；尚未接线的算子登记进 `WIRING_EXEMPT` 并写清原因，接线后删除该条豁免。
 
 ---
 
@@ -104,6 +109,9 @@ pytest -q tests/test_doc_consistency.py
 
 # 交付状态门禁（索引标签 vs evidence.json，纯文本，秒级）
 pytest -q tests/test_delivery_status_consistency.py
+
+# 文档踩坑机械守卫（manifest / sdist / 原始数据 / 宿主路径 / 门控接线，纯文本，秒级）
+pytest -q tests/test_pitfall_guards.py
 
 # 本地提交钩子（安装一次；只跑纯文本快检，与上面两条判据一致）
 python -m pip install pre-commit pytest ruff && pre-commit install

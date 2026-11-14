@@ -43,6 +43,14 @@ repos:
         pass_filenames: false
         files: ^(DELIVERY_INDEX\.json|ops/.*)$
 
+      - id: pitfall-guards
+        name: 文档踩坑机械守卫
+        description: manifest 边界与根 bundle、sdist 内容、原始数据/大文件/垃圾、宿主路径、门控接线
+        entry: pytest -q tests/test_pitfall_guards.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: doc-consistency
         name: 文档行文与仓库事实一致
         description: 术语表锚点、数量陈述、算子目录契约、度量关键词与禁语

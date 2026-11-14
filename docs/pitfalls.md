@@ -25,3 +25,33 @@
 - 历史探针原件（如 [multibuffer-graph.json](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/multibuffer-determinism-20261018/multibuffer-graph.json)）已通过 SHA256 固化审计；两份 separate-graph 崩溃日志仍未找回，不得把其调用或收益归因给插件。
 
 历史运行记录仅作原始证据和溯源，不作为当前操作手册；证据位置与散列规则见 [EVIDENCE.md](EVIDENCE.md)。
+
+## 机械化守卫（改这些之前先看判据）
+
+下列约束已落成本地 `pre-commit` 钩子与 CI 判据，命中即拦。判据本体与被守卫的文档句一一对应，
+写在对应测试模块的注释里，改判据前先改文档。
+
+| 约束 | 守卫 |
+|---|---|
+| manifest 的宿主范围两端有界、不带本地后缀，`activation.environment` 是真实注入值 | `tests/test_pitfall_guards.py` |
+| 根 bundle 保持 `import_only`，不注入环境变量 | 同上 |
+| manifest `extension_version` 与包版本一致 | 同上 |
+| sdist 只含运行时、元数据、README、许可与溯源 | 同上 |
+| 仓内不出现原始数据后缀文件、超大文件、缓存垃圾 | 同上 |
+| 对外行文不写死宿主工作区绝对路径 | 同上 |
+| `plugin_carrier` 的门控变量在 `src/` 真实存在（未接线的登记在 `WIRING_EXEMPT`） | 同上 |
+| 索引标签必须被证据支撑（服务结论、L3、L4、取代指针、方向） | `tests/test_delivery_status_consistency.py` |
+| 算子目录必备文件、证据指纹未被改写、索引覆盖全部算子目录 | `tests/test_ops_delivery_policy.py`、`tests/test_json_hygiene.py` |
+| 文档数量陈述、术语锚点真实性、行文关键词与禁语 | `tests/test_doc_consistency.py` |
+
+## 仍靠人工
+
+以下几条无法从文件内容机械判定，保留为人工核对项：
+
+- 不以 `/vllm-workspace` 为 CWD 运行命令——命令怎么跑不留在仓库里；
+- 未知 `VLLM_HUST_*` 警告的含义——必须看服务自身日志与环境快照；
+- 宿主树只读、历史证据不得重采、失败记录不得删除——属操作纪律，机械判定会误伤正常操作；
+- 从局部算子耗时推算服务收益——层级关系由索引状态门禁覆盖一部分，其余要靠评审；
+- 关闭态零差异、关闭态不导入重型实现——由 `tests/test_extension_config_boundary.py` 与
+  `tests/test_runtime_patch_manifest_guard.py` 部分覆盖，新增能力仍需逐项核对。
+
