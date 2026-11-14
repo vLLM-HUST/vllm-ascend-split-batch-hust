@@ -32,7 +32,7 @@ Cascade 不属于当前包：无源码、注册入口、执行路径或 kernel-w
 
 | 对象 | 契约 |
 |---|---|
-| `vllm_hust.extension_bundles` | 保留 6 个 bundle 的发现入口；发现只读元数据，不导入执行实现 |
+| `vllm_hust.extension_bundles` | 保留 5 个 bundle 的发现入口；发现只读元数据，不导入执行实现 |
 | `org.vllm-hust.split-batch-full-graph` | 仅保留 `dual-pad-planner`，`import_only`，activation environment 为空，管理器不得激活 |
 | 其他 bundle | 按自身 manifest 状态、环境变量与 host 范围判定 |
 | `implementation[].status` | 未具备三项验收证据的组件保持 `import_only` |

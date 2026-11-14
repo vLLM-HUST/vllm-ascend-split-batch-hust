@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Placeholder L0 entry for moe_gating_routing.
+
+This exploration was rejected and is kept as a negative result
+(``status: default_off_negative_speedup``); no plugin-side microbenchmark script
+exists yet. The acceptance records stay in ``evidence.json`` and ``REPORT.md``.
+Replace this file with a real ``bench_l0.py`` before recording a new L0
+measurement here.
+
+Exit code 3 means "no measurement provided", never "benchmark passed".
+"""
+
+if __name__ == "__main__":
+    print(__doc__)
+    raise SystemExit(3)

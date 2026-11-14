@@ -28,7 +28,7 @@ bash <容器自愈脚本>
 ```
 自检输出需确认：
 - `sshd: running`
-- `插件包 vllm-ascend-split-batch: installed`（entry points 正常列出 9 个插件）
+- `插件包 vllm-ascend-split-batch: installed`（entry points 正常列出 6 个插件）
 - `宿主层分工: 下沉至宿主 Fork 仓库，无运行时动态补丁`
 
 ### 第二步：硬件拓扑与驱动确认

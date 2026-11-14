@@ -18,7 +18,8 @@ pip install vllm-ascend-split-batch
 
 Published wheels are immutable and may differ from this checkout. `0.1.3` predates the removal; `0.2.0` records the published removal state. Release receipts and verification limits are listed in [docs/release.md](docs/release.md#1110-已发布安装资产).
 
-**What you get:** 9 `vllm.general_plugins` carriers and 6 extension bundles.
+**What you get:** 6 `vllm.general_plugins` carriers and 5 extension bundles
+(清单以 [`pyproject.toml`](pyproject.toml) 与各 bundle manifest 为准).
 The root split-batch bundle is planner-only and cannot be activated. There is
 no `cascade-attention` entry point, no cascade environment injection, and no
 `[kernels]` extra or dependency on the external cascade kernel repository.
