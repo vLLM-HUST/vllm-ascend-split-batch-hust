@@ -10,9 +10,11 @@ import importlib.util
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
-    "delivery_custody", ROOT / "tools/op_agent/custody.py"
+    "delivery_custody", ROOT / "tools/operator_tools/custody.py"
 )
 custody = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(custody)
@@ -73,6 +75,84 @@ def test_delivery_surface_prose_has_no_measured_metric_pairs():
 
 
 def test_delivery_checksum_covers_untampered_evidence():
-    for checksum in sorted((ROOT / "ops").glob("*/checksum.sha256")):
-        ok, message = custody.verify_dir_checksum(str(checksum.parent))
+    for directory in sorted(p for p in (ROOT / "ops").iterdir() if p.is_dir()):
+        ok, message = custody.verify_dir_checksum(str(directory))
         assert ok, message
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "empty",
+        "missing",
+        "new",
+        "modified",
+        "deleted",
+        "malformed",
+        "duplicate",
+        "symlink",
+    ],
+)
+def test_checksum_rejects_incomplete_directory(tmp_path, damage):
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text("{}")
+    checksum = Path(custody.write_dir_checksum(str(tmp_path)))
+    assert custody.verify_dir_checksum(str(tmp_path))[0]
+    if damage == "empty":
+        checksum.write_text("")
+    elif damage == "missing":
+        checksum.unlink()
+    elif damage == "new":
+        (tmp_path / "new.py").write_text("pass")
+    elif damage == "modified":
+        evidence.write_text("[]")
+    elif damage == "deleted":
+        evidence.unlink()
+    elif damage == "malformed":
+        checksum.write_text("invalid\n")
+    elif damage == "duplicate":
+        checksum.write_text(checksum.read_text() * 2)
+    else:
+        (tmp_path / "link").symlink_to(evidence)
+    assert not custody.verify_dir_checksum(str(tmp_path))[0]
+
+
+def test_checksum_reports_unreadable_files(tmp_path, monkeypatch):
+    (tmp_path / "evidence.json").write_text("{}")
+    custody.write_dir_checksum(str(tmp_path))
+
+    def fail(_):
+        raise PermissionError("unreadable")
+
+    monkeypatch.setattr(custody, "calculate_dir_fingerprint", fail)
+    assert not custody.verify_dir_checksum(str(tmp_path))[0]
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        "ffn_activation",
+        "gate_fp32",
+        "gdn_input_norm",
+        "gdn_merge_inproj",
+        "gdn_norm_gate",
+        "gdn_qkv_norm",
+        "gdn_split_ba",
+        "moe_down_residual_norm",
+        "gdn_conv_pack",
+        "gdn_split_fusion",
+        "moe_gating_routing",
+    ],
+)
+def test_nonmeasuring_benchmark_exits_explicitly(operator, tmp_path):
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", str(ROOT / "ops" / operator / "bench_l0.py")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 3, result.stdout + result.stderr

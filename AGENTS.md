@@ -12,8 +12,8 @@
    - **严禁运行时打补丁**：严禁在仓内维护任何就地修改宿主运行环境的动态补丁脚本。
 2. **默认关闭（default-off）**：
    - 所有算子与优化能力必须由环境变量明确门控，未启用时与原生行为严格一致、零开销、零副作用。
-3. **算子调优 Harness 规范**（详见 [docs/op-agent-harness-spec.md](docs/op-agent-harness-spec.md)）：
-   - 算子优化目标统一实现可插拔 `OpCase` 契约，执行短路评估、上下文修剪与单例知识库缓存，严禁硬编码特化逻辑。
+3. **算子优化 Skill**（详见 [.openbitfun/skills/operator-sol-optimizer/SKILL.md](.openbitfun/skills/operator-sol-optimizer/SKILL.md)）：
+   - Agent 直接按真实形状、布局和数值合同优化；先采集再单点修改，核对 SOL 账目与乐观上界，按基准规范交接证据，不维护自动生成循环。
 4. **元数据发现延迟导入（Lazy Import）**：
    - 插件对外暴露必须采用惰性加载机制，保证在包元数据发现和生命周期扫描期间，绝不触发重型实现模块的导入。
 5. **外部数据与知识库物理隔离**：
@@ -21,7 +21,7 @@
    - 仓内仅沉淀标准化的算子技术文档、结构化验收报告及权威索引清单。
 6. **执行环境路径隔离纪律**：
    - 严禁在可能遮蔽已安装依赖的顶层或未隔离目录中执行命令，确保执行环境与依赖包路径清晰解耦；
-   - 调优 Harness 与自动生成代码严格受限于仓库根目录内部，严禁引用或向仓外物理路径写文件。
+   - 调优临时项目与候选代码严格受限于仓库根目录内部，严禁引用或向仓外物理路径写文件。
 7. **宿主 Fork 必须定死基线分支（严禁在 main 上提 PR）**：
    - 两个宿主仓库在当前容器运行时中的基线分支定死如下，严禁以追新脱节的 `main` 为 Base：
      - `vLLM-HUST/vllm-ascend-hust`：Base 定死为 **`based/split-batch-baseline`**（锚定镜像 `74f0c0a27`，分支头 `ad82d77cb`，内容为镜像源码 + 3 个构建文件修复）；
@@ -38,6 +38,7 @@
 
 1. **四级验证阶梯**（详见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) 与 [docs/npu-benchmark-execution-guide.md](docs/npu-benchmark-execution-guide.md)）：
    - 严格遵循 `L0 纯算子微基准 -> L3 数值正确性护栏 -> L4 调用链路归因 -> 服务端到端实测` 阶梯；
+   - MOD 最终验收按 [docs/mod-acceptance-standard.md](docs/mod-acceptance-standard.md) 执行；算子服务结论不能替代冻结数据集、连续窗口与四项目标验收；执行完整性与目标达标分开记录；
    - 数值失败（L3 未过）一票否决，严格保持 default-off；
    - 负收益或在噪声范围内的结论必须如实记录，绝不夸大或伪造加速比。
 2. **可比性事实口径**：
@@ -51,7 +52,7 @@
    - 组织工作流 `Benchmark-only data (organization)` 对 PR 变更文件执行 fail-closed 审查：文本新增行命中下行任一关键词后同行出现数字即拒绝：
      `ttft`、`tpot`、`throughput`、`latency`、`tokens/s`、`实测`、`吞吐`、`延迟`；
      度量数字一律落在结构化 `evidence.json`，行文与标题避免"关键词+数字"同段；
-   - 算子交付面由 `pytest -q tests/test_ops_delivery_policy.py` 把关；修改 `ops/<operator>/` 下被 `checksum.sha256` 覆盖的文件后，必须用 `tools/op_agent/custody.py` 重新生成指纹。
+   - 算子交付面由 `pytest -q tests/test_ops_delivery_policy.py` 把关；修改 `ops/<operator>/` 下被 `checksum.sha256` 覆盖的文件后，必须用 `tools/operator_tools/custody.py` 重新生成指纹。
 5. **文档行文与仓库事实必须一致**（由 `pytest -q tests/test_doc_consistency.py` 与工作流 `Text invariants` 把关）：
    - 任何 Markdown 里写的"N 个插件 / N 个 bundle"必须等于 `pyproject.toml` 中 `vllm.general_plugins` 与 `vllm_hust.extension_bundles` 的实际条目数；改入口点必须同步改行文；
    - `ops/<operator>/` 必须齐备 `README.md`、`REPORT.md`、`bench_l0.py`、`evidence.json`；未提供独立微基准脚本时按占位脚本交付（退出码 3 表示"无测量"），不得留空或伪造脚本；
@@ -66,7 +67,7 @@
 7. **仓库边界不变量**（由 `pytest -q tests/test_pitfall_guards.py` 与工作流 `Text invariants` 把关）：
    - manifest 的宿主范围两端有界、不带 `+local`，`activation.environment` 是真实注入值；根 bundle 保持 `import_only` 且不注入环境变量；manifest `extension_version` 与包版本一致；sdist 只含运行时、元数据、README、许可与溯源；
    - 仓内不得出现原始数据后缀文件、超过 2 MB 的被追踪文件与缓存/构建垃圾；对外行文不写死宿主工作区绝对路径；
-   - `plugin_carrier` 的门控变量必须在 `src/` 里真实存在；尚未接线的算子登记进 `WIRING_EXEMPT` 并写清原因，接线后删除该条豁免。
+   - `plugin_carrier` 已公开的门控变量必须在 `src/` 里真实存在；尚未接线的算子使用 `gate_env=unexposed`，不得标记已集成。
 
 ---
 
@@ -98,20 +99,8 @@
 ruff check .
 ruff format --check .
 
-# 仓内关键契约与规范测试
-pytest -q tests/test_benchmark_standard.py tests/test_json_hygiene.py tests/test_document_custody.py tests/test_ops_delivery_policy.py
-
-# 快速运行单算子测试
-pytest -q tests/test_gate_fp32_plugin.py
-
-# 文档一致性门禁（术语表、数量陈述、算子目录契约、行文纪律；纯文本，秒级）
-pytest -q tests/test_doc_consistency.py
-
-# 交付状态门禁（索引标签 vs evidence.json，纯文本，秒级）
-pytest -q tests/test_delivery_status_consistency.py
-
-# 文档踩坑机械守卫（manifest / sdist / 原始数据 / 宿主路径 / 门控接线，纯文本，秒级）
-pytest -q tests/test_pitfall_guards.py
+# 统一离线交付检查（本地、pre-commit 与 CI 共用）
+pytest @tests/offline-checks.args
 
 # 本地提交钩子（安装一次；只跑纯文本快检，与上面两条判据一致）
 python -m pip install pre-commit pytest ruff && pre-commit install

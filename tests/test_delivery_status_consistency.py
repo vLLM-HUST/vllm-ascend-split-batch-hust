@@ -33,6 +33,7 @@ L0 微基准的加速比直接写成 `serving_status: verified_faster`，而同�
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 
@@ -43,6 +44,7 @@ SCHEMA = "operator-benchmark-evidence/v1"
 
 #: 需要被测过的服务结论标签；`measured_no_gain` 只要求测过、不要求有数字。
 MEASURED_CLAIMS = {
+    "measured_no_gain",
     "verified_faster",
     "within_noise",
     "verified_on_par_with_baseline",
@@ -62,6 +64,7 @@ ATTR_PENDING_ALLOWED = {
     "negative_or_pending",
     "superseded_by_host_fork",
     "l3_failed_default_off",
+    "historical_only",
 }
 
 #: 文档化的归属层（见 GLOSSARY.md §3.4 的 `layer` 词条）。
@@ -69,6 +72,7 @@ ALLOWED_LAYERS = {"host_fork", "plugin_carrier", "rejected_exploration"}
 
 #: 文档化的 L3 标签；空串表示该算子没有 L3 结论。
 ALLOWED_L3 = {"passed", "failed"}
+ALLOWED_SERVING = MEASURED_CLAIMS | NO_CLAIM | ATTR_PENDING_ALLOWED
 
 #: `gate_env` 是"变量名=启用值"的赋值写法（如 `VLLM_HUST_GATE_FP32=1`），
 #: 未对外暴露时写 `unexposed`。
@@ -117,6 +121,10 @@ def test_index_uses_documented_vocabulary():
             )
         if entry["default_enabled"] is not False:
             violations.append(f"{op_id}: default_enabled 必须为 false（default-off）")
+        if entry["serving_status"] not in ALLOWED_SERVING:
+            violations.append(
+                f"{op_id}: unknown serving_status={entry['serving_status']!r}"
+            )
         gate_env = entry["gate_env"]
         if gate_env != "unexposed" and not GATE_ENV_RE.match(gate_env):
             violations.append(
@@ -143,7 +151,11 @@ def test_serving_claims_are_backed_by_measurements():
             violations.append(
                 f"{op_id}: serving_status={status} 但 evidence 里 tested={tested}"
             )
-        if status in NUMERIC_CLAIMS and not isinstance(speedup, (int, float)):
+        if status in NUMERIC_CLAIMS and (
+            type(speedup) not in (int, float)
+            or not math.isfinite(speedup)
+            or speedup <= 0
+        ):
             violations.append(
                 f"{op_id}: serving_status={status} 但 evidence 里 speedup={speedup}"
             )
@@ -154,19 +166,95 @@ def test_serving_claims_are_backed_by_measurements():
     assert not violations, "服务结论缺少测量支撑: " + "; ".join(violations)
 
 
+def assert_serving_prerequisites(entry: dict, evidence: dict) -> None:
+    if entry["serving_status"] not in MEASURED_CLAIMS:
+        return
+    assert (evidence.get("l3_numerical_guard") or {}).get("passed") is True
+    attribution = evidence.get("l4_attribution") or {}
+    assert attribution.get("status") in (None, "completed")
+    assert attribution.get("verified", True) is True
+    for key in ("call_count_expected", "call_count_actual"):
+        assert type(attribution.get(key)) is int and attribution[key] > 0
+    if attribution["call_count_expected"] != attribution["call_count_actual"]:
+        assert attribution.get("verified") is True and attribution.get("note")
+    serving = evidence.get("serving_end_to_end") or {}
+    assert serving.get("tested") is True
+    assert serving.get("applicability", "current") == "current"
+
+
 def test_serving_conclusion_requires_l4_attribution():
-    """L4 还没归因时，索引不得给出服务收益结论。"""
-    violations = []
     for entry, evidence in _v1_entries():
-        attribution = evidence.get("l4_attribution") or {}
-        if attribution.get("status") != "pending_outer_loop":
-            continue
-        status = entry["serving_status"]
-        if status not in ATTR_PENDING_ALLOWED:
-            violations.append(
-                f"{entry['id']}: l4_attribution 仍 pending，serving_status={status}"
+        assert_serving_prerequisites(entry, evidence)
+        if (evidence.get("l4_attribution") or {}).get("status") == "pending_outer_loop":
+            assert entry["serving_status"] in ATTR_PENDING_ALLOWED
+        if entry["serving_status"] == "historical_only":
+            serving = evidence.get("serving_end_to_end") or {}
+            assert serving.get("tested") is True
+            assert serving.get("applicability") == "historical"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "missing_l3",
+        "unknown_l3",
+        "failed_l3",
+        "missing_l4",
+        "unknown_l4",
+        "pending_l4",
+        "zero_calls",
+        "mismatched_calls",
+        "unverified",
+        "historical",
+        "not_tested",
+    ],
+)
+def test_serving_prerequisites_reject_incomplete_evidence(change):
+    entry = {"serving_status": "verified_faster"}
+    evidence = {
+        "l3_numerical_guard": {"passed": True},
+        "l4_attribution": {"call_count_expected": 10, "call_count_actual": 10},
+        "serving_end_to_end": {"tested": True},
+    }
+    if change == "missing_l3":
+        del evidence["l3_numerical_guard"]
+    elif change in {"unknown_l3", "failed_l3"}:
+        evidence["l3_numerical_guard"]["passed"] = (
+            None if change == "unknown_l3" else False
+        )
+    elif change == "missing_l4":
+        del evidence["l4_attribution"]
+    elif change in {"unknown_l4", "pending_l4"}:
+        evidence["l4_attribution"]["status"] = (
+            "unknown" if change == "unknown_l4" else "pending_outer_loop"
+        )
+    elif change in {"zero_calls", "mismatched_calls"}:
+        evidence["l4_attribution"]["call_count_actual"] = (
+            0 if change == "zero_calls" else 9
+        )
+    elif change == "unverified":
+        evidence["l4_attribution"]["verified"] = False
+    elif change == "historical":
+        evidence["serving_end_to_end"]["applicability"] = "historical"
+    else:
+        evidence["serving_end_to_end"]["tested"] = False
+    with pytest.raises(AssertionError):
+        assert_serving_prerequisites(entry, evidence)
+
+
+def test_measured_no_gain_requires_measurement(monkeypatch):
+    monkeypatch.setattr(
+        __import__(__name__),
+        "_v1_entries",
+        lambda: [
+            (
+                {"id": "example", "serving_status": "measured_no_gain"},
+                {"serving_end_to_end": {"tested": False}},
             )
-    assert not violations, "服务结论早于 L4 归因: " + "; ".join(violations)
+        ],
+    )
+    with pytest.raises(AssertionError):
+        test_serving_claims_are_backed_by_measurements()
 
 
 def test_l3_label_matches_evidence_and_vetoes_serving_claims():

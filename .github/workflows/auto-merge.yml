@@ -5,6 +5,7 @@ on:
     types: [completed]
   workflow_run:
     workflows:
+      - "Text invariants"
       - "Extension CI"
       - "Custody policy tests"
       - "Canonical evidence custody"
@@ -64,6 +65,17 @@ jobs:
               with urllib.request.urlopen(req, timeout=30) as resp:
                   return resp.status, json.loads(resp.read().decode("utf-8"))
 
+          def pages(path, key=None):
+              rows = []
+              separator = "&" if "?" in path else "?"
+              for page in range(1, 101):
+                  _, data = api("GET", f"{path}{separator}per_page=100&page={page}")
+                  batch = data[key] if key else data
+                  rows.extend(batch)
+                  if len(batch) < 100:
+                      return rows
+              raise SystemExit("Pagination limit reached; refusing incomplete review")
+
           def is_package_ci_ignored(filename: str) -> bool:
               if filename.endswith(".md"):
                   return True
@@ -84,7 +96,7 @@ jobs:
                   raise SystemExit(f"Invalid pr_number: {input_pr!r}")
               pr_numbers = [int(input_pr)]
           else:
-              _, open_prs = api("GET", "/pulls?state=open&base=main&per_page=30")
+              open_prs = pages("/pulls?state=open&base=main")
               pr_numbers = [
                   p["number"]
                   for p in open_prs
@@ -116,7 +128,7 @@ jobs:
               head_sha = pr["head"]["sha"]
 
               # Verify every commit in the PR has committer == Raing5Days
-              _, commits = api("GET", f"/pulls/{num}/commits?per_page=100")
+              commits = pages(f"/pulls/{num}/commits")
               if not commits:
                   print(f"Skip PR #{num}: no commits returned")
                   continue
@@ -136,8 +148,7 @@ jobs:
                   continue
 
               # Verify check-runs on head_sha are all completed and green
-              _, chk_data = api("GET", f"/commits/{head_sha}/check-runs?per_page=100")
-              check_runs = chk_data.get("check_runs", [])
+              check_runs = pages(f"/commits/{head_sha}/check-runs", "check_runs")
 
               # Ignore this auto-merge job itself
               other_runs = [
@@ -170,8 +181,9 @@ jobs:
                   "Benchmark-only data (organization)",
                   "Custody policy tests",
                   "verify",
+                  "Text invariants",
               }
-              _, pr_files = api("GET", f"/pulls/{num}/files?per_page=100")
+              pr_files = pages(f"/pulls/{num}/files")
               if any(not is_package_ci_ignored(f["filename"]) for f in pr_files):
                   required_checks.update(
                       {"package (3.10)", "package (3.12)", "package (3.14)"}

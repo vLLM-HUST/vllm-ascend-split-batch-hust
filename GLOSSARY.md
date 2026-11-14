@@ -76,7 +76,7 @@
 | C2 | 扩展、门控与回退 | 能力怎么被发现、怎么被打开、出错往哪退 | [docs/architecture.md](docs/architecture.md)、[docs/support-matrix.md](docs/support-matrix.md) |
 | C3 | split-batch 核心域 | 切分规划本身的语义 | [docs/architecture.md](docs/architecture.md)、[docs/HOST_CONTRACT.md](docs/HOST_CONTRACT.md) |
 | C4 | 算子交付与评测 | 一个算子怎么算交付完、结论怎么才成立 | [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) |
-| C5 | 调优 Harness（内外环） | 自动调优与整网评测怎么跑 | [docs/op-agent-harness-spec.md](docs/op-agent-harness-spec.md) |
+| C5 | 算子优化与服务验证 | SOL、单点优化及证据交接 | [.openbitfun/skills/operator-sol-optimizer/SKILL.md](.openbitfun/skills/operator-sol-optimizer/SKILL.md) |
 | C6 | 证据保管与溯源 | 结论凭什么可信、凭什么可追溯 | [docs/EVIDENCE.md](docs/EVIDENCE.md)、[docs/PROVENANCE.md](docs/PROVENANCE.md) |
 
 跨上下文借义是禁止的：callsite 只能按 C4 的定义用，`import_only` 只能按 C2 的定义用。
@@ -139,17 +139,21 @@
 
 | 术语 | 定义（判据） | 锚点 | 禁用或易混写法 |
 |---|---|---|---|
+| MOD | 在固定基础引擎上以明确开关集合启停的待测能力或组合；身份包含实现版本与依赖，发现入口不等于启用。 | `docs/mod-acceptance-standard.md`；`MOD_METADATA.json` | 不要等同于单个插件入口或全部算子目录 |
+| MOD 最终验收 | 对冻结 MOD 组合分别检查测试执行完整性和各项目标，算子服务收益不能替代此验收。 | `docs/mod-acceptance/evidence.json`；`docs/mod-acceptance-standard.md` | 不要把算子验收称为 MOD 达标 |
+| B0 / B1 | MOD 配对实验的关闭组与启用组；基础引擎及其他条件相同，网站参考组合不自动成为本仓身份。 | `docs/mod-acceptance-standard.md` | 不要固定指某个历史 Engine |
+| 同工况参考效率（η_ref） | 完成同工况必要工作的独立参考时间与被测时间之比；设备忙碌度和相对基线速率不是此指标。 | `docs/mod-acceptance-standard.md` | 不要与单算子 MFU 混用 |
 | 算子（operator） | 一次有明确 callsite 的等价替换或融合优化，以 `ops/<operator>/` 为一个交付单元。 | `ops/`；`DELIVERY_INDEX.json` 的 `operators[]` | 不要用"优化点"泛指 |
 | callsite | 算子被真实调用处的宿主位置（文件、方法、调用点）。可达性只认 callsite 证据。 | `ops/<operator>/evidence.json` 的 `callsite` | 不要与"接缝"互换（见 §4） |
 | 算子交付目录 | 一个算子的自洽目录：`README.md`、`REPORT.md`、`evidence.json` 为必备，`bench_l0.py` 为微基准脚本，另有 `checksum.sha256` 指纹。 | `ops/README.md`；`tests/test_ops_delivery_policy.py` | 不要只写"三件套"而漏掉指纹文件 |
 | layer | 算子的归属层：`host_fork`（宿主侧）、`plugin_carrier`（插件侧）、`rejected_exploration`（已否定的探索）。工具新登记时可能留下占位值 `unclassified`，合入前必须改成上面三种之一（门禁会拦）。 | `DELIVERY_INDEX.json` 的 `layer` | 不要把 `unclassified` 当成第四种层 |
-| status / serving_status | 索引里的交付状态与服务结论标签（如 `default_off_negative_speedup`、`verified_faster`、`within_noise`）。标签本身是术语，不得改写。 | `DELIVERY_INDEX.json` | 不要用"通过/不通过"替代标签 |
+| status / serving_status | 索引里的交付状态与服务结论标签（如 `default_off_negative_speedup`、`verified_faster`、`within_noise`）。标签本身是术语，不得改写；`historical_only` 表示已有历史测量但不能作为当前实现结论，`unexposed` 表示当前没有公开接入。 | `DELIVERY_INDEX.json` | 不要用"通过/不通过"替代标签 |
 | 形状事实（shape facts） | 张量维度、批量、输入输出规模、执行相位、专家分布等可复核的执行条件。 | `ops/<operator>/evidence.json` 的 `shape_facts`；`docs/operator-benchmark-standard.md` §1 | 不要用"典型形状" |
 | 权重标签 | 模型名 + 精度格式的组合，是可比性事实的另一半。 | `ops/<operator>/evidence.json` 的 `environment.model` / `dtype` | 不要只写模型族名 |
 | 单变量上下文 | 两次对比除被测项外全部固定：种子、采样、图模式、并发、负载。 | `docs/operator-benchmark-standard.md` §1.2 | 不要写"条件差不多" |
 | 数值护栏 | 与原生实现的容差比对环节；失败即熔断。 | `ops/<operator>/evidence.json` 的 `l3_numerical_guard` | 不要写成"精度检查"以外的自造名 |
 | 一票否决 | 数值不一致时立即关闭能力并保持 default-off，不再谈性能。 | `AGENTS.md` §2.1；`docs/operator-benchmark-standard.md` §2 | — |
-| all-kernel 分母 | 模型整体算子耗时，用来判断单算子净省时能否被服务观测到。 | `tools/op_agent/serving_loop.py` 的 `parse-l4` | 不要用"总耗时"含糊表述 |
+| all-kernel 分母 | 模型整体算子耗时，用来判断单算子净省时能否被服务观测到。 | `tools/operator_tools/serving_loop.py` 的 `parse-l4` | 不要用"总耗时"含糊表述 |
 | within noise | 组间差异落在组内波动之内。只能这样写，不得改写成收益。 | `DELIVERY_INDEX.json` 的 `serving_status` | 不要写"略有提升" |
 | 负结果 | 优化后更慢或无效的结论。必须保留并入索引，不得删除。 | `DELIVERY_INDEX.json` 的 `status` | 不要写"待复测"含糊过去 |
 | cohort | 一组锁定的实验条件（宿主线、模型、请求形态、图配置、精度）。数字只在同一 cohort 内可比。 | `docs/cohort-and-ownership.md` §2 | 不要用"环境"替代 cohort |
@@ -157,24 +161,23 @@
 | 跨域外推（禁止） | 把某 cohort 的结论搬到另一 cohort。历史 Qwen2.5 / 0.25 与当前基准互不推导。 | `docs/cohort-and-ownership.md` §3 | — |
 | 工作项代号（`D0`/`D4`/`W1R`/`F2`/`W3F2`） | 历史工作单编号，只作检索标签，单独出现不构成术语。 | 例：`VLLM_HUST_D4_CONV_PACK` 中的 `D4` | 每次出现必须同时写出物理实体（环境变量、路径或分支） |
 
-### 3.5 C5 调优 Harness（内外环）
+### 3.5 C5 算子优化与服务验证
 
 | 术语 | 定义（判据） | 锚点 | 禁用或易混写法 |
 |---|---|---|---|
-| 内环（inner loop） | 单卡秒级的单算子闭环：数值校验、零重编译门禁、分桶计时。 | `tools/op_agent/optimizer_loop.py`；`tools/op_agent/evaluator.py` | 不要写成"单算子评测" |
-| 外环（outer loop） | 双卡服务闭环：整网对拍、调用归因、负载 A/B。 | `tools/op_agent/serving_loop.py`；`workloads/run_workload.sh` | 不要写成"端到端测试" |
-| `OpCase` | 算子优化目标的可插拔契约，实现后注册进 `CASE_REGISTRY`。 | `tools/op_agent/cases/base.py` | 不要写成"用例" |
-| 形状桶（`shape_buckets`） | 必须覆盖的固定形状集合，对应图捕获档位。 | `OpCase.shape_buckets` | — |
-| 动态形状探针（`dynamic_shape_probes`） | 没参与过编译的非常规行数，用来抓"把行数固化进编译期"的实现。 | `OpCase.dynamic_shape_probes` | — |
-| `recompile_budget_ms` | 动态探针单次执行的耗时上限，超出即判为发生重编译。 | `tools/op_agent/evaluator.py` | 不要写成"超时时间" |
-| 短路评估 | 前一阶段不通过立即返回，不进入下一阶段。 | `tools/op_agent/evaluator.py` | — |
-| 知识库缓存（KB） | 单例缓存的历史结论，避免同一形状重复评估。 | `tools/op_agent/kb.py` | 不要写成"数据库" |
-| campaign | 多算子批次流程：`discover` 产出候选与批次审核单，勾选 `approved` 后再 `run`。 | `tools/op_agent/campaign.py` | 不要写成"批量测试" |
-| 泳道图 | 由 timeline 折叠出的高层级子图片段可视化，供人工审阅。 | `tools/op_agent/timeline_insight.py` | — |
-| SNR 门 | 判断算子净省时能否超过服务波动的预判门槛；未过即归档为 `within noise`。 | `tools/op_agent/serving_loop.py` 的 `evaluate_e2e_snr_gate` | 不要写成"收益门槛" |
-| 负载（workload） | `random`（定长受控）、`long-prefix`（长上下文预填充）、`sharegpt`（真实长尾）。主测与压力负载按算子类型配对。 | `tools/op_agent/workloads.py`；`workloads/README.md` | 不要写"数据集"，`sharegpt` 仅指负载名 |
-| `primary_workload` / `stress_workload` | 配对规则：主测对比负载与动态形状压力负载，缺一即证据不完整。 | `workloads/README.md` | — |
-| 载体状态快照（`carriers.env`） | 一次起服窗口里被核验的开关与入口点状态集合，属记录轴而非门禁；唯一来源是与 serve 日志同名的 `<log>.env.json`。 | `tools/bench-ladder.sh` 的 `carrier_write_serve_env`、`carrier_summary` | 不要与 C2 的"插件载体"混称 |
+| 单算子优化 | Agent 按真实输入合同进行数值核对、采集、单点修改与重复计时。 | `.openbitfun/skills/operator-sol-optimizer/SKILL.md` | 不要求框架接口 |
+| 外环（outer loop） | 整网对拍、逐卡调用归因与负载 A/B 的服务验证。 | `tools/operator_tools/serving_loop.py`；`workloads/run_workload.sh` | 不等同 MOD 最终验收 |
+| SOL 达成率（SOL%） | 匹配资源能力下的必要工作时间下界与同范围设备时间之比；能力与缓存假设必须可核查。 | `.openbitfun/skills/operator-sol-optimizer/scripts/sol.py` | 不等同 MFU 或 MOD 参考效率 |
+| 资源时间下界 | 必要工作量除以匹配的资源能力；跨资源取最大值只给出充分重叠假设下的乐观界。 | `.openbitfun/skills/operator-sol-optimizer/SKILL.md` | 不把可消除中间流量当作必要工作 |
+| 优化空间上界 | 由有效下界推得的最多可省比例与最大倍率，不代表一定可实现。 | `.openbitfun/skills/operator-sol-optimizer/scripts/sol.py` | 不称预期收益 |
+| 形状桶 | 必须覆盖的固定形状集合，与实际执行相位和图档位对应。 | `.openbitfun/skills/operator-sol-optimizer/SKILL.md` | 不硬编码生产尺寸 |
+| 动态形状探针 | 未参与预热编译的尺寸；编译缓存或日志用于核查是否重编译。 | `.openbitfun/skills/operator-sol-optimizer/SKILL.md` | 单次时间不能证明重编译 |
+| 短路评估 | 数值检查失败后不接受该候选的性能结论。 | `.openbitfun/skills/operator-sol-optimizer/SKILL.md` | — |
+| 泳道图 | 由 timeline 折叠出的高层级子图片段可视化，供人工审阅。 | `tools/operator_tools/timeline_insight.py` | 不能自动推定计算语义 |
+| SNR 预筛 | 用算子份额估算是否值得投入服务实验，不构成服务收益判定。 | `tools/operator_tools/serving_loop.py` | 全核份额不等同墙钟关键路径 |
+| 负载（workload） | 主测、动态压力和跨相位诊断输入，按算子生效条件配对。 | `tools/operator_tools/workloads.py`；`workloads/README.md` | 不等同 MOD 冻结任务 |
+| `primary_workload` / `stress_workload` | 主测对比负载与动态形状压力负载，缺一即证据不完整。 | `workloads/README.md` | — |
+| 载体状态快照（`carriers.env`） | 一次起服窗口里被核验的开关与入口点状态集合，唯一来源是与 serve 日志同名的环境记录。 | `tools/bench-ladder.sh` | 不与 C2 的插件载体混称 |
 
 ### 3.6 C6 证据保管与溯源
 
@@ -184,9 +187,9 @@
 | `operator-benchmark-evidence/v1` | `evidence.json` 的 schema 标识；改字段等于改 schema。 | `docs/operator-benchmark-standard.md` §4 | — |
 | `DELIVERY_INDEX.json` | 全仓算子交付的权威事实清单；新增或改状态必须登记。 | 根目录；`tests/test_json_hygiene.py` | 不要写成"清单文件" |
 | 证据指纹（`checksum.sha256`） | 目录内文件的 sha256 清单，用于发现证据被静默改写。 | `ops/*/checksum.sha256` | 不要写成"校验和"泛指 |
-| custody | 生成与校验指纹的工具契约。 | `tools/op_agent/custody.py` | — |
+| custody | 生成与校验指纹的工具契约。 | `tools/operator_tools/custody.py` | — |
 | provenance（溯源） | 从历史实现或提交提取代码时的原貌保存：版权头、commit、只读。 | `provenance/`；`docs/PROVENANCE.md` | 不要写成"来源说明" |
-| CPU 门禁 | 不接 NPU 也能跑的测试集；`host_tree` 标记的用例在缺宿主树时失败而不是跳过。 | `pyproject.toml` 的 `markers`；`pytest -q -m "not host_tree"` | 不要写成"离线测试" |
+| CPU 门禁 | 不接 NPU 也能跑的测试集；纯逻辑不依赖设备包，可选张量测试缺包时跳过；`host_tree` 排除的宿主源码与入口集成在显式选择后缺依赖即失败。 | `docs/operator-benchmark-standard.md` §6；`pyproject.toml` 的 `markers` | 不要写成"离线测试" |
 | `MOD_METADATA.json` | 仓库身份、责任人、default-off、回滚与证据限定。 | 根目录 | — |
 
 ---
@@ -236,5 +239,6 @@
 | 日期 | 变更 | 依据 |
 |---|---|---|
 | 2026-11-14 | 建立本文件：6 个限界上下文、术语表、消歧表、墓碑与新增流程；`AGENTS.md` 增加指向本文的指针 | 全仓文档与代码锚点普查（`docs/`、`ops/`、`src/`、`tools/`、`DELIVERY_INDEX.json`） |
+| 2026-11-14 | 新增 MOD、MOD 最终验收、配对组与同工况参考效率 | `docs/mod-acceptance-standard.md` |
 
 后续每次增删词条都要在这里加一行，写明改了什么与依据出处；只在术语层变化时记，纯错字不入表。

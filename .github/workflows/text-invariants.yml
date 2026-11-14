@@ -10,27 +10,7 @@ name: Text invariants
 
 on:
   push:
-    paths:
-      - '*.md'
-      - '**/*.md'
-      - 'pyproject.toml'
-      - 'DELIVERY_INDEX.json'
-      - 'src/**'
-      - 'ops/**'
-      - 'tests/**'
-      - '.pre-commit-config.yaml'
-      - '.github/workflows/text-invariants.yml'
   pull_request:
-    paths:
-      - '*.md'
-      - '**/*.md'
-      - 'pyproject.toml'
-      - 'DELIVERY_INDEX.json'
-      - 'src/**'
-      - 'ops/**'
-      - 'tests/**'
-      - '.pre-commit-config.yaml'
-      - '.github/workflows/text-invariants.yml'
   workflow_dispatch:
 
 permissions:
@@ -46,19 +26,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install pytest ruff
-      - name: lint the guard tests themselves
-        run: |
-          ruff check tests/test_doc_consistency.py \
-            tests/test_delivery_status_consistency.py \
-            tests/test_pitfall_guards.py
-          ruff format --check tests/test_doc_consistency.py \
-            tests/test_delivery_status_consistency.py \
-            tests/test_pitfall_guards.py
-      - name: 文档行文与仓库事实一致
-        run: pytest -q tests/test_doc_consistency.py
-      - name: 索引状态标签必须被证据支撑
-        run: pytest -q tests/test_delivery_status_consistency.py
-      - name: 算子交付面结构与指纹
-        run: pytest -q tests/test_ops_delivery_policy.py tests/test_json_hygiene.py
-      - name: 文档踩坑机械守卫
-        run: pytest -q tests/test_pitfall_guards.py
+      - run: ruff check .
+      - run: ruff format --check .
+      - name: 离线交付检查
+        run: env -u PYTHONPATH pytest @tests/offline-checks.args

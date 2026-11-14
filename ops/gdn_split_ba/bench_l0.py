@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """L0 microbenchmark for gdn_split_ba (vllm_ascend/ops/gdn.py:210)."""
 
+if __name__ == "__main__":
+    print("No standalone measurement provided; callable implementation only.")
+    raise SystemExit(3)
+
+
 import torch
 import triton
 import triton.language as tl
@@ -42,7 +47,3 @@ def optimized_op(ba: torch.Tensor):
         ba, b, a, M, ba.stride(0), 16, 16, BLOCK_M=BLOCK_M, num_warps=1
     )
     return b, a
-
-
-if __name__ == "__main__":
-    print("Benchmarking gdn_split_ba...")

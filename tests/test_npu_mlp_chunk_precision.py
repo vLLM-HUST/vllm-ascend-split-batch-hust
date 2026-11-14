@@ -86,13 +86,22 @@ e2e（不断言引擎启动、吞吐、端到端时延）。
 
 from __future__ import annotations
 
+import importlib.util
 import math
 import os
 
 import pytest
-from _device_stack import F, torch, torch_npu  # noqa: F401
 
-from vllm_ascend_split_batch.mlp_chunk_plugin import (
+# Only package absence skips collection; a broken installed stack must fail.
+for _package in ("torch", "torch_npu"):
+    if importlib.util.find_spec(_package) is None:
+        pytest.skip(f"NPU precision tests need {_package}", allow_module_level=True)
+
+import torch  # noqa: E402
+import torch.nn.functional as F  # noqa: E402
+import torch_npu  # noqa: E402
+
+from vllm_ascend_split_batch.mlp_chunk_plugin import (  # noqa: E402
     _ACT_WHITELIST,
     chunked_mlp_forward,
 )

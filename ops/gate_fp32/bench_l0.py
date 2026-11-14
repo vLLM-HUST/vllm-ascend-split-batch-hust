@@ -3,6 +3,11 @@
 
 from __future__ import annotations
 
+if __name__ == "__main__":
+    print("No standalone measurement provided; callable implementation only.")
+    raise SystemExit(3)
+
+
 import torch
 
 

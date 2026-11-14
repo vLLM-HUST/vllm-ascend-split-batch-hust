@@ -39,7 +39,7 @@
 | sdist 只含运行时、元数据、README、许可与溯源 | 同上 |
 | 仓内不出现原始数据后缀文件、超大文件、缓存垃圾 | 同上 |
 | 对外行文不写死宿主工作区绝对路径 | 同上 |
-| `plugin_carrier` 的门控变量在 `src/` 真实存在（未接线的登记在 `WIRING_EXEMPT`） | 同上 |
+| `plugin_carrier` 已公开的门控变量在 `src/` 真实存在；未接线的写 `unexposed`，不标记已集成 | 同上 |
 | 索引标签必须被证据支撑（服务结论、L3、L4、取代指针、方向） | `tests/test_delivery_status_consistency.py` |
 | 算子目录必备文件、证据指纹未被改写、索引覆盖全部算子目录 | `tests/test_ops_delivery_policy.py`、`tests/test_json_hygiene.py` |
 | 文档数量陈述、术语锚点真实性、行文关键词与禁语 | `tests/test_doc_consistency.py` |

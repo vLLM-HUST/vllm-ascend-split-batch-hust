@@ -41,12 +41,13 @@ import types
 from pathlib import Path
 
 import pytest
-from _device_stack import vllm_ascend  # noqa: F401  -- host stack, or skip
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 from vllm_ascend_split_batch import rope_fix_plugin as plugin
-
-# 探针链到 /vllm-workspace 运行树(子进程 import 链), CPU CI 收敛 deselect。
-pytestmark = pytest.mark.host_tree
 
 ENV = plugin.ENV_ENABLE
 
@@ -222,6 +223,7 @@ class _HostTree:
             return types.SimpleNamespace(speculative_config=None)
 
         fake_tree = {
+            "torch": {"Tensor": _FakeTensor, "dtype": object},
             "vllm": {},
             "vllm.config": {"get_current_vllm_config": get_current_vllm_config},
             "vllm.model_executor": {},
@@ -746,23 +748,21 @@ def test_llama3_delegate_falls_back_when_the_base_key_is_not_a_class(
 
 
 # --------------------------------------------------- live host integration
+@pytest.mark.host_tree
 def test_official_registration_path_reaches_the_overrides(monkeypatch) -> None:
     """The wrapper must catch the *real* ``register_ascend_customop`` call.
 
     ``vllm_ascend/worker/worker.py`` binds the function at import time
     (``from vllm_ascend.utils import register_ascend_customop``), so this drives
     the live host module: fresh registry, fork guard reset, real rope classes.
-    Skipped when the vllm-ascend stack is not importable.
+    Missing or broken host dependencies fail this explicit integration check.
     """
     import importlib
     from types import SimpleNamespace
 
     importlib.import_module("vllm_ascend.ops")
-    host_utils = pytest.importorskip(
-        "vllm_ascend.utils",
-        reason="the live registration path needs the vllm-ascend stack",
-    )
-    custom_op = pytest.importorskip("vllm.model_executor.custom_op")
+    host_utils = importlib.import_module("vllm_ascend.utils")
+    custom_op = importlib.import_module("vllm.model_executor.custom_op")
     monkeypatch.setenv(ENV, "1")
 
     saved_registry = dict(custom_op.op_registry_oot)
@@ -809,8 +809,6 @@ def test_descriptor_declares_both_entry_point_groups() -> None:
     entry point only shows up after the editable install is refreshed; this test
     pins the declaration itself, which is what a refresh consumes.
     """
-    import tomllib
-
     repo_root = Path(plugin.__file__).resolve().parents[2]
     groups = tomllib.loads((repo_root / "pyproject.toml").read_text())["project"][
         "entry-points"

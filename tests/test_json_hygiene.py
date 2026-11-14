@@ -38,6 +38,7 @@ def test_all_repository_jsons_belong_to_governed_categories():
         "tools/workbench-archive.json",
         "host-proposals/",
         "docs/evidence/",
+        "docs/mod-acceptance/evidence.json",
         "bench/results/",
     )
     for p in ROOT.rglob("*.json"):

@@ -53,7 +53,7 @@ jobs:
       # see vllm-hust-website plugins.html), and the `test` extra pins ==0.2.0.dev0,
       # so install the git version first or `.[test]` cannot resolve. Same order
       # as .github/workflows/ci.yml.
-      - run: python -m pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extension-manager.git@main"
+      - run: python -m pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extension-manager.git@6a26ae88acc14591817df9069b7c884dd1a4f86d"
       # Gate: the same checks CI runs, so a red tree never reaches the index.
       - run: python -m pip install -e ".[test]"
       - run: ruff check .

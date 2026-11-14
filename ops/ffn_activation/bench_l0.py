@@ -4,6 +4,11 @@
 Callsite: vllm_ascend/ops/fused_moe/fused_moe.py:ffn_activation.
 """
 
+if __name__ == "__main__":
+    print("No standalone measurement provided; callable implementation only.")
+    raise SystemExit(3)
+
+
 import torch
 import triton
 import triton.language as tl
@@ -55,7 +60,3 @@ def optimized_op(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
         BLOCK_SIZE=BLOCK_SIZE,
     )
     return out
-
-
-if __name__ == "__main__":
-    print("Benchmarking ffn_activation...")

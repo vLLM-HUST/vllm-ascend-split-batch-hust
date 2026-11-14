@@ -6,20 +6,27 @@ from types import SimpleNamespace
 
 import pytest
 
-torch = pytest.importorskip("torch")
-
-from vllm_ascend_split_batch.gdn_qkv_norm_diagnostic import (  # noqa: E402
+from vllm_ascend_split_batch.gdn_qkv_norm_diagnostic import (
     NormDiagnostic,
     attention_class_for_model,
     tensor_difference,
 )
 
 
+@pytest.fixture
+def torch():
+    return pytest.importorskip("torch", reason="CPU tensor tests need torch")
+
+
 def values():
+    import torch
+
     return tuple(torch.zeros(1, 16, h, 128, dtype=torch.bfloat16) for h in (8, 8, 16))
 
 
 def observe(probe, name, different=False):
+    import torch
+
     probe.current_layer = SimpleNamespace(prefix=name)
     actual, expected = values(), values()
     if different:
@@ -29,7 +36,7 @@ def observe(probe, name, different=False):
     return actual
 
 
-def test_difference_preserves_nonfinite_and_signed_zero():
+def test_difference_preserves_nonfinite_and_signed_zero(torch):
     a = torch.tensor([0.0, float("nan"), float("inf")], dtype=torch.bfloat16)
     b = a.clone()
     b[0] = -0.0
@@ -40,7 +47,7 @@ def test_difference_preserves_nonfinite_and_signed_zero():
     assert tensor_difference(a, b)["first_index"] == [2]
 
 
-def test_first_active_layer_and_immutable_capture(tmp_path):
+def test_first_active_layer_and_immutable_capture(torch, tmp_path):
     probe = NormDiagnostic(tmp_path, rank=1)
     observe(probe, "stale", different=True)
     probe.begin_step()
@@ -68,7 +75,7 @@ def test_first_active_layer_and_immutable_capture(tmp_path):
 @pytest.mark.parametrize(
     "covered,status", [(True, "NO_DIVERGENCE"), (False, "NO_COVERAGE")]
 )
-def test_bounded_no_divergence_is_not_acceptance(tmp_path, covered, status):
+def test_bounded_no_divergence_is_not_acceptance(torch, tmp_path, covered, status):
     probe = NormDiagnostic(tmp_path, rank=0, max_steps=1)
     if covered:
         observe(probe, "layer0")
@@ -79,7 +86,7 @@ def test_bounded_no_divergence_is_not_acceptance(tmp_path, covered, status):
     assert not (tmp_path / "rank0-first.pt").exists()
 
 
-def test_install_returns_original_results_and_restores_context(tmp_path):
+def test_install_returns_original_results_and_restores_context(torch, tmp_path):
     result = values()
     api = SimpleNamespace(unpack_norm=lambda x: result)
 
@@ -105,7 +112,7 @@ def test_install_returns_original_results_and_restores_context(tmp_path):
     assert probe.current_layer is None
 
 
-def test_invalid_budget_and_missing_context(tmp_path):
+def test_invalid_budget_and_missing_context(torch, tmp_path):
     with pytest.raises(ValueError):
         NormDiagnostic(tmp_path, 0, max_steps=0)
     probe = NormDiagnostic(tmp_path, 0)
@@ -113,7 +120,7 @@ def test_invalid_budget_and_missing_context(tmp_path):
         probe.observe(torch.zeros(1), values(), values())
 
 
-def test_rebound_host_class_not_definition_class(tmp_path):
+def test_rebound_host_class_not_definition_class(torch, tmp_path):
     api = SimpleNamespace(unpack_norm=lambda x: values())
 
     class Carrier:
@@ -153,7 +160,7 @@ def test_model_binding_fails_closed(ambiguous):
         attention_class_for_model(SimpleNamespace(modules=lambda: iter(layers)), core)
 
 
-def test_v_is_bitwise_and_metadata_is_embedded(tmp_path):
+def test_v_is_bitwise_and_metadata_is_embedded(torch, tmp_path):
     scope = {"model": "test-model", "precision": "bf16"}
     probe = NormDiagnostic(tmp_path, 0, metadata=scope)
     probe.current_layer = SimpleNamespace(prefix="layer")
@@ -168,7 +175,7 @@ def test_v_is_bitwise_and_metadata_is_embedded(tmp_path):
     assert payload["metadata"]["model_scope"] == scope
 
 
-def test_coverage_survives_inactive_last_step(tmp_path):
+def test_coverage_survives_inactive_last_step(torch, tmp_path):
     probe = NormDiagnostic(tmp_path, 0, max_steps=2)
     observe(probe, "layer")
     probe.end_step({})
@@ -180,7 +187,7 @@ def test_coverage_survives_inactive_last_step(tmp_path):
     assert report["seen_layers"] == ["layer"]
 
 
-def test_graph_warmup_inference_buffers_reset_outside_inference(tmp_path):
+def test_graph_warmup_inference_buffers_reset_outside_inference(torch, tmp_path):
     probe = NormDiagnostic(tmp_path, 0)
     with torch.inference_mode():
         observe(probe, "layer", different=True)

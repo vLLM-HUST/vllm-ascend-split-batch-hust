@@ -47,9 +47,14 @@ import textwrap
 import types
 
 import pytest
-from _device_stack import torch  # noqa: F401  -- torch present, or skip
 
 from vllm_ascend_split_batch import zerocost_wiring as carrier
+
+
+@pytest.fixture
+def torch():
+    return pytest.importorskip("torch", reason="CPU tensor tests need torch")
+
 
 HOST_METHODS = (
     ("AscendAttentionBackendImpl", "forward"),
@@ -209,7 +214,7 @@ def test_enable_tokens_are_exact(monkeypatch):
 # ------------------------------------------------------- identity predicate
 
 
-def test_identity_copy_predicate():
+def test_identity_copy_predicate(torch):
     output = torch.zeros(4, 2, 3)
     other = torch.ones(4, 2, 3)
     ident = carrier._identity_copy
@@ -231,7 +236,7 @@ def test_identity_copy_predicate():
 # ------------------------------------------------------- the AST rewrite
 
 
-def test_inject_fi_out_rewrites_the_destination():
+def test_inject_fi_out_rewrites_the_destination(torch):
     module = _synthetic_module()
     carrier._rewrite_method(
         module,
@@ -250,7 +255,7 @@ def test_inject_fi_out_rewrites_the_destination():
     assert received["_zc_fi_out"].shape == (2, 2, 2)
 
 
-def test_guard_skips_only_identity_copies():
+def test_guard_skips_only_identity_copies(torch):
     module = _synthetic_module()
     carrier._rewrite_method(
         module, module.FakeImpl, "forward", carrier._guard_tail_copy
@@ -318,7 +323,7 @@ def test_host_func_traverses_three_wrapper_layers():
     assert carrier._host_func(func, host.__file__) is host_fn
 
 
-def test_rewrite_through_stacked_wrappers_engages_fi_out():
+def test_rewrite_through_stacked_wrappers_engages_fi_out(torch):
     """End-to-end: the double-wrapped class attribute still gets ① installed.
 
     ``_zc_fi_out`` must reach the adaptor and the (now-identity) tail copy must
@@ -403,10 +408,11 @@ def test_rewrite_source_is_the_host_body_plus_the_guard():
 def _host_root() -> str:
     override = os.getenv("VLLM_ASCEND_HUST_ROOT")
     if override:
-        return override
+        package = os.path.join(override, "vllm_ascend")
+        return package if os.path.isdir(package) else override
     spec = importlib.util.find_spec("vllm_ascend")
     if spec is None or not spec.origin:
-        pytest.skip("vllm_ascend is not importable")
+        pytest.fail("host source not found; set VLLM_ASCEND_HUST_ROOT", pytrace=False)
     return os.path.dirname(spec.origin)
 
 
@@ -436,12 +442,13 @@ def _count_tail_copies(fn: ast.FunctionDef) -> int:
     )
 
 
+@pytest.mark.host_tree
 def test_attention_anchors_still_present():
     """host drift guard for ①: re-audit HOST_CONTRACT if this fails."""
     root = _host_root()
     path = os.path.join(root, "attention", "attention_v1.py")
     if not os.path.exists(path):
-        pytest.skip(f"{path} not present")
+        pytest.fail(f"host source not present: {path}", pytrace=False)
     forward = _fn_source(path, carrier.ATTENTION_CLASS, carrier.METHOD_FORWARD)
     assert _count_tail_copies(forward) == 1, "anchor drifted → re-audit HOST_CONTRACT"
     fia = _fn_source(path, carrier.ATTENTION_CLASS, carrier.METHOD_FIA)
@@ -458,12 +465,13 @@ def test_attention_anchors_still_present():
     assert len(adaptor_calls) == 1, "anchor drifted → re-audit HOST_CONTRACT"
 
 
+@pytest.mark.host_tree
 def test_rope_anchors_still_present():
     """host drift guard for ②: re-audit HOST_CONTRACT if this fails."""
     root = _host_root()
     path = os.path.join(root, "ops", "rotary_embedding.py")
     if not os.path.exists(path):
-        pytest.skip(f"{path} not present")
+        pytest.fail(f"host source not present: {path}", pytrace=False)
     with open(path, encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
     names = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
@@ -479,6 +487,7 @@ def test_rope_anchors_still_present():
     assert "_cos_slice = _cos[:, :num_tokens]" in flat
 
 
+@pytest.mark.host_tree
 def test_rope_readers_are_the_known_pair():
     """② is only sound because exactly these two modules read the buffers."""
     root = _host_root()
@@ -525,7 +534,7 @@ def _read_json(path) -> dict:
         return json.load(handle)
 
 
-def test_snapshot_file_name_shape_and_env_gate(tmp_path, monkeypatch):
+def test_snapshot_file_name_shape_and_env_gate(torch, tmp_path, monkeypatch):
     base = str(tmp_path / "zc.json")
     monkeypatch.delenv(carrier.ENV_STATS_FILE, raising=False)
     assert carrier.snapshot() is None, "unset env must not write anything"
@@ -571,7 +580,7 @@ def test_state_histogram_tallies_by_state_and_survives_odd_input():
     assert carrier.state_histogram() == {"DecodeOnly": 2, "none": 1}
 
 
-def test_exit_dump_carries_the_same_payload(tmp_path, monkeypatch):
+def test_exit_dump_carries_the_same_payload(torch, tmp_path, monkeypatch):
     """The exit dump and the snapshots must be comparable by subtraction."""
     base = str(tmp_path / "zc_exit.json")
     monkeypatch.setenv(carrier.ENV_STATS_FILE, base)
@@ -587,7 +596,7 @@ def test_exit_dump_carries_the_same_payload(tmp_path, monkeypatch):
     assert f"zc_exit.json.{os.getpid()}.json" in os.listdir(tmp_path)
 
 
-def test_token_histogram_ignores_non_tensors():
+def test_token_histogram_ignores_non_tensors(torch):
     """A diagnostics hook must never break the host call it measures."""
     carrier._tally_tokens(object())  # no .shape
     carrier._tally_tokens(None)

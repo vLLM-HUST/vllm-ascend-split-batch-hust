@@ -100,7 +100,7 @@ python -m venv <新的仓外venv>
 
 ## 7. CPU CI 与设备验证
 
-CPU CI 使用 Python 3.10/3.12/3.14：`ruff check .`、`ruff format --check .`、`pytest -q -m "not host_tree"`、build 和 extension inspect。没有 torch/NPU/宿主树的环境应明确 skip 设备测试，显式 deselect `host_tree`；这不是 NPU 验收。
+CPU CI 使用 Python 3.10/3.12/3.14：`ruff check .`、`ruff format --check .`、`pytest -q -m "not host_tree"`、build 和 extension inspect。依赖拆分、跳过条件和补测记录按[算子基准规范](operator-benchmark-standard.md) §6 执行；这不是 NPU 验收。
 
 干净环境须能安装 `.[test]` 并运行核心回归，不得依赖仓外工作台、个人脚本或台账数据库。工作台自身的集成回归不属于插件包验收。
 

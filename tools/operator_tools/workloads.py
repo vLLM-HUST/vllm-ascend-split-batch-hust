@@ -102,18 +102,18 @@ WORKLOAD_CATALOG: dict[str, WorkloadProfile] = {
         workload_id="long-prefix",
         dataset_kind="builtin_synthetic_long_context",
         summary=(
-            "Long-context and shared-prefix prefill-dominant workload with large "
+            "Long-context synthetic prefill-dominant workload with large "
             "per-step token counts."
         ),
-        prompt_len_profile="long input (2048 to 8192 tokens, optional shared prefix)",
+        prompt_len_profile=(
+            "fixed long input (default 2048 tokens); no shared-prefix guarantee"
+        ),
         output_len_profile="short generation (128 tokens)",
         batch_token_behavior=(
             "Frequent large-T chunked prefill steps (T in 512..2048) dominated by "
             "matrix multiplication and wide tensor split/cat/rearrange copies."
         ),
-        bottleneck_focus=(
-            "Prefill projection merge, wide tensor unpack/rearrange, and KV reuse"
-        ),
+        bottleneck_focus=("Prefill projection merge and wide tensor unpack/rearrange"),
         default_num_prompts=128,
         default_concurrency=32,
         ignore_eos=True,
@@ -135,12 +135,16 @@ def resolve_local_dataset_path(
     workload_id: str, env_override: str | None = None
 ) -> str | None:
     """Locate an offline dataset file on the container filesystem if available."""
-    if env_override and os.path.isfile(env_override):
+    if env_override:
+        if not os.path.isfile(env_override):
+            raise FileNotFoundError(env_override)
         return env_override
 
     env_key = f"VLLM_HUST_DATASET_{workload_id.upper().replace('-', '_')}"
     from_env = os.environ.get(env_key)
-    if from_env and os.path.isfile(from_env):
+    if from_env:
+        if not os.path.isfile(from_env):
+            raise FileNotFoundError(from_env)
         return from_env
 
     profile = WORKLOAD_CATALOG.get(workload_id)
@@ -169,6 +173,20 @@ def select_workloads_for_operator(
       a net regression.
     """
     norm_phase = phase.lower().strip()
+    if norm_phase not in {
+        "decode",
+        "decode_small_batch",
+        "decode_batched",
+        "prefill",
+        "prefill_heavy",
+        "mixed",
+        "all",
+    }:
+        raise ValueError(f"Unknown phase: {phase}")
+    if max_active_rows is not None and (
+        type(max_active_rows) is not int or max_active_rows <= 0
+    ):
+        raise ValueError("max_active_rows must be a positive integer")
     if norm_phase in ("prefill", "prefill_heavy"):
         primary = "long-prefix"
         concurrency = 32
@@ -236,6 +254,8 @@ def build_bench_serve_cmd(
     prof = WORKLOAD_CATALOG[workload_id]
     n_prompts = num_prompts if num_prompts is not None else prof.default_num_prompts
     max_conc = concurrency if concurrency is not None else prof.default_concurrency
+    if any(type(value) is not int or value <= 0 for value in (n_prompts, max_conc)):
+        raise ValueError("Prompt count and concurrency must be positive integers")
     resolved_path = resolve_local_dataset_path(workload_id, dataset_path)
 
     cmd = [

@@ -1,27 +1,17 @@
 #!/usr/bin/env python3
-"""Outer-loop serving harness for whole-network L3, L4 attribution, and E2E A/B.
-
-Decoupled from the sub-second inner operator loop (`optimizer_loop.py`):
-- Inner loop optimizes kernel compute, tensor stride contracts, and dynamic-shape
-  zero-recompilation in isolation (L3 + L0).
-- Outer loop (`serving_loop.py`) evaluates whole-network integration:
-  1. Serving greedy numerical consistency across fixed prompts (Serving L3).
-  2. Profiler `op_statistic.csv` kernel call-count verification and all-kernel
-     share / signal-to-noise gating (L4).
-  3. Workload-aware A/B serving comparison (`random`, `sharegpt`,
-     `long-prefix`) and structured evidence write-back with checksum refresh.
-"""
+"""Serving output comparison, attribution, and A/B summaries."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import math
 import os
+from pathlib import Path
 from typing import Any
 
-from tools.op_agent.custody import write_dir_checksum
-from tools.op_agent.workloads import (
+from tools.operator_tools.workloads import (
     WORKLOAD_CATALOG,
     build_bench_serve_cmd,
     select_workloads_for_operator,
@@ -83,6 +73,8 @@ def parse_op_statistic_csv(
     if not os.path.isfile(csv_path):
         raise FileNotFoundError(f"op_statistic.csv not found: {csv_path}")
 
+    if not target_kernel_substr or (expected_calls is not None and expected_calls <= 0):
+        raise ValueError("Kernel and expected calls must be positive/nonempty.")
     total_time_us = 0.0
     matched_calls = 0
     matched_time_us = 0.0
@@ -94,18 +86,25 @@ def parse_op_statistic_csv(
             op_name = (
                 row.get("OP Type") or row.get("Op Name") or row.get("Name") or ""
             ).strip()
-            count_raw = row.get("Count") or row.get("Calls") or "0"
+            count_raw = row.get("Count") or row.get("Calls") or "invalid"
             total_raw = (
                 row.get("Total Time(us)")
                 or row.get("Total Time (us)")
                 or row.get("TotalTime(us)")
-                or "0"
+                or "invalid"
             )
             try:
                 count_val = int(float(count_raw))
                 time_val = float(total_raw)
-            except ValueError:
-                continue
+            except (ValueError, OverflowError) as exc:
+                raise ValueError(f"Invalid attribution row: {row}") from exc
+            if (
+                count_val < 0
+                or float(count_raw) != count_val
+                or not math.isfinite(time_val)
+                or time_val < 0
+            ):
+                raise ValueError(f"Invalid attribution row: {row}")
 
             total_time_us += time_val
             if target_kernel_substr and target_kernel_substr in op_name:
@@ -143,9 +142,17 @@ def evaluate_e2e_snr_gate(
 ) -> dict[str, Any]:
     """Assess whether L4 operator savings exceed the serving noise floor.
 
-    Prevents misinterpreting sub-0.5% Amdahl share shifts as real serving wins
-    or losses when run-to-run serving variance is ~1-2%.
+    This all-kernel heuristic only prioritizes experiments. It is neither a
+    critical-path Amdahl bound nor evidence of a serving outcome.
     """
+    if (
+        not all(
+            math.isfinite(v)
+            for v in (net_saved_ms, all_kernel_total_ms, serving_noise_floor_pct)
+        )
+        or serving_noise_floor_pct <= 0
+    ):
+        raise ValueError("Finite measurements and a positive noise floor are required.")
     if all_kernel_total_ms <= 0:
         return {
             "expected_all_kernel_delta_pct": 0.0,
@@ -159,9 +166,7 @@ def evaluate_e2e_snr_gate(
     snr = abs(delta_pct) / max(serving_noise_floor_pct, 1e-6)
     recommend_ab = snr >= 0.5
     hint = (
-        "proceed_to_ab"
-        if recommend_ab
-        else "within_noise_expected_due_to_small_all_kernel_share"
+        "proceed_to_ab" if recommend_ab else "low_priority_requires_serving_measurement"
     )
     return {
         "expected_all_kernel_delta_pct": round(delta_pct, 3),
@@ -182,23 +187,53 @@ def summarize_serving_ab_runs(
     if not off_result_paths or not on_result_paths:
         raise ValueError("Both off_result_paths and on_result_paths must be non-empty.")
 
+    if len(off_result_paths) != len(on_result_paths) or len(off_result_paths) < 2:
+        raise ValueError("A/B runs must be paired.")
+    if not math.isfinite(noise_threshold_pct) or noise_threshold_pct <= 0:
+        raise ValueError("Noise threshold must be finite and positive.")
+
+    resolved = [Path(p).resolve() for p in off_result_paths + on_result_paths]
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("A/B runs must reference distinct result files.")
+
     def _load_metrics(paths: list[str]) -> list[dict[str, float]]:
         rows = []
         for p in paths:
             with open(p, encoding="utf-8") as f:
                 data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError(f"Expected benchmark object: {p}")
+            completed = data.get("completed")
+            if (
+                type(completed) is not int
+                or completed <= 0
+                or type(data.get("failed")) is not int
+                or data["failed"] != 0
+            ):
+                raise ValueError(f"Incomplete benchmark: {p}")
+            for key in ("output_throughput", "mean_tpot_ms"):
+                value = data.get(key)
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or value <= 0
+                ):
+                    raise ValueError(f"Invalid benchmark metric {key}: {p}")
             rows.append(
                 {
-                    "output_rate": float(data.get("output_throughput", 0.0)),
-                    "mean_step_ms": float(data.get("mean_tpot_ms", 0.0)),
-                    "median_step_ms": float(data.get("median_tpot_ms", 0.0)),
-                    "mean_first_token_ms": float(data.get("mean_ttft_ms", 0.0)),
+                    "completed": completed,
+                    "output_rate": float(data["output_throughput"]),
+                    "mean_step_ms": float(data["mean_tpot_ms"]),
                 }
             )
         return rows
 
     off_rows = _load_metrics(off_result_paths)
     on_rows = _load_metrics(on_result_paths)
+
+    if len({r["completed"] for r in off_rows + on_rows}) != 1:
+        raise ValueError("A/B runs must complete the same request count.")
 
     def _mean(vals: list[float]) -> float:
         return sum(vals) / len(vals)
@@ -231,6 +266,7 @@ def summarize_serving_ab_runs(
 
     return {
         "tested": True,
+        "diagnostic_only": True,
         "status": status,
         "workload": workload_id,
         "num_runs_off": len(off_rows),
@@ -247,40 +283,6 @@ def summarize_serving_ab_runs(
         "mean_step_on_ms": round(on_step, 2),
         "mean_step_delta_pct": round(step_delta_pct, 2),
     }
-
-
-def update_operator_outer_evidence(
-    op_dir: str,
-    serving_l3: dict[str, Any] | None = None,
-    l4_attribution: dict[str, Any] | None = None,
-    serving_e2e: dict[str, Any] | None = None,
-) -> str:
-    """Write outer-loop L3/L4/E2E results into `<op_dir>/evidence.json` and re-hash."""
-    evidence_path = os.path.join(op_dir, "evidence.json")
-    if not os.path.isfile(evidence_path):
-        raise FileNotFoundError(f"Missing evidence.json in {op_dir}")
-
-    with open(evidence_path, encoding="utf-8") as f:
-        data = json.load(f)
-
-    if serving_l3 is not None:
-        l3_sec = dict(data.get("l3_numerical_guard") or {})
-        l3_sec["serving_greedy_guard"] = serving_l3
-        if not serving_l3.get("passed", False):
-            l3_sec["passed"] = False
-        data["l3_numerical_guard"] = l3_sec
-
-    if l4_attribution is not None:
-        data["l4_attribution"] = l4_attribution
-
-    if serving_e2e is not None:
-        data["serving_end_to_end"] = serving_e2e
-
-    with open(evidence_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-
-    return write_dir_checksum(op_dir)
 
 
 def build_outer_loop_plan(
@@ -336,7 +338,7 @@ def build_outer_loop_plan(
     }
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Outer-loop whole-network verification and workload planner."
     )
@@ -359,14 +361,12 @@ def main(argv: list[str] | None = None) -> None:
     ab_p.add_argument("--workload", default="random")
     ab_p.add_argument("--off", nargs="+", required=True)
     ab_p.add_argument("--on", nargs="+", required=True)
-    ab_p.add_argument("--update-op-dir", default=None)
 
     greedy_p = sub.add_parser(
         "compare-greedy", help="Compare baseline vs candidate greedy text files."
     )
     greedy_p.add_argument("--baseline", required=True, help="Baseline JSON or TXT.")
     greedy_p.add_argument("--candidate", required=True, help="Candidate JSON or TXT.")
-    greedy_p.add_argument("--update-op-dir", default=None)
 
     args = parser.parse_args(argv)
     if args.command == "plan":
@@ -386,14 +386,13 @@ def main(argv: list[str] | None = None) -> None:
             expected_calls=args.expected_calls,
         )
         print(json.dumps(res, indent=2, ensure_ascii=False))
+        return 0 if res.get("hit_verified", res.get("passed", False)) else 1
     elif args.command == "summarize-ab":
         summary = summarize_serving_ab_runs(
             off_result_paths=args.off,
             on_result_paths=args.on,
             workload_id=args.workload,
         )
-        if args.update_op_dir:
-            update_operator_outer_evidence(args.update_op_dir, serving_e2e=summary)
         print(json.dumps(summary, indent=2, ensure_ascii=False))
     elif args.command == "compare-greedy":
 
@@ -401,16 +400,21 @@ def main(argv: list[str] | None = None) -> None:
             with open(path, encoding="utf-8") as f:
                 if path.endswith(".json"):
                     content = json.load(f)
-                    return content if isinstance(content, list) else [str(content)]
-                return [line.rstrip("\r\n") for line in f if line.strip()]
+                    if not isinstance(content, list) or not all(
+                        isinstance(item, str) for item in content
+                    ):
+                        raise ValueError("Greedy JSON must be an array of strings.")
+                    return content
+                return [line.rstrip("\r\n") for line in f]
 
         base_texts = _load_lines(args.baseline)
         cand_texts = _load_lines(args.candidate)
         res = compare_greedy_outputs(base_texts, cand_texts)
-        if args.update_op_dir:
-            update_operator_outer_evidence(args.update_op_dir, serving_l3=res)
         print(json.dumps(res, indent=2, ensure_ascii=False))
+        return 0 if res.get("hit_verified", res.get("passed", False)) else 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

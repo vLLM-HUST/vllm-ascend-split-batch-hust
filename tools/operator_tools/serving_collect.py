@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import signal
 import socket
@@ -19,11 +20,16 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.op_agent.serving_loop import (  # noqa: E402
+from tools.operator_tools.serving_loop import (  # noqa: E402
     FIXED_L3_PROMPTS,
     compare_greedy_outputs,
     parse_op_statistic_csv,
     summarize_serving_ab_runs,
+)
+from tools.operator_tools.workloads import (  # noqa: E402
+    WORKLOAD_CATALOG,
+    build_bench_serve_cmd,
+    select_workloads_for_operator,
 )
 
 
@@ -189,13 +195,30 @@ def verify_profiles(config, output):
 
 def validate_benchmark(path, expected):
     data = json.loads(Path(path).read_text())
-    if data.get("completed") != expected or data.get("failed") != 0:
+    if (
+        type(data.get("completed")) is not int
+        or data["completed"] != expected
+        or type(data.get("failed")) is not int
+        or data["failed"] != 0
+    ):
         raise ValueError(f"Incomplete benchmark: {path}")
-    if data.get("output_throughput", 0) <= 0:
-        raise ValueError(f"Invalid benchmark metrics: {path}")
+    for key in ("output_throughput", "mean_tpot_ms"):
+        value = data.get(key)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError(f"Invalid benchmark metrics: {path}")
 
 
 def run(config, output):
+    pairing = select_workloads_for_operator(
+        config.get("phase", "decode"), config.get("max_active_rows")
+    )
+    if not Path(config["sharegpt_path"]).is_file():
+        raise FileNotFoundError(config["sharegpt_path"])
     save(output / "config.json", config)
     texts = {}
     for arm in ("off", "on"):
@@ -206,7 +229,8 @@ def run(config, output):
     if not guard["passed"]:
         raise ValueError("Serving L3 failed; performance runs refused")
     verify_profiles(config, output)
-    paths = {w: {a: [] for a in ("off", "on")} for w in ("random", "sharegpt")}
+    save(output / "workload_pairing.json", pairing)
+    paths = {w: {a: [] for a in ("off", "on")} for w in WORKLOAD_CATALOG}
     for index, arm in enumerate(("off", "on", "on", "off")):
         directory = output / f"bench_{index}_{arm}"
         print(f"Collecting benchmarks {index} {arm}", flush=True)
@@ -215,42 +239,30 @@ def run(config, output):
                 completion(config, "Explain RMSNorm briefly.", 16)
             for workload in paths:
                 target = directory / f"{workload}.json"
+                profile = WORKLOAD_CATALOG[workload]
+                command = build_bench_serve_cmd(
+                    workload,
+                    config["port"],
+                    config["model_alias"],
+                    str(directory),
+                    target.name,
+                    concurrency=pairing["primary_concurrency"]
+                    if workload == pairing["primary_workload"]
+                    else profile.default_concurrency,
+                    dataset_path=config["sharegpt_path"]
+                    if workload == "sharegpt"
+                    else None,
+                )
                 cmd = [
                     config["python"],
                     "-m",
                     "vllm.entrypoints.cli.main",
-                    "bench",
-                    "serve",
-                    "--model",
-                    config["model_alias"],
+                    *command[1:],
                     "--tokenizer",
                     config["model_path"],
-                    "--port",
-                    str(config["port"]),
                     "--seed",
                     "42",
-                    "--dataset-name",
-                    workload,
-                    "--num-prompts",
-                    "128",
-                    "--max-concurrency",
-                    "16",
-                    "--save-result",
-                    "--result-dir",
-                    str(directory),
-                    "--result-filename",
-                    target.name,
                 ]
-                if workload == "random":
-                    cmd += [
-                        "--random-input-len",
-                        "512",
-                        "--random-output-len",
-                        "256",
-                        "--ignore-eos",
-                    ]
-                else:
-                    cmd += ["--dataset-path", config["sharegpt_path"]]
                 with (directory / f"{workload}.log").open("w") as log:
                     subprocess.run(
                         cmd,
@@ -261,7 +273,11 @@ def run(config, output):
                         timeout=1800,
                         check=True,
                     )
-                validate_benchmark(target, 128)
+                save(
+                    directory / f"{workload}_invocation.json",
+                    {"command": cmd, "returncode": 0},
+                )
+                validate_benchmark(target, profile.default_num_prompts)
                 paths[workload][arm].append(str(target))
     summaries = {
         w: summarize_serving_ab_runs(p["off"], p["on"], w) for w, p in paths.items()
@@ -287,6 +303,8 @@ def main():
         if expected is not None and config[key] != expected:
             parser.error(f"Config {key} does not match requested value {expected!r}")
     output = Path(args.output).resolve()
+    if output == ROOT or ROOT in output.parents:
+        parser.error("Raw collection output must be outside the repository")
     output.mkdir(parents=True, exist_ok=False)
     try:
         run(config, output)

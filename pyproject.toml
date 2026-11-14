@@ -24,15 +24,8 @@ classifiers = [
 test = [
     "pytest>=8",
     "ruff>=0.12",
-    # NOTE: `vllm-hust-ext` is deliberately NOT pinned here (removed 2026-09-26).
-    # It is the org's extension-manager package and is not on any index, so a
-    # pin in this extra made `pip install "vllm-ascend-split-batch[test]"`
-    # unresolvable (measured: "Could not find a version that satisfies the
-    # requirement vllm-hust-ext==0.2.0.dev0 (from versions: none)"). Install it
-    # from git first, as CI and publish.yml do:
-    #   pip install "vllm-hust-ext @ git+https://github.com/vLLM-HUST/extension-manager.git@main"
-    # Only tests/test_manifest.py consumes it (load_manifest / activation_blocker).
-    #
+    # The extension manager is installed separately at the CI-pinned revision.
+    # Torch is optional: tensor cases skip without it; pure logic still runs.
     # stdlib tomllib landed in 3.11; the manifest tests read pyproject.toml on
     # every matrix leg (3.10 included), so pin the backport there.
     "tomli>=2; python_version < '3.11'",
@@ -68,11 +61,11 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    # Tests that need the vllm-ascend source checkout (source-level drift guards).
+    # Host source drift guards and live host integration tests.
     # They FAIL (not skip) when the tree is missing, so the dependency-free CI job
     # deselects them: `pytest -q -m "not host_tree"`.  The full local run keeps
     # them, which is what makes the guard loud.
-    "host_tree: needs the vllm-ascend source checkout (deselected on the CPU CI job)",
+    "host_tree: needs host source or live host imports; missing dependencies fail (excluded from CPU CI)",
 
 ]
 

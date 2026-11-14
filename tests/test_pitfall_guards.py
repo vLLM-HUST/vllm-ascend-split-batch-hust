@@ -26,6 +26,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from test_doc_consistency import PROSE_SURFACE
+
 try:
     import tomllib
 except ModuleNotFoundError:  # Python 3.10
@@ -81,46 +83,10 @@ JUNK_RE = re.compile(
     r"(^|/)(__pycache__|\.pytest_cache|\.ruff_cache)/|\.pyc$|\.egg-info/|^dist/"
 )
 
-#: 对外规范行文（与 tests/test_doc_consistency.py 的 PROSE_SURFACE 保持同步）。
-PROSE_SURFACE = (
-    "README.md",
-    "AGENTS.md",
-    "GLOSSARY.md",
-    "docs/README.md",
-    "docs/architecture.md",
-    "docs/agent-guide.md",
-    "docs/support-matrix.md",
-    "docs/operator-benchmark-standard.md",
-    "docs/npu-benchmark-execution-guide.md",
-    "docs/op-agent-harness-spec.md",
-    "docs/container-and-plugin-boundary-spec.md",
-    "docs/HOST_CONTRACT.md",
-    "docs/cohort-and-ownership.md",
-    "docs/release.md",
-    "docs/delivery-inventory.md",
-    "docs/pitfalls.md",
-    "ops/README.md",
-)
-
 #: 宿主工作区路径：写进对外文档就等于把环境写死。
 HOST_PATH_RE = re.compile(
     r"/vllm-workspace/|(?<![\w<`\"'])/root/[A-Za-z0-9_\u4e00-\u9fff]+/"
 )
-
-#: `plugin_carrier` 但 `src/` 里还没有门控变量的存量债：算子 id -> 现状。
-#: 接线完成或索引改判后删除对应条目，不要留过期豁免。
-WIRING_EXEMPT = {
-    "gdn_qkv_norm": (
-        "公开注册已撤回，能力只在宿主提案 host-proposals/GDN-qkv-norm/；"
-        "索引保留的是历史交付记录（README 的 GDN QKV norm 段）"
-    ),
-    "moe_down_residual_norm": (
-        "目前只有调优 Harness 用例（tools/op_agent/cases/），未注册 general plugin 入口"
-    ),
-    "ffn_activation": (
-        "目前只有调优 Harness 用例（tools/op_agent/cases/），未注册 general plugin 入口"
-    ),
-}
 
 
 def _tracked_files() -> list[str]:
@@ -263,31 +229,16 @@ def _gate_references() -> str:
     )
 
 
-def test_plugin_carrier_gates_exist_in_source_or_are_declared_debt():
-    """`plugin_carrier` 声称的门控变量必须真的出现在 `src/` 里。"""
-    index = json.loads((ROOT / "DELIVERY_INDEX.json").read_text(encoding="utf-8"))
+def test_plugin_carrier_gates_exist_in_source():
+    index = json.loads((ROOT / "DELIVERY_INDEX.json").read_text())
     source = _gate_references()
-    violations = []
-    seen = set()
     for entry in index["operators"]:
-        if entry["layer"] != "plugin_carrier":
+        if entry["layer"] != "plugin_carrier" or entry["gate_env"] == "unexposed":
             continue
-        gate_env = entry["gate_env"]
-        if gate_env == "unexposed":
-            continue
-        variable = gate_env.split("=")[0]
-        if variable in source:
-            continue
-        if entry["id"] in WIRING_EXEMPT:
-            seen.add(entry["id"])
-            continue
-        violations.append(f"{entry['id']}: {variable} 在 src/ 里找不到")
-    assert not violations, (
-        "plugin_carrier 的门控变量没有接线（源码模块/工具不等于公开入口）: "
-        + "; ".join(violations)
-    )
-    stale = sorted(set(WIRING_EXEMPT) - seen)
-    assert not stale, f"WIRING_EXEMPT 里的条目已不再需要豁免，请删除: {stale}"
+        assert entry["gate_env"].split("=")[0] in source, entry["id"]
+    for entry in index["operators"]:
+        if entry["status"].startswith("integrated_"):
+            assert entry["gate_env"] != "unexposed", entry["id"]
 
 
 def test_delivery_index_paths_are_repo_relative():
@@ -299,6 +250,10 @@ def test_delivery_index_paths_are_repo_relative():
             value = entry.get(key)
             if not isinstance(value, str):
                 continue
-            if value.startswith(("/", "~", "file:", "computer:")) or "://" in value:
+            if (
+                value.startswith(("/", "~", "file:", "computer:"))
+                or "://" in value
+                or ".." in Path(value).parts
+            ):
                 violations.append(f"{entry['id']}.{key}={value!r}")
     assert not violations, "索引路径不是仓内相对路径: " + "; ".join(violations)

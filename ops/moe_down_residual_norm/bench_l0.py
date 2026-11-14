@@ -4,6 +4,11 @@
 Callsite: vllm_ascend/ops/fused_moe/shared_experts.py:down_residual_norm.
 """
 
+if __name__ == "__main__":
+    print("No standalone measurement provided; callable implementation only.")
+    raise SystemExit(3)
+
+
 import torch
 
 
@@ -18,7 +23,3 @@ def optimized_op(x, down_w, residual, norm_w):
     rsqrt = torch.rsqrt(var + 1e-6)
     out = (h * rsqrt) * norm_w
     return out
-
-
-if __name__ == "__main__":
-    print("Benchmarking moe_down_residual_norm...")

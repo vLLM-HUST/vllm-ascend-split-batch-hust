@@ -26,38 +26,32 @@ Read-only: no import of torch / vllm / vllm_ascend, no device use.
 
 from __future__ import annotations
 
+import importlib.util
+import os
 import pathlib
-import sys
 
 import pytest
-
-_PLUGIN = (
-    pathlib.Path(__file__).resolve().parents[1]
-    / "src"
-    / "vllm_ascend_split_batch"
-    / "aot_cache_guard_plugin.py"
-)
-
-#: Needs the vllm-ascend source checkout (reads the host compiler interface).
-#: Deselected on the dependency-free CI job via ``-m "not host_tree"``; a full
-#: local run without a host tree still errors loudly, which is the intent.
-pytestmark = pytest.mark.host_tree
 
 
 def _host_source() -> str:
     """Locate ``vllm_ascend/compilation/compiler_interface.py`` from disk only."""
-    import vllm_ascend  # noqa: PLC0415 -- cheap: package dir only
-
-    host = (
-        pathlib.Path(vllm_ascend.__file__).resolve().parent
-        / "compilation"
-        / "compiler_interface.py"
-    )
-    if not host.exists():
-        pytest.skip(f"host compile interface not found: {host}")
+    override = os.getenv("VLLM_ASCEND_HUST_ROOT")
+    if override:
+        root = pathlib.Path(override)
+        if (root / "vllm_ascend").is_dir():
+            root /= "vllm_ascend"
+    else:
+        spec = importlib.util.find_spec("vllm_ascend")
+        assert spec is not None and spec.origin, (
+            "host source not found; set VLLM_ASCEND_HUST_ROOT"
+        )
+        root = pathlib.Path(spec.origin).parent
+    host = root / "compilation" / "compiler_interface.py"
+    assert host.is_file(), f"host compile interface not found: {host}"
     return host.read_text(encoding="utf-8")
 
 
+@pytest.mark.host_tree
 def test_host_still_exposes_the_guard_the_carrier_wraps() -> None:
     src = _host_source()
     assert "def _disable_pytorch_aot_cache_for_npugraph_ex(" in src, (
@@ -73,6 +67,7 @@ def test_host_still_exposes_the_guard_the_carrier_wraps() -> None:
     )
 
 
+@pytest.mark.host_tree
 def test_fusion_pass_branch_is_still_unguarded() -> None:
     """If upstream guards this branch itself, the carrier is redundant -> delete it."""
     src = _host_source()
@@ -91,23 +86,16 @@ def test_fusion_pass_branch_is_still_unguarded() -> None:
     )
 
 
-def test_load_is_default_on_with_opt_out() -> None:
-    sys.path.insert(0, str(_PLUGIN.parent.parent))
-    from vllm_ascend_split_batch import (
-        aot_cache_guard_plugin as plugin,  # noqa: PLC0415
-    )
+@pytest.mark.parametrize("value", [None, "0", "1", "", "false", " 0"])
+def test_load_is_default_on_with_exact_opt_out(monkeypatch, value) -> None:
+    from vllm_ascend_split_batch import aot_cache_guard_plugin as plugin
 
-    assert plugin.is_enabled() is True, (
-        "carrier must be default-on (frozen config has no env var to spare)"
-    )
-    import os  # noqa: PLC0415
-
-    os.environ[plugin.ENV_GUARD] = "0"
-    try:
-        assert plugin.is_enabled() is False, (
-            "opt-out token `0` must disable the carrier"
-        )
-        assert plugin.load() is False, "disabled carrier must not install anything"
-    finally:
-        os.environ.pop(plugin.ENV_GUARD, None)
-    assert plugin.is_enabled() is True
+    monkeypatch.delenv(plugin.ENV_GUARD, raising=False)
+    if value is not None:
+        monkeypatch.setenv(plugin.ENV_GUARD, value)
+    calls = []
+    monkeypatch.setattr(plugin, "install", lambda: calls.append("install") or True)
+    enabled = value != "0"
+    assert plugin.is_enabled() is enabled
+    assert plugin.load() is enabled
+    assert calls == (["install"] if enabled else [])
