@@ -7,18 +7,19 @@
 | 顺序 | 文档 | 回答的问题 |
 |---|---|---|
 | 1 | [../README.md](../README.md) | 这个仓库是什么、装完怎么验证 |
-| 2 | [architecture.md](architecture.md) | 插件壳/kernel 库/宿主三者什么关系,manifest 各字段什么语义 |
-| 3 | [container-and-plugin-boundary-spec.md](container-and-plugin-boundary-spec.md) | 容器存储与生命周期、宿主Fork与插件边界、知识库隔离规范（权威 Spec） |
-| 4 | [agent-guide.md](agent-guide.md) | 在这个仓库写代码必须遵守什么(人机通用) |
-| 5 | [support-matrix.md](support-matrix.md) | 能力的激活边界和宿主条件 |
-| 6 | [delivery-inventory.md](delivery-inventory.md) | 当前组件、补丁、工具归属和收益证据状态 |
-| 7 | [operator-benchmark-standard.md](operator-benchmark-standard.md) | 算子优化评测四级阶梯、形状事实合同、报告标准与交付合规门禁 |
-| 8 | [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) | NPU 实测执行步骤、各算子测试命令与结果回填流程 |
-| 9 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
-| 10 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
-| 11 | [op-agent-harness-spec.md](op-agent-harness-spec.md) | 算子调优 Harness (tools/op_agent) 架构与使用规范 |
-| 12 | [../tools/op_agent/README.md](../tools/op_agent/README.md) | 调优循环怎么跑起来、API key 如何接入(上手入口) |
-| 13 | [progress.md](progress.md) | 项目当前状态 |
+| 2 | [../GLOSSARY.md](../GLOSSARY.md) | 术语怎么读：一个词指什么、同名异义怎么分、哪些词已废止 |
+| 3 | [architecture.md](architecture.md) | 插件壳/kernel 库/宿主三者什么关系,manifest 各字段什么语义 |
+| 4 | [container-and-plugin-boundary-spec.md](container-and-plugin-boundary-spec.md) | 容器存储与生命周期、宿主Fork与插件边界、知识库隔离规范（权威 Spec） |
+| 5 | [agent-guide.md](agent-guide.md) | 在这个仓库写代码必须遵守什么(人机通用) |
+| 6 | [support-matrix.md](support-matrix.md) | 能力的激活边界和宿主条件 |
+| 7 | [delivery-inventory.md](delivery-inventory.md) | 当前组件、补丁、工具归属和收益证据状态 |
+| 8 | [operator-benchmark-standard.md](operator-benchmark-standard.md) | 算子优化评测四级阶梯、形状事实合同、报告标准与交付合规门禁 |
+| 9 | [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) | NPU 实测执行步骤、各算子测试命令与结果回填流程 |
+| 10 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
+| 11 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
+| 12 | [op-agent-harness-spec.md](op-agent-harness-spec.md) | 算子调优 Harness (tools/op_agent) 架构与使用规范 |
+| 13 | [../tools/op_agent/README.md](../tools/op_agent/README.md) | 调优循环怎么跑起来、API key 如何接入(上手入口) |
+| 14 | [progress.md](progress.md) | 项目当前状态 |
 
 ## 单一事实源分工
 
@@ -26,6 +27,7 @@
 
 | 主题 | 权威位置 |
 |---|---|
+| 术语唯一写法、定义判据、代码锚点、同名异义与废止词 | [../GLOSSARY.md](../GLOSSARY.md) |
 | 使用方法、env 开关、验证证据 | [../README.md](../README.md) |
 | **容器运行时分层、宿主Fork边界与证据隔离规范** | [container-and-plugin-boundary-spec.md](container-and-plugin-boundary-spec.md) |
 | 能力激活边界 × 代码位置 | [support-matrix.md](support-matrix.md) |
