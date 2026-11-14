@@ -1,0 +1,52 @@
+# 本地提交前的快检钩子：只跑纯文本、无设备、几秒内完成的检查。
+#
+# 用途是拦住"标签比证据走得远"这类问题——例如把 L0 加速比写成
+# `serving_status: verified_faster`，而同一算子的 evidence.json 里
+# `serving_end_to_end.tested` 仍是 false。CI 仍以 .github/workflows/ 为准，
+# 这里只是让问题在 `git commit` 时就被发现。
+#
+# 安装一次即可：
+#   python -m pip install pre-commit pytest ruff
+#   pre-commit install
+# 手动全量复跑：
+#   pre-commit run --all-files
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        description: 与 CI 同一条命令，尊重 pyproject.toml 的 exclude
+        entry: ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+
+      - id: ruff-format
+        name: ruff format --check
+        description: 与 CI 同一条命令；需要改写时用 ruff format <file>
+        entry: ruff format --check --force-exclude
+        language: system
+        types_or: [python, pyi]
+
+      - id: delivery-status-consistency
+        name: 索引状态标签必须被证据支撑
+        description: serving_status / l3_numerical_guard / status 与 evidence.json 对齐
+        entry: pytest -q tests/test_delivery_status_consistency.py
+        language: system
+        pass_filenames: false
+        files: ^(DELIVERY_INDEX\.json|ops/.*/evidence\.json)$
+
+      - id: ops-delivery-policy
+        name: 算子交付面结构与指纹
+        description: 目录契约、证据指纹未被静默改写、索引覆盖全部算子目录
+        entry: pytest -q tests/test_ops_delivery_policy.py tests/test_json_hygiene.py
+        language: system
+        pass_filenames: false
+        files: ^(DELIVERY_INDEX\.json|ops/.*)$
+
+      - id: doc-consistency
+        name: 文档行文与仓库事实一致
+        description: 术语表锚点、数量陈述、算子目录契约、度量关键词与禁语
+        entry: pytest -q tests/test_doc_consistency.py
+        language: system
+        pass_filenames: false
+        files: ^(.*\.md|pyproject\.toml)$

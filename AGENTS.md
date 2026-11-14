@@ -57,6 +57,11 @@
    - `ops/<operator>/` 必须齐备 `README.md`、`REPORT.md`、`bench_l0.py`、`evidence.json`；未提供独立微基准脚本时按占位脚本交付（退出码 3 表示"无测量"），不得留空或伪造脚本；
    - `GLOSSARY.md` 词条四列必须填满、术语不得重复、锚点里的路径必须真实存在，且必须被 `AGENTS.md` 与 `docs/README.md` 引用；
    - 对外规范文档不得出现"关键词 + 数字"同段与 `AGENTS.md` §3.2 的禁用暗语；新增对外规范文档需登记进 `tests/test_doc_consistency.py` 的 `PROSE_SURFACE`。
+6. **索引状态必须被证据支撑**（由 `pytest -q tests/test_delivery_status_consistency.py`、工作流 `Delivery status consistency` 与 `.pre-commit-config.yaml` 钩子把关）：
+   - `DELIVERY_INDEX.json` 的 `serving_status`、`l3_numerical_guard`、`status` 是结论标签，必须与同一算子的 `ops/<operator>/evidence.json` 同向；
+   - `verified_faster` / `within_noise` / `verified_on_par_with_baseline` 要求 `serving_end_to_end.tested` 为真且有 `speedup` 数字；`pending_outer_loop` / `negative_or_pending` 不得出现 `tested: true`；
+   - `l4_attribution` 仍为 `pending_outer_loop` 时不得给出服务收益结论；L3 失败一票否决，禁止任何服务收益标签；
+   - 标签比证据走得远（如把 L0 加速比写成服务结论）属禁止项，发现即改索引或补证据，不得两边都留着。
 
 ---
 
@@ -96,6 +101,13 @@ pytest -q tests/test_gate_fp32_plugin.py
 
 # 文档一致性门禁（术语表、数量陈述、算子目录契约、行文纪律；纯文本，秒级）
 pytest -q tests/test_doc_consistency.py
+
+# 交付状态门禁（索引标签 vs evidence.json，纯文本，秒级）
+pytest -q tests/test_delivery_status_consistency.py
+
+# 本地提交钩子（安装一次；只跑纯文本快检，与上面两条判据一致）
+python -m pip install pre-commit pytest ruff && pre-commit install
+pre-commit run --all-files
 
 # 全量 CPU 门禁套件
 pytest -q -m "not host_tree"
