@@ -1,0 +1,202 @@
+{
+  "scope": "Historical synthetic inputs and references, not current host truth; re-extract exact dtype, rounding and layout before retesting. CPU references do not establish NPU equivalence.",
+  "cases": {
+    "gdn_output_norm_fusion": {
+      "name": "gdn_output_norm_fusion",
+      "callsite": "vllm_ascend/ops/gdn.py:327",
+      "phase": "decode",
+      "default_tokens": 16,
+      "num_v_heads": 16,
+      "head_v_dim": 128,
+      "qkv_prefix_cols": 2048,
+      "shape_buckets": [
+        1,
+        4,
+        8,
+        16,
+        32
+      ],
+      "dynamic_shape_probes": [
+        7,
+        97,
+        266
+      ],
+      "reference_code": "\ndef optimized_op(core_out, z, weight):\n    T, H, D = z.shape\n    if hasattr(core_out, \"pow\"):\n        import torch\n        import torch.nn.functional as F\n\n        x_2d = core_out.reshape(-1, D).to(torch.float32)\n        z_2d = z.reshape(-1, D).to(torch.float32)\n        var = x_2d.pow(2).mean(-1, keepdim=True)\n        normed = (x_2d * torch.rsqrt(var + 1e-6)) * weight.to(torch.float32)\n        gated = (normed * F.silu(z_2d)).to(core_out.dtype)\n        return gated.reshape(T, H * D)\n    else:\n        import numpy as np\n\n        x_2d = core_out.reshape(-1, D)\n        z_2d = z.reshape(-1, D)\n        var = np.mean(np.square(x_2d), axis=-1, keepdims=True)\n        normed = (x_2d / np.sqrt(var + 1e-6)) * weight\n        silu_z = z_2d / (1.0 + np.exp(-z_2d))\n        return (normed * silu_z).reshape(T, H * D)\n",
+      "z_stride": [
+        6144,
+        128,
+        1
+      ]
+    },
+    "moe_gate_merge": {
+      "name": "moe_gate_merge",
+      "callsite": "vllm/model_executor/models/qwen3_next.py:186-192",
+      "phase": "decode",
+      "M": 32,
+      "K": 2048,
+      "N_router": 256,
+      "N_shared": 1,
+      "shape_buckets": [
+        1,
+        8,
+        16,
+        32
+      ],
+      "dynamic_shape_probes": [
+        7,
+        24
+      ],
+      "reference_code": "\ndef optimized_op(x, router_w, shared_w):\n    if hasattr(x, \"matmul\"):\n        import torch\n\n        router_logits = torch.matmul(x, router_w.t())\n        shared_gate = torch.matmul(x, shared_w.t())\n        return router_logits, shared_gate\n    else:\n        import numpy as np\n\n        router_logits = np.matmul(x, router_w.T)\n        shared_gate = np.matmul(x, shared_w.T)\n        return router_logits, shared_gate\n"
+    },
+    "moe_down_residual_norm": {
+      "name": "moe_down_residual_norm",
+      "callsite": "vllm_ascend/ops/fused_moe/shared_experts.py:down_residual_norm",
+      "phase": "decode",
+      "M": 32,
+      "K": 256,
+      "N": 2048,
+      "shape_buckets": [
+        1,
+        8,
+        16,
+        32
+      ],
+      "dynamic_shape_probes": [
+        7,
+        23
+      ],
+      "reference_code": "\ndef optimized_op(x, down_w, residual, norm_w):\n    if hasattr(x, \"matmul\"):\n        import torch\n        import torch.nn.functional as F\n\n        gemm_out = F.linear(x, down_w)\n        added = gemm_out + residual\n        var = added.pow(2).mean(-1, keepdim=True)\n        return added * torch.rsqrt(var + 1e-6) * norm_w\n    else:\n        import numpy as np\n\n        gemm_out = x @ down_w.T\n        added = gemm_out + residual\n        var = np.mean(added**2, axis=-1, keepdims=True)\n        return added * (1.0 / np.sqrt(var + 1e-6)) * norm_w\n"
+    },
+    "moe_gating_routing": {
+      "name": "moe_gating_routing",
+      "callsite": "vllm_ascend/ops/fused_moe/fused_moe.py:261",
+      "phase": "decode",
+      "default_tokens": 32,
+      "E": 256,
+      "K": 8,
+      "H": 2048,
+      "shape_buckets": [
+        1,
+        4,
+        8,
+        16,
+        32
+      ],
+      "dynamic_shape_probes": [
+        7,
+        24
+      ],
+      "reference_code": "\nimport numpy as np\n\ndef optimized_op(router_logits, hidden_states):\n    if hasattr(router_logits, \"is_npu\") and router_logits.is_npu:\n        import torch_npu\n\n        batch_tokens = router_logits.shape[0]\n        topk_weights, topk_ids, _ = torch_npu.npu_moe_gating_top_k(\n            router_logits,\n            8,\n            k_group=1,\n            group_count=1,\n            group_select_mode=0,\n            renorm=0,\n            norm_type=0,\n        )\n        expanded_x, expanded_row_idx, expert_tokens, _ = (\n            torch_npu.npu_moe_init_routing_v2(\n                hidden_states,\n                topk_ids,\n                active_num=batch_tokens * 8,\n                expert_num=256,\n                expert_tokens_num_type=1,\n                expert_tokens_num_flag=True,\n                active_expert_range=[0, 256],\n                quant_mode=-1,\n            )\n        )\n        return topk_weights, expanded_x, expanded_row_idx, expert_tokens\n    else:\n        batch_tokens = router_logits.shape[0]\n        exp_r = np.exp(router_logits - np.max(router_logits, axis=-1, keepdims=True))\n        probs = exp_r / np.sum(exp_r, axis=-1, keepdims=True)\n        topk_ids = np.argsort(-probs, axis=-1)[:, :8].astype(np.int32)\n        topk_weights = np.take_along_axis(probs, topk_ids, axis=-1)\n\n        flat_expert = topk_ids.reshape(-1)\n        flat_token = np.repeat(np.arange(batch_tokens, dtype=np.int32), 8)\n\n        perm = np.argsort(flat_expert, kind=\"stable\")\n        expanded_row_idx = np.empty(batch_tokens * 8, dtype=np.int32)\n        expanded_row_idx[perm] = np.arange(batch_tokens * 8, dtype=np.int32)\n\n        sorted_tokens = flat_token[perm]\n        expanded_x = hidden_states[sorted_tokens]\n        expert_tokens = np.bincount(flat_expert, minlength=256).astype(np.int64)\n\n        return topk_weights, expanded_x, expanded_row_idx, expert_tokens\n"
+    },
+    "gdn_qkv_norm": {
+      "name": "gdn_qkv_norm",
+      "callsite": "vllm_ascend/ops/gdn.py:552-553,692-693",
+      "phase": "pure decode",
+      "T": 16,
+      "row_stride": 4096,
+      "q_dim": 1024,
+      "k_dim": 1024,
+      "v_dim": 2048,
+      "head_dim": 128,
+      "shape_buckets": [
+        1,
+        4,
+        8,
+        16,
+        32
+      ],
+      "dynamic_shape_probes": [
+        7,
+        97,
+        266
+      ],
+      "reference_code": "\ndef optimized_op(x):\n    seq_len = x.shape[0]\n    if hasattr(x, \"float\"):\n        import torch\n\n        q_dim, k_dim, v_dim = 1024, 1024, 2048\n        query, key, value = torch.split(x, [q_dim, k_dim, v_dim], dim=-1)\n        fused = torch.cat(\n            [query.reshape(-1), key.reshape(-1), value.reshape(-1)], dim=0\n        )\n        q_size = seq_len * q_dim\n        k_size = seq_len * k_dim\n        q = fused[0:q_size].view(1, seq_len, 8, 128)\n        k = fused[q_size : q_size + k_size].view(1, seq_len, 8, 128)\n        v = fused[q_size + k_size :].view(1, seq_len, 16, 128)\n        try:\n            from vllm.third_party.flash_linear_attention.ops.l2norm import l2norm_fwd\n\n            return l2norm_fwd(q), l2norm_fwd(k), v\n        except Exception:\n            q_f = q.float()\n            q_norm = (\n                q_f * torch.rsqrt((q_f * q_f).sum(-1, keepdim=True) + 1e-6)\n            ).to(x.dtype)\n            k_f = k.float()\n            k_norm = (\n                k_f * torch.rsqrt((k_f * k_f).sum(-1, keepdim=True) + 1e-6)\n            ).to(x.dtype)\n            return q_norm, k_norm, v\n    else:\n        import numpy as np\n        q = x[:, :1024].reshape(1, seq_len, 8, 128)\n        k = x[:, 1024:2048].reshape(1, seq_len, 8, 128)\n        v = x[:, 2048:].reshape(1, seq_len, 16, 128)\n        q_norm = q / np.sqrt(np.sum(q**2, axis=-1, keepdims=True) + 1e-6)\n        k_norm = k / np.sqrt(np.sum(k**2, axis=-1, keepdims=True) + 1e-6)\n        return q_norm, k_norm, v\n"
+    },
+    "moe_shared_epilogue": {
+      "name": "moe_shared_epilogue_decode",
+      "callsite": "vllm_ascend/ops/fused_moe/shared_experts.py:part2",
+      "phase": "decode",
+      "M": 32,
+      "H": 2048,
+      "max_active_rows": 32,
+      "shape_buckets": [
+        1,
+        8,
+        16,
+        32
+      ],
+      "dynamic_shape_probes": [
+        7,
+        23
+      ],
+      "reference_code": "\ndef optimized_op(gate, out):\n    return gate * out\n"
+    },
+    "gdn_input_norm": {
+      "name": "gdn_input_norm_decode",
+      "callsite": "vllm_ascend/ops/gdn.py:in_proj_norm",
+      "phase": "decode",
+      "T": 32,
+      "H": 2048,
+      "reference_code": "\nimport torch\n\ndef optimized_op(x, weight):\n    if hasattr(x, \"pow\"):\n        variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)\n        rsqrt = torch.rsqrt(variance + 1e-6)\n        return (x.to(torch.float32) * rsqrt).to(x.dtype) * weight\n    else:\n        import numpy as np\n        var = np.mean(np.square(x), axis=-1, keepdims=True)\n        return (x / np.sqrt(var + 1e-6)) * weight\n"
+    },
+    "gdn_norm_gate": {
+      "name": "gdn_norm_gate",
+      "callsite": "vllm_ascend/ops/gdn.py:255",
+      "phase": "decode",
+      "Rows": 512,
+      "Dim": 128,
+      "num_v_heads": 16,
+      "shape_buckets": [
+        1,
+        4,
+        8,
+        16,
+        32
+      ],
+      "dynamic_shape_probes": [
+        7,
+        97,
+        266
+      ],
+      "reference_code": "\nimport torch\nimport torch.nn.functional as F\n\ndef optimized_op(x, z, weight):\n    if hasattr(x, \"pow\"):\n        variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)\n        rsqrt = torch.rsqrt(variance + 1e-6)\n        x_normed = (x.to(torch.float32) * rsqrt) * weight.to(torch.float32)\n        out = x_normed * F.silu(z.to(torch.float32))\n        return out.to(x.dtype)\n    else:\n        import numpy as np\n        var = np.mean(np.square(x), axis=-1, keepdims=True)\n        x_normed = (x / np.sqrt(var + 1e-6)) * weight\n        silu_z = z / (1.0 + np.exp(-z))\n        return x_normed * silu_z\n"
+    },
+    "ffn_activation": {
+      "name": "ffn_activation",
+      "callsite": "vllm_ascend/ops/fused_moe/fused_moe.py:ffn_activation",
+      "phase": "decode",
+      "M": 32,
+      "H_ffn": 1024,
+      "shape_buckets": [
+        1,
+        8,
+        16,
+        32
+      ],
+      "dynamic_shape_probes": [
+        7,
+        23
+      ],
+      "reference_code": "\ndef optimized_op(gate, up):\n    if hasattr(gate, \"matmul\"):\n        import torch.nn.functional as F\n\n        return F.silu(gate) * up\n    else:\n        import numpy as np\n\n        silu_gate = gate / (1.0 + np.exp(-gate))\n        return silu_gate * up\n"
+    },
+    "gdn_split_ba": {
+      "name": "gdn_split_ba",
+      "callsite": "vllm_ascend/ops/gdn.py:210",
+      "phase": "decode",
+      "T": 32,
+      "TotalDim": 32,
+      "shape_buckets": [
+        1,
+        4,
+        8,
+        16,
+        32
+      ],
+      "dynamic_shape_probes": [
+        7,
+        97,
+        266
+      ],
+      "reference_code": "\nimport torch\n\ndef optimized_op(ba):\n    if hasattr(ba, \"chunk\"):\n        b, a = ba.chunk(2, dim=-1)\n        return b.contiguous(), a.contiguous()\n    else:\n        half = ba.shape[-1] // 2\n        return ba[:, :half], ba[:, half:]\n"
+    }
+  }
+}

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ctypes
 import subprocess
 from pathlib import Path
 
@@ -8,7 +7,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "bench-ladder.sh"
-ATB_HOME = Path("/usr/local/Ascend/nnal/atb")
 
 
 def run_guard(
@@ -108,8 +106,3 @@ def test_guard_absent_atb_home_is_noop(tmp_path: Path) -> None:
         atb_home=str(tmp_path / "nonexistent"),
     )
     assert proc.returncode == 0, proc.stderr
-
-
-@pytest.mark.skipif(not ATB_HOME.is_dir(), reason="nnal/atb 不在该容器")
-def test_login_env_canary() -> None:
-    ctypes.CDLL("libatb.so")

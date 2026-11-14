@@ -1,0 +1,10 @@
+-q
+tests/test_benchmark_standard.py
+tests/test_doc_consistency.py
+tests/test_pitfall_guards.py
+tests/test_json_hygiene.py
+tests/test_delivery_status_consistency.py
+tests/test_document_custody.py
+tests/test_ops_delivery_policy.py
+tests/test_operator_sol.py
+tests/test_operator_serving.py

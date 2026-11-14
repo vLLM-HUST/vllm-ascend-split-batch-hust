@@ -1,73 +1,49 @@
 #!/usr/bin/env python3
 """L0 microbenchmark for gdn_split_ba (vllm_ascend/ops/gdn.py:210)."""
 
+if __name__ == "__main__":
+    print("No standalone measurement provided; callable implementation only.")
+    raise SystemExit(3)
+
+
 import torch
 import triton
 import triton.language as tl
 
 
-@triton.jit(
-    do_not_specialize=[
-        "M",
-        "stride_bam",
-        "stride_bm",
-        "stride_am",
-    ]
-)
-def gdn_split_ba_2d_kernel(
-    ba_ptr,
-    b_ptr,
-    a_ptr,
-    stride_bam,
-    stride_bm,
-    stride_am,
-    M,
-    HALF: tl.constexpr,
-    BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
+@triton.jit(do_not_specialize=["M", "stride_bam", "stride_bm", "stride_am"])
+def split_ba_kernel(
+    ba_ptr, b_ptr, a_ptr, M, stride_bam, stride_bm, stride_am, BLOCK_M: tl.constexpr
 ):
     pid = tl.program_id(0)
-    row_offs = pid * BLOCK_M + tl.arange(0, BLOCK_M)
-    col_offs = tl.arange(0, BLOCK_N)
-    row_mask = row_offs < M
+    offs_m = pid * BLOCK_M + tl.arange(0, BLOCK_M)
+    mask_m = offs_m < M
+    offs_k = tl.arange(0, 16)
 
-    b_in_ptrs = ba_ptr + row_offs[:, None] * stride_bam + col_offs[None, :]
-    a_in_ptrs = ba_ptr + row_offs[:, None] * stride_bam + (col_offs[None, :] + HALF)
+    m_bam = offs_m[:, None] * stride_bam
+    ptr_b_in = ba_ptr + m_bam + offs_k[None, :]
+    ptr_a_in = ba_ptr + m_bam + (16 + offs_k[None, :])
 
-    b_out_ptrs = b_ptr + row_offs[:, None] * stride_bm + col_offs[None, :]
-    a_out_ptrs = a_ptr + row_offs[:, None] * stride_am + col_offs[None, :]
+    mask = mask_m[:, None]
+    val_b = tl.load(ptr_b_in, mask=mask, other=0.0)
+    val_a = tl.load(ptr_a_in, mask=mask, other=0.0)
 
-    mask_2d = row_mask[:, None]
+    ptr_b_out = b_ptr + offs_m[:, None] * stride_bm + offs_k[None, :]
+    ptr_a_out = a_ptr + offs_m[:, None] * stride_am + offs_k[None, :]
 
-    val_b = tl.load(b_in_ptrs, mask=mask_2d, other=0.0)
-    val_a = tl.load(a_in_ptrs, mask=mask_2d, other=0.0)
-
-    tl.store(b_out_ptrs, val_b, mask=mask_2d)
-    tl.store(a_out_ptrs, val_a, mask=mask_2d)
+    tl.store(ptr_b_out, val_b, mask=mask)
+    tl.store(ptr_a_out, val_a, mask=mask)
 
 
 def optimized_op(ba: torch.Tensor):
-    M, TotalDim = ba.shape
-    Half = TotalDim // 2
-    b = torch.empty((M, Half), dtype=ba.dtype, device=ba.device)
-    a = torch.empty((M, Half), dtype=ba.dtype, device=ba.device)
-    BLOCK_M = 32
-    BLOCK_N = Half
-    grid = (triton.cdiv(M, BLOCK_M),)
-    gdn_split_ba_2d_kernel[grid](
-        ba,
-        b,
-        a,
-        ba.stride(0),
-        b.stride(0),
-        a.stride(0),
-        M,
-        HALF=Half,
-        BLOCK_M=BLOCK_M,
-        BLOCK_N=BLOCK_N,
+    M = ba.shape[0]
+    out = torch.empty((2, M, 16), dtype=ba.dtype, device=ba.device)
+    b = out[0]
+    a = out[1]
+
+    BLOCK_M = 64
+    grid = ((M + 63) // 64, 1, 1)
+    split_ba_kernel[grid](
+        ba, b, a, M, ba.stride(0), 16, 16, BLOCK_M=BLOCK_M, num_warps=1
     )
     return b, a
-
-
-if __name__ == "__main__":
-    print("Benchmarking gdn_split_ba...")

@@ -67,7 +67,11 @@ except ModuleNotFoundError:  # pragma: no cover -- Python 3.10 (CI matrix leg)
 
 from vllm_ascend_split_batch import gdn_merge_inproj_plugin as plugin
 
-torch = pytest.importorskip("torch", reason="the weight conversion needs torch")
+
+@pytest.fixture
+def torch():
+    return pytest.importorskip("torch", reason="CPU tensor tests need torch")
+
 
 ENV = plugin.ENV_ENABLE
 _REPO_ROOT = Path(plugin.__file__).resolve().parents[2]
@@ -83,18 +87,27 @@ _EXPECTED_CANDIDATES = (
 
 
 # ------------------------------------------------------------------ stubs
-class _InProj(torch.nn.Module):
-    """A stand-in for the host's ``MergedColumnParallelLinear`` projection."""
+def _InProj(rows, hidden=2048, dtype=None, device="cpu"):
+    """Stand-in projection, constructed only in CPU tensor tests."""
+    import torch
 
-    def __init__(self, rows, hidden=2048, dtype=torch.bfloat16, device="cpu"):
-        super().__init__()
-        self.weight = torch.nn.Parameter(
-            torch.empty(rows, hidden, dtype=dtype, device=device), requires_grad=False
-        )
+    proj = torch.nn.Module()
+    proj.weight = torch.nn.Parameter(
+        torch.empty(
+            rows,
+            hidden,
+            dtype=torch.bfloat16 if dtype is None else dtype,
+            device=device,
+        ),
+        requires_grad=False,
+    )
+    return proj
 
 
 def _stub_host_gdn_class(monkeypatch):
     """Inject a stub host module carrying the confirmed GDN class name."""
+    import torch
+
     cls = type("QwenGatedDeltaNetAttention", (torch.nn.Module,), {})
     module = types.ModuleType(plugin._HOST_MODULE)
     module.QwenGatedDeltaNetAttention = cls
@@ -121,6 +134,8 @@ def _gdn_layer(cls, **overrides):
 
 
 def _model(**children: torch.nn.Module) -> torch.nn.Module:
+    import torch
+
     root = torch.nn.Module()
     for name, child in children.items():
         root.add_module(name, child)
@@ -262,7 +277,7 @@ def test_the_carrier_is_fail_closed_and_documented():
 
 
 def test_process_model_refuses_to_rewrite_weights_without_a_consumer(
-    monkeypatch, caplog
+    torch, monkeypatch, caplog
 ):
     """Fail-closed: env on, no seam -> no rewrite, one warning, stock weight."""
     cls = _stub_host_gdn_class(monkeypatch)
@@ -289,7 +304,7 @@ def test_process_model_refuses_to_rewrite_weights_without_a_consumer(
 
 
 def test_process_model_merges_once_a_consumer_seam_exists(
-    monkeypatch, consumer_available
+    torch, monkeypatch, consumer_available
 ):
     """The merge path is live: it is what the fail-closed gate guards."""
     cls = _stub_host_gdn_class(monkeypatch)
@@ -316,7 +331,7 @@ def test_process_model_merges_once_a_consumer_seam_exists(
 
 
 def test_process_model_does_not_rewrite_a_same_named_foreign_module(
-    monkeypatch, consumer_available
+    torch, monkeypatch, consumer_available
 ):
     """A non-host module with ``in_proj_qkvz``/``in_proj_ba`` must stay stock."""
     cls = _stub_host_gdn_class(monkeypatch)
@@ -331,7 +346,9 @@ def test_process_model_does_not_rewrite_a_same_named_foreign_module(
     assert getattr(foreign, plugin._LAYER_MARK, False) is False
 
 
-def test_process_model_skips_a_layer_that_is_not_f2(monkeypatch, consumer_available):
+def test_process_model_skips_a_layer_that_is_not_f2(
+    torch, monkeypatch, consumer_available
+):
     cls = _stub_host_gdn_class(monkeypatch)
     good = _gdn_layer(cls)
     interleaved = _gdn_layer(cls, gqa_interleaved_layout=True)
@@ -340,7 +357,7 @@ def test_process_model_skips_a_layer_that_is_not_f2(monkeypatch, consumer_availa
     assert getattr(interleaved, plugin._LAYER_MARK, False) is False
 
 
-def test_process_model_warns_when_the_host_class_is_missing(monkeypatch, caplog):
+def test_process_model_warns_when_the_host_class_is_missing(torch, monkeypatch, caplog):
     """No importable host class: nothing is rewritten, and it says so."""
     monkeypatch.setitem(sys.modules, plugin._HOST_MODULE, None)
     monkeypatch.setattr(plugin, "_SERVE_LOGGER", plugin.logger)
@@ -352,7 +369,7 @@ def test_process_model_warns_when_the_host_class_is_missing(monkeypatch, caplog)
 
 
 # ------------------------------------------------------------- the conversion
-def test_merge_concatenates_qkvz_first_then_ba():
+def test_merge_concatenates_qkvz_first_then_ba(torch):
     qkvz = torch.full((6, 4), 1.0, dtype=torch.bfloat16)
     ba = torch.full((2, 4), 2.0, dtype=torch.bfloat16)
 
@@ -364,7 +381,7 @@ def test_merge_concatenates_qkvz_first_then_ba():
     assert bool((merged[6:] == 2.0).all())
 
 
-def test_merge_does_not_mutate_its_inputs():
+def test_merge_does_not_mutate_its_inputs(torch):
     qkvz = torch.full((6, 4), 1.0, dtype=torch.bfloat16)
     ba = torch.full((2, 4), 2.0, dtype=torch.bfloat16)
 
@@ -375,7 +392,7 @@ def test_merge_does_not_mutate_its_inputs():
     assert merged.data_ptr() not in (qkvz.data_ptr(), ba.data_ptr())
 
 
-def test_merge_guards_are_explicit():
+def test_merge_guards_are_explicit(torch):
     qkvz = torch.zeros(6, 4, dtype=torch.bfloat16)
     with pytest.raises(TypeError):
         plugin.merge_inproj_weight([1, 2], qkvz)
@@ -392,13 +409,15 @@ def test_merge_guards_are_explicit():
 
 
 # ------------------------------------------------------------- plan_merge guards
-def test_plan_merge_accepts_an_f2_layer(monkeypatch):
+def test_plan_merge_accepts_an_f2_layer(torch, monkeypatch):
     cls = _stub_host_gdn_class(monkeypatch)
     assert plugin.plan_merge(_gdn_layer(cls)) is None
 
 
 def _weightless_proj(value):
     """A projection-like module whose ``weight`` is an arbitrary value."""
+    import torch
+
     proj = torch.nn.Module()
     proj.weight = value
     return proj
@@ -409,25 +428,41 @@ def _weightless_proj(value):
     [
         ({}, ("in_proj_qkvz",), "in_proj_qkvz"),
         ({}, ("in_proj_ba",), "in_proj_ba"),
-        ({"in_proj_qkvz": _weightless_proj(3)}, (), "tensor"),
-        ({"in_proj_qkvz": _weightless_proj(torch.zeros(8))}, (), "2-d"),
+        ({"in_proj_qkvz": lambda torch: _weightless_proj(3)}, (), "tensor"),
+        ({"in_proj_qkvz": lambda torch: _weightless_proj(torch.zeros(8))}, (), "2-d"),
         (
-            {"in_proj_ba": _InProj(plugin.BA_OUT_ROWS, dtype=torch.float16)},
+            {
+                "in_proj_ba": lambda torch: _InProj(
+                    plugin.BA_OUT_ROWS, dtype=torch.float16
+                )
+            },
             (),
             "bfloat16",
         ),
-        ({"in_proj_ba": _InProj(plugin.BA_OUT_ROWS, hidden=4096)}, (), "differ"),
-        ({"in_proj_qkvz": _InProj(plugin.QKVZ_OUT_ROWS, device="meta")}, (), "meta"),
+        (
+            {"in_proj_ba": lambda torch: _InProj(plugin.BA_OUT_ROWS, hidden=4096)},
+            (),
+            "differ",
+        ),
+        (
+            {
+                "in_proj_qkvz": lambda torch: _InProj(
+                    plugin.QKVZ_OUT_ROWS, device="meta"
+                )
+            },
+            (),
+            "meta",
+        ),
         ({"tp_size": 4}, (), "layer dims imply"),
         ({"num_v_heads": 64}, (), "layer dims imply"),
         ({}, (), "already merged"),
-        ({"in_proj_qkv": torch.nn.Module()}, (), "LoRA"),
+        ({"in_proj_qkv": lambda torch: torch.nn.Module()}, (), "LoRA"),
         ({"gqa_interleaved_layout": True}, (), "layout"),
         ({"key_dim": None}, (), "dims"),
     ],
 )
 def test_plan_merge_refuses_every_off_contract_shape(
-    monkeypatch, overrides, removed, invalid
+    torch, monkeypatch, overrides, removed, invalid
 ):
     """Each refusal is explicit -- nothing is ever silently rewritten."""
     cls = _stub_host_gdn_class(monkeypatch)
@@ -437,7 +472,7 @@ def test_plan_merge_refuses_every_off_contract_shape(
     for name in removed:
         delattr(layer, name)
     for name, value in overrides.items():
-        setattr(layer, name, value)
+        setattr(layer, name, value(torch) if callable(value) else value)
 
     reason = plugin.plan_merge(layer)
 
@@ -445,7 +480,7 @@ def test_plan_merge_refuses_every_off_contract_shape(
     assert invalid.lower() in reason.lower(), reason
 
 
-def test_plan_merge_refuses_a_foreign_module(monkeypatch):
+def test_plan_merge_refuses_a_foreign_module(torch, monkeypatch):
     _stub_host_gdn_class(monkeypatch)
     foreign = torch.nn.Module()
     foreign.in_proj_qkvz = _InProj(plugin.QKVZ_OUT_ROWS)
@@ -454,7 +489,7 @@ def test_plan_merge_refuses_a_foreign_module(monkeypatch):
     assert plugin.plan_merge(foreign) == "not the host GDN attention class"
 
 
-def test_plan_merge_refuses_wrong_row_counts(monkeypatch):
+def test_plan_merge_refuses_wrong_row_counts(torch, monkeypatch):
     """Rows must match both the F2 shape and the layer's own dims."""
     cls = _stub_host_gdn_class(monkeypatch)
     layer = _gdn_layer(cls, in_proj_qkvz=_InProj(plugin.QKVZ_OUT_ROWS + 32))
@@ -464,7 +499,7 @@ def test_plan_merge_refuses_wrong_row_counts(monkeypatch):
     assert reason is not None and "rows" in reason
 
 
-def test_layer_dims_are_derived_from_the_f2_arithmetic(monkeypatch):
+def test_layer_dims_are_derived_from_the_f2_arithmetic(torch, monkeypatch):
     cls = _stub_host_gdn_class(monkeypatch)
     assert plugin._layer_dims(_gdn_layer(cls)) == (
         plugin.QKVZ_OUT_ROWS,
@@ -518,7 +553,9 @@ def test_wrapper_forwards_arguments_and_result():
     assert instance.kwargs == {"b": 2}
 
 
-def test_wrapper_processes_after_a_successful_load(monkeypatch, consumer_available):
+def test_wrapper_processes_after_a_successful_load(
+    torch, monkeypatch, consumer_available
+):
     """The merge runs *after* the loader materialized the model."""
     cls = _stub_host_gdn_class(monkeypatch)
     layer = _gdn_layer(cls)
@@ -533,7 +570,9 @@ def test_wrapper_processes_after_a_successful_load(monkeypatch, consumer_availab
     assert getattr(loaded, plugin._LAYER_MARK, False) is True
 
 
-def test_wrapper_skips_the_merge_when_the_load_fails(monkeypatch, consumer_available):
+def test_wrapper_skips_the_merge_when_the_load_fails(
+    torch, monkeypatch, consumer_available
+):
     """A raising loader must not be post-processed, and must stay raising."""
     cls = _stub_host_gdn_class(monkeypatch)
     layer = _gdn_layer(cls)
@@ -555,7 +594,9 @@ def test_wrapper_skips_the_merge_when_no_model_was_loaded():
     assert runner().load_model() == "ORIGINAL"
 
 
-def test_wrapper_chains_with_another_plugins_wrapper(monkeypatch, consumer_available):
+def test_wrapper_chains_with_another_plugins_wrapper(
+    torch, monkeypatch, consumer_available
+):
     """``gate_fp32_plugin`` wraps the same method; both hooks must survive."""
     cls = _stub_host_gdn_class(monkeypatch)
     layer = _gdn_layer(cls)
@@ -669,7 +710,7 @@ def test_uninstall_restores_the_pristine_seam(monkeypatch):
     assert plugin.install() is True  # a fresh install still works
 
 
-def test_post_load_hook_fails_open_on_an_unexpected_error(monkeypatch, caplog):
+def test_post_load_hook_fails_open_on_an_unexpected_error(torch, monkeypatch, caplog):
     """A broken post-load hook must not break engine startup."""
     cls = _stub_host_gdn_class(monkeypatch)
     runner = _make_model_runner(_gdn_layer(cls))
@@ -791,6 +832,7 @@ def test_bundle_package_carries_only_the_manifest() -> None:
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.host_tree
 def test_host_seams_are_still_present():
     """Read-only drift guard: the probed host names must still resolve.
 
@@ -811,15 +853,10 @@ def test_host_seams_are_still_present():
             found.append(f"{module_name}.{class_name}")
 
     if not found:
-        pytest.skip("no GDN-merge runner candidate is importable here")
+        pytest.fail("no GDN-merge runner candidate is importable here")
 
-    try:
-        host_module = importlib.import_module(plugin._HOST_MODULE)
-    except Exception:  # noqa: BLE001
-        pytest.skip("the host GDN module is not importable here")
+    host_module = importlib.import_module(plugin._HOST_MODULE)
     host_class = getattr(host_module, plugin._HOST_CLASS, None)
-    if host_class is None:
-        pytest.skip("the host GDN class is not importable here")
 
     assert found
     assert isinstance(host_class, type)

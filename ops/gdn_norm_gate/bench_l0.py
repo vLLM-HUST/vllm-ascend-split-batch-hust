@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """L0 microbenchmark for gdn_norm_gate (vllm_ascend/ops/gdn.py:255)."""
 
+if __name__ == "__main__":
+    print("No standalone measurement provided; callable implementation only.")
+    raise SystemExit(3)
+
+
 import torch
 import triton
 import triton.language as tl
@@ -67,7 +72,3 @@ def optimized_op(
         BLOCK_N=128,
     )
     return out
-
-
-if __name__ == "__main__":
-    print("Benchmarking gdn_norm_gate...")

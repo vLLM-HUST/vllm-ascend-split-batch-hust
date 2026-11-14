@@ -18,14 +18,13 @@
 
 | 项 | 要求 | 校验动作 |
 |---|---|---|
-| 硬件 | 2 张 Ascend910B2，TP=2 | `python3 -c "from tools.op_agent.guard import check_npu_environment as c; print(c(2))"` |
-| 宿主基线 | `based/split-batch-baseline`；vllm-ascend `e59aaeef`、vllm-hust `f18cf803c` | `git -C "$VLLM_ASCEND_REPO" rev-parse --short HEAD` |
+| 硬件 | 2 张 Ascend910B2，TP=2 | `python3 -c "from tools.operator_tools.guard import check_npu_environment as c; print(c(2))"` |
+| 宿主基线 | 按 `AGENTS.md` 固定的宿主分支与提交核验，不在此维护另一份版本 | `git -C "$VLLM_ASCEND_REPO" rev-parse --short HEAD` |
 | 结果目录 | 必须在仓库外，`bench/evidence_paths.py` 会强制校验 | `export SPLIT_BATCH_RESULTS_DIR=<仓库外的绝对目录>/<stamp>` |
 | 门控 | 全部 `VLLM_HUST_*=0` 起服后再逐项打开 | `tools/bench-ladder.sh carriers` |
 | 单变量 | 贪心采样、固定 seed、`--no-enable-prefix-caching`、固定并发与输入输出长度 | 见 `docs/npu-benchmark-execution-guide.md` |
 
-本机探针当前返回 `HardwareStatus(has_npu=True, device_count=2, is_tp2_ready=True, device_name='Ascend910B2')`，
-单卡可用显存约 61 GB。正式开窗前仍需重跑探针，探针不通过不得往下走。
+当前没有可用 NPU，本计划的设备验证暂不执行。正式开窗前重新检查设备，探针不通过不得往下走。
 
 ## 2. 方向总览
 
@@ -89,13 +88,12 @@ python3 experiments/ascend910b-2card/run_baseline_window.py --stamp 1109-1400
 1. L4 归因先确认调用点与次数：`tools/bench-ladder.sh profile --tier light`，在 `op_statistic.csv` 里核对
    `MatMulV2` 与后续 `Add`/`RmsNorm` 的配对次数（每层 1 次 × 40 层）。
 2. L0 先做**纯算子**对照：原生「matmul → add → rmsnorm」三段 vs 单 kernel 融合，同形状同 dtype。
-3. L3 数值：与三段原生链路逐元素比对，门禁按 D4 的 dtype 相对判据（本链路输出为 bf16，禁止用绝对阈值）。
-4. L4 归因：融合后目标小算子计数应归零，且 all-kernel 分母不变。
+3. L3 数值：与三段原生链路逐元素比对，门禁按任务的 dtype、布局与数值合同，执行算子基准规范的正确性要求。
+4. L4 归因：融合后被替代的小算子计数应归零，并核对新增融合调用；全核耗时总和只作诊断，不要求保持不变。
 
 **预期**
 - 融合后中间张量不再落 HBM，L4 里对应的 `Add`/`Norm` 调用数降到 0；
-- L0 改善幅度**不应超过**该 M 下的节省占比上界（M=1 约 1.5%、M=32 约 28.6%）。若远超上界，
-  说明测量里混进了别的变量（多半是 launch 开销差异），必须拆开重测；
+- 流量节省占比不能直接作为耗时改善上界；按优化 skill 分别核算资源下界、启动成本和可重叠范围，再对比同条件测量；
 - decode（小 M）场景大概率落在噪声带内 —— 这种结果必须如实记录为「方向成立、当前形状无收益」，
   不得改口径包装成加速。
 
@@ -105,7 +103,7 @@ python3 experiments/ascend910b-2card/run_baseline_window.py --stamp 1109-1400
 - `ops/moe_epilogue/evidence.json` 的 `l0_microbenchmark`、`l3_numerical_guard`、`l4_attribution`；
 - `ops/moe_epilogue/REPORT.md` 按 `docs/operator-benchmark-standard.md` §3 模板重写对应小节；
 - `DELIVERY_INDEX.json` 里 `moe_epilogue` 条目的 `status` / `l3_numerical_guard` / `serving_status`；
-- 若判定「无收益」，`serving_status` 记 `within_noise` 或 `measured_no_gain`，**不允许**记 `verified_faster`。
+- 只有实际服务测量支持时才记 `within_noise` 或 `measured_no_gain`；只有单算子或理论分析时保持 `pending_outer_loop`。
 
 ---
 
@@ -171,13 +169,12 @@ M=17 时 46.9%（补到 32）。
 
 **步骤**
 1. 先在卡上验证硬件是否真的开 FTZ：构造一组 GELU 输出恰落次正规区间的输入，看是否被归零；
-2. L3 对拍：融合实现 vs 原生 `gelu + mul`，用余弦与 dtype 相对阈值双判据；
+2. L3 对拍：融合实现 vs 原生 `gelu + mul`，先固定任务允许的误差、NaN/Inf 和次正规数处理合同，再验证；
 3. 若硬件确实开 FTZ，把「激活悬崖」区间与上界记入 pitfall；
 4. 只有在 bf16 路线才可考虑跳过 FTZ 相关工作（离线已证贡献为 0），fp16 路线必须带门禁。
 
 **预期**
-- 余弦判据应稳定过 0.99999；
-- 误差应落在 2 倍半台阶内（fp16 约 7.8e-3、bf16 约 6.3e-2）；
+- 容差按实际任务、输入范围与输出 dtype 确定；离线误差分解只用于定位，不能直接作为所有任务的通用门禁；
 - 若卡上误差显著超离线上界，说明输入量化或近似函数实现与假设不同，需重做误差分解，不得直接放宽容差。
 
 **判废**：出现 NaN/Inf、出现超出门禁的单个元素，或门禁被改成「任何实现都能过」的宽阈值。
@@ -233,47 +230,17 @@ shared expert 512 B、gate_up 1024 B）在 bf16 与 fp32 下全部落在 32 字�
 
 **回填位置**：`docs/pitfalls.md` 增加或修正条目；涉及具体算子的部分写进该算子 `REPORT.md` 的「风险与边界」小节。
 
-## 4. 统一回填契约
+## 4. 产物交接
 
-| 层次 | 落点 | 约束 |
-|---|---|---|
-| 原始产物 | 仓外 `$SPLIT_BATCH_RESULTS_DIR`（`bench/evidence_paths.py` 强制） | 仓库内禁止出现 Trace、日志、DB、csv 原始件 |
-| 算子证据 | `ops/<operator>/evidence.json`（`operator-benchmark-evidence/v1`） | 度量数字只落这里，行文里不复述 |
-| 算子报告 | `ops/<operator>/REPORT.md` | 按 `docs/operator-benchmark-standard.md` §3 模板 |
-| 交付索引 | `DELIVERY_INDEX.json` 的 `operators[]` | `status`、`l3_numerical_guard`、`serving_status` 必须与证据一致 |
-| 指纹 | `ops/<operator>/checksum.sha256` | 改过目录内文件后必须重算（见下命令） |
-| 坑位 | `docs/pitfalls.md` | 只写判据与约束，不写过程 |
-| 禁止落点 | `docs/evidence/**`、仓库根目录、本目录 | 新增文件严禁进入这三处 |
-
-回填与校验命令：
+正式证据、索引与指纹的更新顺序以 [算子基准规范](../../docs/operator-benchmark-standard.md#6-产物交接与离线检查) 为准，不在实验计划维护另一份契约。以下命令只检查和汇总输入，不自动写正式证据：
 
 ```bash
-# 1) 服务侧 A/B 汇总并自动回填算子目录
-python3 -m tools.op_agent.serving_loop summarize-ab \
-    --workload random \
-    --off "$SPLIT_BATCH_RESULTS_DIR/off_1.json" "$SPLIT_BATCH_RESULTS_DIR/off_2.json" \
-    --on  "$SPLIT_BATCH_RESULTS_DIR/on_1.json"  "$SPLIT_BATCH_RESULTS_DIR/on_2.json" \
-    --update-op-dir ops/<operator>
+python3 -m tools.operator_tools.serving_loop summarize-ab     --workload random     --off "$SPLIT_BATCH_RESULTS_DIR/off_1.json" "$SPLIT_BATCH_RESULTS_DIR/off_2.json"     --on  "$SPLIT_BATCH_RESULTS_DIR/on_1.json"  "$SPLIT_BATCH_RESULTS_DIR/on_2.json"
 
-# 2) 贪心输出逐字对拍（数值门禁）
-python3 -m tools.op_agent.serving_loop greedy \
-    --baseline "$SPLIT_BATCH_RESULTS_DIR/l3_off.json" \
-    --candidate "$SPLIT_BATCH_RESULTS_DIR/l3_on.json" \
-    --update-op-dir ops/<operator>
-
-# 3) L4 归因核对
-python3 -m tools.op_agent.serving_loop parse-l4 \
-    --csv <仓库外的绝对目录>/<stamp>/op_statistic.csv --kernel <kernel_name> --expected-calls <n>
-
-# 4) 刷新指纹
-python3 -c "from tools.op_agent.custody import write_dir_checksum as w; print(w('ops/<operator>'))"
-
-# 5) 合规门禁（全绿才可提交）
-ruff check . && ruff format --check .
-python3 -m pytest -q tests/test_benchmark_standard.py tests/test_json_hygiene.py \
-    tests/test_document_custody.py tests/test_ops_delivery_policy.py
-python3 -m pytest -q -m "not host_tree"
+python3 -m tools.operator_tools.serving_loop compare-greedy     --baseline "$SPLIT_BATCH_RESULTS_DIR/l3_off.json"     --candidate "$SPLIT_BATCH_RESULTS_DIR/l3_on.json"
 ```
+
+逐字对拍输入为字符串数组 JSON 或逐行文本；空白行也参与比较。主测摘要不能代替压力、相位交叉、数值与逐卡归因审核。完成审核后手动更新证据、索引和指纹，执行 `pytest @tests/offline-checks.args` 及隔离 CPU 门禁。
 
 ## 5. 阶段与依赖
 
@@ -307,9 +274,9 @@ python3 -m pytest -q -m "not host_tree"
 
 | 编号 | 预期方向 | 预期量级（由离线口径推出，带卡后必须替换分母） | 最可能的落空原因 |
 |---|---|---|---|
-| D1 | 中间激活往返消失 | 上限 = 该 M 下节省占比：M=1 约 1.5%、M=10 约 12.7%、M=32 约 28.6% | 权重流量占比高，小 M 被稀释 |
+| D1 | 中间激活往返消失 | 流量节省见上文；耗时上界需另算资源账目 | 权重流量占比高，小 M 被稀释 |
 | D2 | 等待下降 | 2→3 级有改善，3→4 级递减 | 片上容量或编译器自动已加深 |
 | D3 | 分界点 | 落在 M ∈ [8,16] | 打包成本吃掉全部收益 |
-| D4 | 精度可判定 | 余弦 ≥ 0.99999，误差 ≤ 2 倍半台阶（fp16 约 7.8e-3、bf16 约 6.3e-2） | 硬件近似函数与假设不同 |
+| D4 | 精度可判定 | 按任务数值合同通过，离线误差分解仅作诊断 | 硬件近似函数与假设不同 |
 | D5 | 调度空泡下降 | 微秒级，短步场景才显形 | 无稳定公开接口 |
 | D6 | 对齐退化台阶 | 非对齐组出现明显台阶，`DataCopyPad` 修复 | 该版本 MTE 已容忍非对齐 |

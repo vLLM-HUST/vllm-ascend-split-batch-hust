@@ -21,7 +21,7 @@ FETCH = load("benchmark_evidence", "tools/benchmark_evidence.py")
 PATHS = load("evidence_paths", "bench/evidence_paths.py")
 
 
-def test_active_harness_uses_external_output_guard():
+def test_benchmark_scripts_use_external_output_guard():
     bench_dir = ROOT / "bench"
     active_bench_scripts = [
         p.name

@@ -1,0 +1,32 @@
+# 纯文本不变量门禁：文档行文、交付状态、交付面结构、文档踩坑。
+#
+# 为什么单独一个 workflow：`ci.yml` 的 push/pull_request 用 `paths-ignore:
+# '**/*.md'` 过滤纯 Markdown 变更（成本纪律见 docs/agent-guide.md §2），而术语表、
+# 数量陈述、状态标签、manifest 不变量恰恰只在文本/JSON 变更里漂移。
+#
+# 这里跑的全部是不装本仓包、不碰 NPU、几秒完成的判据；同一批判据也由
+# `.pre-commit-config.yaml` 在 `git commit` 时先跑一次。
+name: Text invariants
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  text-invariants:
+    name: Text invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest ruff
+      - run: ruff check .
+      - run: ruff format --check .
+      - name: 离线交付检查
+        run: env -u PYTHONPATH pytest @tests/offline-checks.args

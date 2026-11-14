@@ -43,8 +43,8 @@ callable ``load_model``, so fake candidate modules are injected into
 touch the real host classes.  The positive host-side drift guard lives in
 ``test_host_candidate_seam_is_still_present`` (read-only; it never wraps).
 
-No device, no network.  ``_device_stack`` gives real ``torch`` for the tensor
-predicate, or a clean skip on a CPU-only runner.
+No device or network is needed. Tensor tests use optional CPU torch; host
+integration tests are marked host_tree.
 """
 
 from __future__ import annotations
@@ -59,12 +59,13 @@ import types
 from pathlib import Path
 
 import pytest
-from _device_stack import torch
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 from vllm_ascend_split_batch import gate_fp32_plugin as plugin
-
-# 探针链到 /vllm-workspace 运行树(子进程 import 链), CPU CI 收敛 deselect。
-pytestmark = pytest.mark.host_tree
 
 ENV = plugin.ENV_ENABLE
 _REPO_ROOT = Path(plugin.__file__).resolve().parents[2]
@@ -101,20 +102,26 @@ _EXPECTED_CANDIDATES = (
 
 
 # ------------------------------------------------------------------ helpers
-class _Gate(torch.nn.Module):
-    """A leaf module named ``gate`` carrying an arbitrary ``weight`` value."""
+def _gate(weight):
+    import torch
 
-    def __init__(self, weight):
-        super().__init__()
-        self.weight = weight
+    gate = torch.nn.Module()
+    gate.weight = weight
+    return gate
 
 
-def _model(**children: torch.nn.Module) -> torch.nn.Module:
-    """Build a root module whose attributes give each child its leaf name."""
+def _model(**children):
+    import torch
+
     root = torch.nn.Module()
     for name, child in children.items():
         root.add_module(name, child)
     return root
+
+
+@pytest.fixture
+def torch():
+    return pytest.importorskip("torch", reason="CPU tensor tests need torch")
 
 
 def _make_runner():
@@ -134,13 +141,14 @@ def _make_runner():
 
 def _make_model_runner():
     """A runner whose ``load_model`` materializes ``self.model`` (real timing)."""
+    import torch
 
     class _Runner:
         def __init__(self):
             self.model = None
 
         def load_model(self, *args, **kwargs):
-            self.model = _model(gate=_Gate(torch.zeros(4, 8, dtype=torch.bfloat16)))
+            self.model = _model(gate=_gate(torch.zeros(4, 8, dtype=torch.bfloat16)))
             return "LOADED"
 
     return _Runner
@@ -228,6 +236,7 @@ def test_load_default_off_imports_nothing():
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.host_tree
 def test_worker_startup_order_wraps_the_active_runner():
     """Regression: the carrier must wrap the *active* v1 model runner.
 
@@ -263,11 +272,11 @@ def test_worker_startup_order_wraps_the_active_runner():
 
 
 # ------------------------------------------------------------- gate selection
-def test_only_leaf_named_gate_is_cached():
+def test_only_leaf_named_gate_is_cached(torch):
     """``router_gate`` / ``expert_gate`` are not the MoE router gate."""
-    gate = _Gate(torch.zeros(4))
-    router = _Gate(torch.zeros(4))
-    expert = _Gate(torch.zeros(4))
+    gate = _gate(torch.zeros(4))
+    router = _gate(torch.zeros(4))
+    expert = _gate(torch.zeros(4))
     model = _model(gate=gate, router_gate=router, expert_gate=expert)
 
     assert plugin._cache_gate_weights(model) == 1
@@ -276,33 +285,33 @@ def test_only_leaf_named_gate_is_cached():
     assert not hasattr(expert, "weight_fp32")
 
 
-def test_shared_expert_gate_is_excluded():
+def test_shared_expert_gate_is_excluded(torch):
     """The leaf check is exact: ``shared_expert_gate`` must stay stock."""
-    shared = _Gate(torch.zeros(4))
+    shared = _gate(torch.zeros(4))
     model = _model(shared_expert_gate=shared)
 
     assert plugin._cache_gate_weights(model) == 0
     assert not hasattr(shared, "weight_fp32")
 
 
-def test_nested_leaf_gate_is_cached():
+def test_nested_leaf_gate_is_cached(torch):
     """A gate nested under a block (``block.gate``) is still a leaf ``gate``."""
-    inner = _Gate(torch.zeros(4))
+    inner = _gate(torch.zeros(4))
     model = _model(block=_model(gate=inner))
 
     assert plugin._cache_gate_weights(model) == 1
     assert hasattr(inner, "weight_fp32")
 
 
-def test_returns_the_number_of_cached_gates():
+def test_returns_the_number_of_cached_gates(torch):
     model = _model(
-        gate=_Gate(torch.zeros(4)),
-        block=_model(gate=_Gate(torch.zeros(4))),
+        gate=_gate(torch.zeros(4)),
+        block=_model(gate=_gate(torch.zeros(4))),
     )
     assert plugin._cache_gate_weights(model) == 2
 
 
-def test_skips_a_gate_without_a_tensor_weight():
+def test_skips_a_gate_without_a_tensor_weight(torch):
     module = torch.nn.Module()
     module.weight = 3  # not a tensor: nothing to convert
     model = _model(gate=module)
@@ -311,14 +320,14 @@ def test_skips_a_gate_without_a_tensor_weight():
     assert not hasattr(module, "weight_fp32")
 
 
-def test_skips_a_gate_without_a_weight_attribute():
+def test_skips_a_gate_without_a_weight_attribute(torch):
     model = _model(gate=torch.nn.Module())
 
     assert plugin._cache_gate_weights(model) == 0
 
 
-def test_second_call_does_not_overwrite_an_existing_cache():
-    gate = _Gate(torch.zeros(4))
+def test_second_call_does_not_overwrite_an_existing_cache(torch):
+    gate = _gate(torch.zeros(4))
     gate.weight_fp32 = torch.full((1,), 7.0)
     model = _model(gate=gate)
 
@@ -327,19 +336,20 @@ def test_second_call_does_not_overwrite_an_existing_cache():
     assert torch.equal(gate.weight_fp32, torch.full((1,), 7.0))
 
 
-def test_empty_model_caches_nothing():
+def test_empty_model_caches_nothing(torch):
     assert plugin._cache_gate_weights(torch.nn.Module()) == 0
 
 
 # ------------------------------------------------------------- dtype / layout
 @pytest.mark.parametrize(
     "dtype",
-    [torch.float32, torch.float16, torch.bfloat16, torch.int8],
+    ["float32", "float16", "bfloat16", "int8"],
 )
-def test_cached_copy_is_fp32_and_contiguous(dtype):
+def test_cached_copy_is_fp32_and_contiguous(dtype, torch):
     """The hoisted copy is the fp32 conversion of the materialized weight."""
+    dtype = getattr(torch, dtype)
     weight = torch.zeros(4, 8, dtype=dtype)
-    gate = _Gate(weight)
+    gate = _gate(weight)
 
     assert plugin._cache_gate_weights(_model(gate=gate)) == 1
     cached = gate.weight_fp32
@@ -349,10 +359,10 @@ def test_cached_copy_is_fp32_and_contiguous(dtype):
     assert gate.weight.dtype == dtype  # the original weight is untouched
 
 
-def test_non_contiguous_weight_is_materialized_contiguously():
+def test_non_contiguous_weight_is_materialized_contiguously(torch):
     weight = torch.randn(8, 4).t()
     assert not weight.is_contiguous()
-    gate = _Gate(weight)
+    gate = _gate(weight)
 
     assert plugin._cache_gate_weights(_model(gate=gate)) == 1
     assert gate.weight_fp32.is_contiguous()
@@ -403,7 +413,7 @@ def test_wrapper_forwards_arguments_and_result():
     assert instance.kwargs == {"b": 2}
 
 
-def test_wrapper_caches_after_the_original_loads_the_model():
+def test_wrapper_caches_after_the_original_loads_the_model(torch):
     """The cache is filled *after* the loader materializes the model."""
     runner = _make_model_runner()
     assert plugin._install_on_class(runner) is True
@@ -508,8 +518,6 @@ def test_probe_order_matches_the_expected_host_candidates():
 
 def test_entry_point_is_declared_in_pyproject():
     """The general-plugin entry point is what the runtime loader consumes."""
-    import tomllib
-
     data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
     general = data["project"]["entry-points"]["vllm.general_plugins"]
     assert general["gate-fp32"] == ("vllm_ascend_split_batch.gate_fp32_plugin:load")
@@ -519,6 +527,7 @@ def test_entry_point_target_is_callable():
     assert callable(plugin.load)
 
 
+@pytest.mark.host_tree
 def test_host_candidate_seam_is_still_present():
     """Read-only drift guard: at least one probed host seam must still exist.
 
@@ -539,6 +548,6 @@ def test_host_candidate_seam_is_still_present():
             found.append(f"{module_name}.{class_name}")
 
     if not found:
-        pytest.skip("no gate-fp32 host candidate is importable here")
+        pytest.fail("no gate-fp32 host candidate is importable here")
 
     assert found

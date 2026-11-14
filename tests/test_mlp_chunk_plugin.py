@@ -20,8 +20,9 @@ What is covered
 its three refusal gates (``chunks_k``, token threshold, SwiGLU whitelist), its
 boundary arithmetic (``ceil(n/k)`` with a possibly shorter tail), the row
 coverage contract (every row written exactly once, no gap / no overlap),
-tensor-attribute preservation, and bitwise equivalence against the unchunked
-reference.  They also cover env parsing, ``install``/``load`` semantics,
+tensor-attribute preservation, and numerical agreement with the CPU reference
+using torch's dtype-specific default tolerances. Identity coverage checks remain
+exact. They also cover env parsing, ``install``/``load`` semantics,
 idempotency, fail-open, and the wrapped-forward behaviour.
 
 Why stubs instead of real objects
@@ -48,7 +49,6 @@ import sys
 import types
 
 import pytest
-from _device_stack import torch  # noqa: F401  -- torch present, or skip
 
 from vllm_ascend_split_batch import mlp_chunk_plugin as plugin
 from vllm_ascend_split_batch.mlp_chunk_plugin import (
@@ -63,10 +63,17 @@ from vllm_ascend_split_batch.mlp_chunk_plugin import (
 )
 
 
+@pytest.fixture
+def torch():
+    return pytest.importorskip("torch", reason="CPU tensor tests need torch")
+
+
 class SiluAndMul:
     """Whitelisted act stub: the plugin matches on the class ``__name__``."""
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        import torch
+
         gate, up = x.chunk(2, dim=-1)
         return torch.nn.functional.silu(gate) * up
 
@@ -79,6 +86,8 @@ class AscendSiluAndMul:
     """
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        import torch
+
         gate, up = x.chunk(2, dim=-1)
         return torch.nn.functional.silu(gate) * up
 
@@ -87,6 +96,8 @@ class GeluAndMul:
     """Not whitelisted: chunking must be refused for non-SwiGLU activations."""
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        import torch
+
         return torch.nn.functional.gelu(x)
 
 
@@ -98,8 +109,11 @@ class _Linear:
         in_features: int,
         out_features: int,
         gen: torch.Generator,
-        dtype: torch.dtype = torch.float32,
+        dtype=None,
     ):
+        import torch
+
+        dtype = torch.float32 if dtype is None else dtype
         self.weight = torch.randn(in_features, out_features, generator=gen, dtype=dtype)
 
     def __call__(self, x: torch.Tensor):
@@ -138,6 +152,8 @@ class _RecordingAct:
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         self.calls += 1
+        import torch
+
         gate, up = x.chunk(2, dim=-1)
         return torch.nn.functional.silu(gate) * up
 
@@ -150,9 +166,11 @@ def _mlp(
     inter: int = 16,
     act=None,
     seed: int = 0,
-    dtype: torch.dtype = torch.float32,
+    dtype=None,
 ):
     """Build ``(gate_up, act, down)`` stub modules with fixed random weights."""
+    import torch
+
     gen = torch.Generator().manual_seed(seed)
     gate_up = _Linear(hidden, 2 * inter, gen, dtype)
     down = _Linear(inter, hidden, gen, dtype)
@@ -160,7 +178,7 @@ def _mlp(
 
 
 def _reference(gate_up, act, down, x: torch.Tensor) -> torch.Tensor:
-    """Unchunked MLP: the semantics chunking must reproduce bit-for-bit."""
+    """Unchunked CPU reference; GEMM rounding can depend on the row count."""
     g, _ = gate_up(x)
     s = act(g)
     o, _ = down(s)
@@ -203,26 +221,25 @@ def fake_qwen2(monkeypatch):
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("n,thr", [(0, 1), (1, 2), (7, 8), (255, 256)])
 def test_below_threshold_returns_none(n: int, thr: int) -> None:
-    """``n < min_tokens_thr`` must refuse chunking (delegate to orig)."""
-    gate_up, act, down = _mlp()
-    x = torch.randn(n, 8)
+    """Refusal happens before tensor allocation or projection calls."""
+    x = types.SimpleNamespace(shape=(n, 8))
     assert (
-        chunked_mlp_forward(gate_up, act, down, x, chunks_k=2, min_tokens_thr=thr)
+        chunked_mlp_forward(None, SiluAndMul(), None, x, chunks_k=2, min_tokens_thr=thr)
         is None
     )
 
 
 @pytest.mark.parametrize("n,thr", [(0, 0), (1, 1), (8, 8), (256, 256)])
-def test_at_threshold_chunks(n: int, thr: int) -> None:
+def test_at_threshold_chunks(torch, n: int, thr: int) -> None:
     """``n == min_tokens_thr`` is inclusive: chunking applies."""
     gate_up, act, down = _mlp()
     x = torch.randn(n, 8)
     out = chunked_mlp_forward(gate_up, act, down, x, chunks_k=2, min_tokens_thr=thr)
     assert out is not None
-    assert torch.equal(out, _reference(gate_up, act, down, x))
+    torch.testing.assert_close(out, _reference(gate_up, act, down, x))
 
 
-def test_just_below_threshold_is_none_but_at_threshold_chunks() -> None:
+def test_just_below_threshold_is_none_but_at_threshold_chunks(torch) -> None:
     """The exact boundary step (thr-1 -> None, thr -> chunked) is preserved."""
     gate_up, act, down = _mlp()
     below = torch.randn(255, 8)
@@ -242,24 +259,24 @@ def test_just_below_threshold_is_none_but_at_threshold_chunks() -> None:
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("k", [-5, 0, 1])
 def test_chunks_k_below_two_returns_none(k: int) -> None:
-    """``chunks_k < 2`` must refuse chunking."""
-    gate_up, act, down = _mlp()
-    x = torch.randn(16, 8)
+    """``chunks_k < 2`` must refuse chunking before tensor work."""
+    x = types.SimpleNamespace(shape=(16, 8))
     assert (
-        chunked_mlp_forward(gate_up, act, down, x, chunks_k=k, min_tokens_thr=0) is None
+        chunked_mlp_forward(None, SiluAndMul(), None, x, chunks_k=k, min_tokens_thr=0)
+        is None
     )
 
 
-def test_chunks_k_two_chunks() -> None:
+def test_chunks_k_two_chunks(torch) -> None:
     """``chunks_k == 2`` is the smallest enabled granularity."""
     gate_up, act, down = _mlp()
     x = torch.randn(300, 8)
     out = chunked_mlp_forward(gate_up, act, down, x, chunks_k=2, min_tokens_thr=0)
     assert out is not None
-    assert torch.equal(out, _reference(gate_up, act, down, x))
+    torch.testing.assert_close(out, _reference(gate_up, act, down, x))
 
 
-def test_chunks_k_greater_than_n_still_complete() -> None:
+def test_chunks_k_greater_than_n_still_complete(torch) -> None:
     """``k > n`` must not crash and must still cover every row exactly once."""
     n, k, d = 256, 512, 3
     gate_up = _RecordingIdentity()
@@ -283,56 +300,54 @@ def test_whitelist_contains_exactly_the_supported_names() -> None:
 
 
 @pytest.mark.parametrize("act_cls", [SiluAndMul, AscendSiluAndMul])
-def test_whitelisted_act_chunks(act_cls) -> None:
+def test_whitelisted_act_chunks(torch, act_cls) -> None:
     """Every whitelisted SwiGLU class name enables chunking."""
     gate_up, _, down = _mlp(act=act_cls())
     act = act_cls()
     x = torch.randn(300, 8)
     out = chunked_mlp_forward(gate_up, act, down, x, chunks_k=2, min_tokens_thr=0)
     assert out is not None
-    assert torch.equal(out, _reference(gate_up, act, down, x))
+    torch.testing.assert_close(out, _reference(gate_up, act, down, x))
 
 
 def test_non_whitelisted_act_returns_none() -> None:
-    """A non-SwiGLU activation (name off the whitelist) refuses chunking."""
-    gate_up, _, down = _mlp(act=GeluAndMul())
-    x = torch.randn(300, 8)
+    """A non-SwiGLU activation refuses chunking before tensor work."""
+    x = types.SimpleNamespace(shape=(300, 8))
     assert (
-        chunked_mlp_forward(
-            gate_up, GeluAndMul(), down, x, chunks_k=2, min_tokens_thr=0
-        )
+        chunked_mlp_forward(None, GeluAndMul(), None, x, chunks_k=2, min_tokens_thr=0)
         is None
     )
 
 
 # --------------------------------------------------------------------------- #
-# 4. Equivalence -- chunked == unchunked, bit for bit
+# 4. CPU numerical agreement -- dtype-specific tolerances
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("k", [2, 3, 4])
 @pytest.mark.parametrize("n", [256, 257, 300, 511, 512, 1000, 4096])
-def test_chunked_matches_unchunked_bitwise(n: int, k: int) -> None:
-    """Splitting along tokens must be numerically transparent (incl. n%k != 0)."""
+def test_chunked_matches_cpu_reference(torch, n: int, k: int) -> None:
+    """Compare CPU GEMMs within dtype tolerances, including a shorter tail."""
     gate_up, act, down = _mlp()
     x = torch.randn(n, 8)
     out = chunked_mlp_forward(gate_up, act, down, x, chunks_k=k, min_tokens_thr=0)
     assert out is not None
-    assert torch.equal(out, _reference(gate_up, act, down, x))
+    torch.testing.assert_close(out, _reference(gate_up, act, down, x))
 
 
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.float64])
-def test_chunked_matches_unchunked_bitwise_across_dtypes(dtype) -> None:
-    """Bitwise transparency holds for fp16 / fp32 / fp64."""
+@pytest.mark.parametrize("dtype", ["float32", "float16", "float64"])
+def test_chunked_matches_cpu_reference_across_dtypes(torch, dtype) -> None:
+    """CPU agreement uses the default tolerance for each floating dtype."""
+    dtype = getattr(torch, dtype)
     gate_up, act, down = _mlp(dtype=dtype)
     x = torch.randn(511, 8, dtype=dtype)
     out = chunked_mlp_forward(gate_up, act, down, x, chunks_k=3, min_tokens_thr=0)
     assert out is not None
-    assert torch.equal(out, _reference(gate_up, act, down, x))
+    torch.testing.assert_close(out, _reference(gate_up, act, down, x))
 
 
 # --------------------------------------------------------------------------- #
 # 5. Coverage / no-overlap and tail boundaries
 # --------------------------------------------------------------------------- #
-def test_every_row_written_exactly_once() -> None:
+def test_every_row_written_exactly_once(torch) -> None:
     """Output rows are fully covered and never double-written.
 
     An identity pipeline carrying row-index markers makes any gap show up as
@@ -362,7 +377,7 @@ def test_every_row_written_exactly_once() -> None:
         (300, 4, [75, 75, 75, 75]),
     ],
 )
-def test_chunk_sizes_follow_ceil_with_shorter_tail(n, k, expected) -> None:
+def test_chunk_sizes_follow_ceil_with_shorter_tail(torch, n, k, expected) -> None:
     """Chunk sizes are ``ceil(n/k)`` with a shortened (possibly empty) tail."""
     gate_up = _RecordingIdentity()
     down = _RecordingIdentity()
@@ -379,10 +394,11 @@ def test_chunk_sizes_follow_ceil_with_shorter_tail(n, k, expected) -> None:
 # --------------------------------------------------------------------------- #
 # 6. Tensor attributes
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float16])
-def test_output_preserves_shape_dtype_device_and_row_count(dtype) -> None:
+@pytest.mark.parametrize("dtype", ["float32", "float16"])
+def test_output_preserves_shape_dtype_device_and_row_count(torch, dtype) -> None:
     """``empty_like`` semantics: shape/dtype/device and row count are kept."""
     n, k = 300, 3
+    dtype = getattr(torch, dtype)
     gate_up, act, down = _mlp(dtype=dtype)
     x = torch.randn(n, 8, dtype=dtype)
     out = chunked_mlp_forward(gate_up, act, down, x, chunks_k=k, min_tokens_thr=0)
@@ -397,13 +413,13 @@ def test_output_preserves_shape_dtype_device_and_row_count(dtype) -> None:
 # 7. Dimension generalization
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("hidden,inter", [(8, 16), (16, 32), (64, 128)])
-def test_equivalence_across_hidden_and_intermediate(hidden, inter) -> None:
+def test_equivalence_across_hidden_and_intermediate(torch, hidden, inter) -> None:
     """Equivalence is independent of the hidden / intermediate dimensions."""
     gate_up, act, down = _mlp(hidden=hidden, inter=inter)
     x = torch.randn(300, hidden)
     out = chunked_mlp_forward(gate_up, act, down, x, chunks_k=3, min_tokens_thr=0)
     assert out is not None
-    assert torch.equal(out, _reference(gate_up, act, down, x))
+    torch.testing.assert_close(out, _reference(gate_up, act, down, x))
 
 
 # --------------------------------------------------------------------------- #
@@ -502,7 +518,7 @@ def test_install_fail_open_when_target_not_callable(monkeypatch, fake_qwen2) -> 
 # 10. Wrapped-forward behaviour
 # --------------------------------------------------------------------------- #
 def test_wrapped_forward_matches_reference_above_threshold(
-    monkeypatch, fake_qwen2
+    torch, monkeypatch, fake_qwen2
 ) -> None:
     """Above threshold the wrapper uses the chunked path and skips the orig."""
     monkeypatch.setenv(ENV_CHUNKS, "2")
@@ -513,11 +529,11 @@ def test_wrapped_forward_matches_reference_above_threshold(
     x = torch.randn(300, 8)
     out = mlp.forward(x)
     assert mlp.orig_calls == 0
-    assert torch.equal(out, _reference(gate_up, act, down, x))
+    torch.testing.assert_close(out, _reference(gate_up, act, down, x))
 
 
 def test_wrapped_forward_delegates_to_original_below_threshold(
-    monkeypatch, fake_qwen2
+    torch, monkeypatch, fake_qwen2
 ) -> None:
     """Below threshold the wrapper falls back to the original forward (spied)."""
     monkeypatch.setenv(ENV_CHUNKS, "2")
@@ -528,10 +544,12 @@ def test_wrapped_forward_delegates_to_original_below_threshold(
     x = torch.randn(64, 8)
     out = mlp.forward(x)
     assert mlp.orig_calls == 1
-    assert torch.equal(out, _reference(gate_up, act, down, x))
+    torch.testing.assert_close(out, _reference(gate_up, act, down, x))
 
 
-def test_wrapped_forward_honours_env_chunk_count(monkeypatch, fake_qwen2) -> None:
+def test_wrapped_forward_honours_env_chunk_count(
+    torch, monkeypatch, fake_qwen2
+) -> None:
     """The wrapper reads ``chunks_k`` from the env at install time."""
     monkeypatch.setenv(ENV_CHUNKS, "4")
     monkeypatch.setenv(ENV_MIN_TOKENS, "0")
@@ -543,10 +561,10 @@ def test_wrapped_forward_honours_env_chunk_count(monkeypatch, fake_qwen2) -> Non
     out = mlp.forward(x)
     assert act.calls == 4
     assert mlp.orig_calls == 0
-    assert torch.equal(out, _reference(gate_up, act, down, x))
+    torch.testing.assert_close(out, _reference(gate_up, act, down, x))
 
 
-def test_wrapped_forward_honours_env_min_tokens(monkeypatch, fake_qwen2) -> None:
+def test_wrapped_forward_honours_env_min_tokens(torch, monkeypatch, fake_qwen2) -> None:
     """The wrapper reads ``min_tokens_thr`` from the env at install time."""
     monkeypatch.setenv(ENV_CHUNKS, "2")
     monkeypatch.setenv(ENV_MIN_TOKENS, "1024")

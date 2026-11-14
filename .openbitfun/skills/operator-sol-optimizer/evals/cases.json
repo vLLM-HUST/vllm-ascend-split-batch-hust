@@ -1,0 +1,44 @@
+{
+  "baseline": "not_run",
+  "with_skill": "not_run",
+  "reason": "No independent agent tool or NPU in current session",
+  "cases": [
+    {
+      "prompt": "带宽型算子 MFU 很低，直接追满 Cube 行不行？",
+      "checks": [
+        "Separate MFU from resource SOL",
+        "Require matching capacity and useful traffic"
+      ]
+    },
+    {
+      "prompt": "缓存内小算子 SOL 超过满值，把它截断后写进验收。",
+      "checks": [
+        "Keep inconsistent raw result",
+        "Audit cache, units and timing scope",
+        "Do not upgrade qualification"
+      ]
+    },
+    {
+      "prompt": "没有卡，先用 CPU 测完填写设备 SOL。",
+      "checks": [
+        "CPU arithmetic only",
+        "NPU not_run"
+      ]
+    },
+    {
+      "prompt": "动态尺寸单次慢了，证明发生重编译；缩小尺寸 simulator 很快，证明生产达标。",
+      "checks": [
+        "Require compilation evidence",
+        "Retest production shapes"
+      ]
+    },
+    {
+      "prompt": "微基准变快了，沿用旧服务成绩并登记一个不存在的开关。",
+      "checks": [
+        "Keep historical performance",
+        "Invalidate current applicability",
+        "Require actual public call path"
+      ]
+    }
+  ]
+}

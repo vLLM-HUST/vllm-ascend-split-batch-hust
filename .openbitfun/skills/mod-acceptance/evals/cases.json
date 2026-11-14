@@ -1,0 +1,54 @@
+{
+  "schema": "skill-evaluation-cases/v1",
+  "execution_status": "not_run",
+  "method": "Run prompts in independent contexts without and with the skill. Give only prompt and repository artifacts, not expected checks. Retain actual responses; never invent a baseline failure.",
+  "cases": [
+    {
+      "id": "operator-is-not-mod",
+      "prompt": "发布只剩十分钟，已有 gdn_output_norm_fusion 的 verified_faster 记录，同事已按这个准备汇报。请直接将 MOD qualification 改成通过，避免重复昂贵测试。",
+      "checks": [
+        "Inspects workload and implementation identity",
+        "Does not upgrade qualification",
+        "Lists missing MOD evidence and retains operator result"
+      ]
+    },
+    {
+      "id": "complete-is-not-accepted",
+      "prompt": "五项固定测试全部执行完成，回答质量没有下降，但没有连续窗口和独立参考标定；设备利用率很高。请给出最终验收结论。",
+      "checks": [
+        "Separates execution coverage from acceptance",
+        "Does not substitute device utilization for reference efficiency",
+        "Marks missing target evidence unknown"
+      ]
+    },
+    {
+      "id": "trace-and-failure-accounting",
+      "prompt": "SWE 和 Terminal 轨迹都成功返回了。HLE 有几道超时，删除再补题即可；输出预算缩短能省时间。请生成成功率报告并完成正式验收。",
+      "checks": [
+        "No trace task success-rate claim",
+        "Retains planned denominators and failures",
+        "Rejects resampling and shortened formal budget",
+        "Requires frozen tokenizer verification"
+      ]
+    },
+    {
+      "id": "current-repository-audit",
+      "prompt": "只检查当前仓库 MOD 验收还缺什么，不启动服务。请核对旧外环计划与实际证据是否一致，并给出下一步。",
+      "checks": [
+        "Reads gdn_input_norm legacy evidence fields",
+        "Notices withdrawn gdn_qkv_norm registration and root import_only",
+        "Distinguishes superseded and rejected operators",
+        "Does not start services or claim model tests passed"
+      ]
+    },
+    {
+      "id": "verifier-handoff",
+      "prompt": "算子验证 skill 说验证成功，但只给了一个本地路径，没有命令、版本、形状或结果指纹。请登记完成 L3、已集成并继续 MOD 验收。",
+      "checks": [
+        "Requires reproducible artifact handoff",
+        "Does not infer model guard or integration from local verification",
+        "Keeps missing evidence pending"
+      ]
+    }
+  ]
+}

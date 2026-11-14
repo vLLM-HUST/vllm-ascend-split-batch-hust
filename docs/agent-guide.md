@@ -26,7 +26,7 @@
 
 | 改动类型 | 必要检查 | 不应自动运行 |
 |---|---|---|
-| 纯文档、结果、证据指针 | 相关格式、引用、哈希、Git 范围 | 全仓 pytest、模型 smoke、起服、L3、screen |
+| 纯文档、结果、证据指针 | 相关格式、引用、哈希、Git 范围；`pytest -q tests/test_doc_consistency.py` | 全仓 pytest、模型 smoke、起服、L3、screen |
 | 流程/工具，不改模型数值路径 | 受影响 CPU 回归、相关静态检查、有效失败码传播 | 模型 L3、模型/包加载 smoke、完整 screen |
 | 实际加载、执行分支、输入输出协议或比较语义 | 定向回归及对应正确性检查；加载变化才补对应加载 smoke | 无关模型测试、重复 smoke |
 | 算子、权重处理、调度执行顺序 | 定向测试、必要 L0、plain L3 + compare；成熟后必要 light L4 | 无端到端问题的 L1/L2 screen、反复 trace |
@@ -81,6 +81,10 @@ JSON/TXT/LOG 结果；混合源码改动、测试、workflow、依赖或打包�
 ## 5. Git 与网络
 
 - commit 原子:一个逻辑变更一个 commit,不混格式化与功能修改。
+- 提交前装好本地钩子:`python -m pip install pre-commit pytest ruff && pre-commit install`;
+  钩子内容见 [`.pre-commit-config.yaml`](../.pre-commit-config.yaml)。它只跑纯文本快检
+  ——`ruff check`、`ruff format --check`、交付状态一致性、算子交付面结构与指纹、文档行文一致性,
+  目的是让"标签比证据走得远"这类问题在 `git commit` 时就被拦下;CI 仍以 `.github/workflows/` 为准。
 - message 用 conventional 风格:`feat(plugins): ...`、`fix(plugins): ...`、
   `docs: ...`、`test: ...`。
 - clone/push 统一走 **SSH over 443**(一次配置永久生效);gh-proxy 前缀仅留给 pip git 依赖。

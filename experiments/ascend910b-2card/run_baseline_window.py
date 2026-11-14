@@ -505,7 +505,7 @@ def _write_json(path: Path, payload: dict) -> None:
 
 def run_window(stamp: str, out_root: Path, skip_ceiling: bool, max_gib: int) -> dict:
     """执行一次完整窗口。"""
-    from tools.op_agent.guard import check_npu_environment
+    from tools.operator_tools.guard import check_npu_environment
 
     status = check_npu_environment(required_cards=2)
     if not status.has_npu or not status.is_tp2_ready:

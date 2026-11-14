@@ -31,7 +31,7 @@ CUBE_ATOM_M = 16
 DTYPE_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4}
 
 # 事实来源：Qwen3.5-35B-A3B (TP=2) 的层结构常量，与 ops/*/REPORT.md、
-# host-proposals/GDN-qkv-norm/proposal_meta.json、tools/op_agent/qwen35_shapes.py
+# host-proposals/GDN-qkv-norm/proposal_meta.json
 # 中登记的值保持一致；改模型时改这里，不要在函数内部硬编码。
 PROFILES = {
     "qwen35-a3b-tp2": {

@@ -1,0 +1,35 @@
+# 本地提交前的快检钩子：只跑纯文本、无设备、几秒内完成的检查。
+#
+# 用途是拦住"标签比证据走得远"这类问题——例如把 L0 加速比写成
+# `serving_status: verified_faster`，而同一算子的 evidence.json 里
+# `serving_end_to_end.tested` 仍是 false。CI 仍以 .github/workflows/ 为准，
+# 这里只是让问题在 `git commit` 时就被发现。
+#
+# 安装一次即可：
+#   python -m pip install pre-commit pytest ruff
+#   pre-commit install
+# 手动全量复跑：
+#   pre-commit run --all-files
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        description: 与 CI 同一条命令，尊重 pyproject.toml 的 exclude
+        entry: ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+
+      - id: ruff-format
+        name: ruff format --check
+        description: 与 CI 同一条命令；需要改写时用 ruff format <file>
+        entry: ruff format --check --force-exclude
+        language: system
+        types_or: [python, pyi]
+
+      - id: offline-contracts
+        name: 离线交付检查
+        entry: env -u PYTHONPATH pytest @tests/offline-checks.args
+        language: system
+        pass_filenames: false
+        always_run: true

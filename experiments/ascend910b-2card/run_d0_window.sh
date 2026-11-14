@@ -86,7 +86,7 @@ if [[ "${DRY_RUN}" != "1" ]]; then
 
   "${PYTHON}" - <<'PY'
 import sys
-from tools.op_agent.guard import check_npu_environment
+from tools.operator_tools.guard import check_npu_environment
 
 status = check_npu_environment(required_cards=2)
 print(f"npu:      has_npu={status.has_npu} devices={status.device_count} "

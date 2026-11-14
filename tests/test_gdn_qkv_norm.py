@@ -8,12 +8,17 @@ from types import SimpleNamespace
 
 import pytest
 
-torch = pytest.importorskip("torch")
+from vllm_ascend_split_batch import gdn_qkv_norm as api
 
-from vllm_ascend_split_batch import gdn_qkv_norm as api  # noqa: E402
+
+@pytest.fixture
+def torch():
+    return pytest.importorskip("torch", reason="CPU tensor tests need torch")
 
 
 def unpack(x):
+    import torch
+
     if x is None:
         return None, None, None
     seq_len = x.shape[0]
@@ -30,14 +35,17 @@ def unpack(x):
 
 
 def norm(x):
+    import torch
+
     f = x.float()
     return (f * torch.rsqrt((f * f).sum(-1, keepdim=True) + 1e-6)).to(x.dtype)
 
 
 @pytest.mark.parametrize("tokens", [17, 825, 1489, 1587, 2048])
 @pytest.mark.parametrize("prefix", [1, 16])
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
-def test_mixed_prefix_reuse_layout_and_alias(tokens, prefix, dtype):
+@pytest.mark.parametrize("dtype", ["bfloat16", "float16", "float32"])
+def test_mixed_prefix_reuse_layout_and_alias(torch, tokens, prefix, dtype):
+    dtype = getattr(torch, dtype)
     torch.manual_seed(0)
     x = torch.randn(tokens, 4096, dtype=dtype)
     saved = x.clone()
@@ -61,7 +69,7 @@ def test_mixed_prefix_reuse_layout_and_alias(tokens, prefix, dtype):
     torch.testing.assert_close(x, saved, rtol=0, atol=0)
 
 
-def test_wrapper_mapping_and_output_lifetime(monkeypatch):
+def test_wrapper_mapping_and_output_lifetime(torch, monkeypatch):
     monkeypatch.setattr(api, "validate", lambda x: None)
 
     def launch(x, flat):
@@ -90,12 +98,14 @@ def test_wrapper_mapping_and_output_lifetime(monkeypatch):
     [
         {"shape": (17, 4096)},
         {"stride": lambda: (6176, 1)},
-        {"dtype": torch.float32},
+        {"dtype": "float32"},
         {"requires_grad": True},
         {"device": SimpleNamespace(type="cpu")},
     ],
 )
-def test_guard_rejects_unsupported(change):
+def test_guard_rejects_unsupported(torch, change):
+    if "dtype" in change:
+        change = {"dtype": getattr(torch, change["dtype"])}
     attrs = dict(
         shape=(16, 4096),
         stride=lambda: (4096, 1),

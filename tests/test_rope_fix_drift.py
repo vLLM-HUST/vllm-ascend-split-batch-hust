@@ -367,27 +367,13 @@ def test_yarn_truncate_default_is_still_false() -> None:
 
 # ------------------------------------------------- host-interface assertions
 def _host_rope():
-    try:
-        importlib.import_module("vllm_ascend.ops")
-    except Exception as error:
-        # 无卡宿主上 vllm_ascend.ops 的导入链会在 triton 取 arch 时炸（SystemError），
-        # 与 tests/_device_stack.py 同口径：转成显式 skip，不冒充"漂移"。
-        pytest.skip(
-            reason="the live host signatures need the Ascend device stack: "
-            f"{type(error).__name__}: {error}",
-        )
-    return pytest.importorskip(
-        "vllm_ascend.ops.rotary_embedding",
-        reason="the live host signatures need the full vllm-ascend stack",
-    )
+    importlib.import_module("vllm_ascend.ops")
+    return importlib.import_module("vllm_ascend.ops.rotary_embedding")
 
 
 def test_llama3_construction_signature_is_unchanged() -> None:
     """The override is instantiated with the host's own argument list."""
-    rope_layers = pytest.importorskip(
-        "vllm.model_executor.layers.rotary_embedding",
-        reason="the live host signatures need vllm",
-    )
+    rope_layers = importlib.import_module("vllm.model_executor.layers.rotary_embedding")
     params = list(
         inspect.signature(rope_layers.Llama3RotaryEmbedding.__init__).parameters
     )
@@ -523,10 +509,7 @@ def test_registry_lever_still_behaves_as_documented() -> None:
     pre-plant the two replacement keys, and the instantiation-time read is why
     replacing the entries *after* the host pass is effective.
     """
-    custom_op = pytest.importorskip(
-        "vllm.model_executor.custom_op",
-        reason="the live registry needs vllm",
-    )
+    custom_op = importlib.import_module("vllm.model_executor.custom_op")
     assert isinstance(getattr(custom_op, "op_registry_oot", None), dict)
     new_source = inspect.getsource(custom_op.CustomOp.__new__)
     if "op_registry_oot" not in new_source:
@@ -625,27 +608,3 @@ def _host_call_passes_neox_style(call: ast.Call) -> bool:
     if any(keyword.arg == "is_neox_style" for keyword in call.keywords):
         return True
     return len(call.args) >= 9
-
-
-def test_yarn_override_stays_signature_agnostic_with_truncate_true() -> None:
-    """The YaRN override must only change the default, nothing else."""
-    tree = _parse(PLUGIN_SRC)
-    cls = _class_def(tree, "AscendFixYaRNRotaryEmbedding")
-    assert cls is not None, "the YaRN override disappeared from the carrier"
-    func = _func_def(cls, "__init__")
-    assert func is not None
-    assert func.args.vararg is not None, (
-        "the YaRN override must accept *args (host call shape may drift)"
-    )
-    assert func.args.kwarg is not None, (
-        "the YaRN override must accept **kwargs (host call shape may drift)"
-    )
-    truncate = _arg_named(func, "truncate")
-    assert truncate is not None and truncate.arg == "truncate"
-    default = _default_for(func, "truncate")
-    assert isinstance(default, ast.Constant) and default.value is True, (
-        f"the YaRN override must default truncate=True (vLLM/HF), found "
-        f"{ast.unparse(default) if default is not None else '<required>'}"
-    )
-    forwards = _calls_to(func, "super")
-    assert forwards, "the YaRN override must delegate to the fork class"

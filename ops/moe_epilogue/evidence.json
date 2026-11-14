@@ -79,7 +79,8 @@
     "per_token_time_delta_pct": 0.88,
     "conclusion": "within noise; no repeated measurement performed on the host-fork form",
     "rationale": "L4 puts the operator at 1.55% -> 1.31% of all-kernel time, a 37.0 ms saving inside 14500 ms (0.26%). Same-config run spread in this cohort measures 2.04%, so an 8-run ABBA design cannot resolve a 0.26% effect; the signal is about 8x smaller than the noise.",
-    "prior_run": "gen-rate -1.29%, per-token time +0.88% over 8 runs; a second 256/512 @1 cohort gave per-token -0.58% against a 2.04% same-config spread"
+    "prior_run": "gen-rate -1.29%, per-token time +0.88% over 8 runs; a second 256/512 @1 cohort gave per-token -0.58% against a 2.04% same-config spread",
+    "applicability": "historical"
   },
   "status": "default_off_host_fork_measured",
   "default_enabled": false,

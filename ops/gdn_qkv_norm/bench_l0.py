@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """L0 microbenchmark for gdn_qkv_norm (vllm_ascend/ops/gdn.py:552-553,692-693)."""
 
+if __name__ == "__main__":
+    print("No standalone measurement provided; callable implementation only.")
+    raise SystemExit(3)
+
+
 import torch
 import triton
 import triton.language as tl
@@ -72,7 +77,3 @@ def optimized_op(x: torch.Tensor):
         v.stride(1),
     )
     return q_norm, k_norm, v
-
-
-if __name__ == "__main__":
-    print("Benchmarking gdn_qkv_norm...")

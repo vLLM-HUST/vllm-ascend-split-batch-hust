@@ -1,0 +1,240 @@
+{
+  "schema": "mod-acceptance-evidence/v1",
+  "record_kind": "contract_and_repository_audit_not_model_measurement",
+  "sources": {
+    "standard_id": "five-datasets-20261113-v1",
+    "website_publication_commit": "9337a419a983d0f063ab27e781493414de2240da",
+    "standard_url": "https://vllm-hust.sage.org.ai/data/dataset-standard-v1/standard.json",
+    "published_standard_sha256": "66c050b7c6d705853f10bc437e6ace1707a9b46d43b6bdb7159724045045b756",
+    "acceptance_url": "https://vllm-hust.sage.org.ai/b0-b1.html",
+    "acceptance_renderer_url": "https://vllm-hust.sage.org.ai/assets/b0-b1.js?v=qualified-pair-20261103&v2=m01-reference-20261114",
+    "read_method": "WebFetch content and publication manifest read in this session",
+    "raw_bytes_verified_on_remote": false,
+    "remote_fetch_limitation": "HTTP 403; source digest is publisher-declared, not independently verified here"
+  },
+  "contract": {
+    "datasets": [
+      {
+        "id": "mmlu",
+        "name": "MMLU-Pro",
+        "mode": "quality_and_inference",
+        "tasks": 200,
+        "requests_per_arm": 200,
+        "max_output_tokens": 8192,
+        "concurrency": 200,
+        "temperature": 0,
+        "seed": 0,
+        "arrival": "simultaneous",
+        "protocol": "mmlu-fixed200.json"
+      },
+      {
+        "id": "hle",
+        "name": "HLE-Verified",
+        "mode": "quality_and_inference",
+        "tasks": 200,
+        "requests_per_arm": 200,
+        "max_output_tokens": 16384,
+        "judge_max_tokens": 8192,
+        "concurrency": 16,
+        "temperature": 0,
+        "seed": 17,
+        "strata": {
+          "gold_text": 64,
+          "gold_image": 10,
+          "revision_text": 113,
+          "revision_image": 13
+        },
+        "protocol": "hle-fixed200.json"
+      },
+      {
+        "id": "frontier",
+        "name": "FrontierScience",
+        "mode": "quality_and_inference",
+        "tasks": 160,
+        "requests_per_arm": 160,
+        "max_output_tokens": 16384,
+        "judge_max_tokens": 8192,
+        "concurrency": 16,
+        "temperature": 0,
+        "seed": 17,
+        "tracks": {
+          "olympiad": 100,
+          "research": 60
+        },
+        "protocol": "frontier-full160.json"
+      },
+      {
+        "id": "swe",
+        "name": "SWE-bench Pro",
+        "mode": "inference_only",
+        "tasks": 32,
+        "requests_per_arm": 64,
+        "max_output_tokens": 2048,
+        "concurrency": 8,
+        "temperature": 0,
+        "seed": 17,
+        "protocol": "public-agent-trace-fixed32-v1.json"
+      },
+      {
+        "id": "terminal",
+        "name": "Terminal-Bench 2.1",
+        "mode": "inference_only",
+        "tasks": 32,
+        "requests_per_arm": 48,
+        "max_output_tokens": 2048,
+        "concurrency": 8,
+        "temperature": 0,
+        "seed": 17,
+        "protocol": "public-agent-trace-fixed32-v1.json"
+      }
+    ],
+    "protocol_artifacts": {
+      "mmlu-fixed200.json": "8124492d6c59f53817116e27b32cd86c7b06c5ce59a45d1d77df56c080772c87",
+      "hle-fixed200.json": "ffcdd5e27b0822937b0f60aea1ca7c88eac82a39fd9d55c50f41c797ba676282",
+      "frontier-full160.json": "aefdc72f23240d59ba5b54e1b1294cec31937ed993fac2617daec61258d04311",
+      "public-agent-trace-fixed32-v1.json": "eacf3628cda8d7accc2e39b20fce687b1deb1cb0b0f470e8b11c8dd4517f71f8",
+      "public-agent-trace-source-selection-v1.json": "f88229564ca29589608055c08859aaaab04d6e6f6259d6be4e88919b44eef08f",
+      "swe-agent-v110-tools.json": "95c0546bbc92c4a6a9e6780ae825d78e05e2c436211603790502303b7f74fcf8"
+    },
+    "trace": {
+      "model_profile": "Qwen3.5-35B-A3B BF16",
+      "max_input_tokens": 16384,
+      "tokenize_hash_match_required": true,
+      "fresh_cache_salt": true,
+      "kv_reuse": false,
+      "execute_tools": false,
+      "tool_choice": "none",
+      "thinking": false
+    },
+    "generation": {
+      "preserve_eos": true,
+      "hle_frontier_thinking": false,
+      "judge_shared_between_arms": true,
+      "judge_in_solver_cost": false,
+      "judge_in_solver_performance": false,
+      "planned_quality_denominator": true
+    },
+    "targets": {
+      "effective_compute": {
+        "current_eta_ref_min_percent": 50,
+        "final_eta_ref_min_percent": 90,
+        "independent_reference_required": true
+      },
+      "serving": {
+        "output_rate_gain_min_percent": 10,
+        "mean_first_token_reduction_min_percent": 5,
+        "mean_per_token_reduction_min_percent": 5,
+        "same_run_quality_not_lower": true
+      },
+      "stability": {
+        "all_datasets_required": true,
+        "continuous_windows_required": true,
+        "formal_failures_max": 0,
+        "tail_absolute_slo": null
+      },
+      "cost": {
+        "unit_output_cost_reduction_min_percent": 10,
+        "device_utilization_must_increase": true,
+        "same_run_quality_not_lower": true
+      }
+    },
+    "continuous": {
+      "source": "b0-b1 reference continuous-window method; adopted as repository execution contract",
+      "input_profiles": [
+        "4K",
+        "16K"
+      ],
+      "reference_actual_input_tokens": [
+        4115,
+        16407
+      ],
+      "concurrency": 8,
+      "warmup_seconds": 60,
+      "formal_arrival_seconds": 300,
+      "drain_all": true,
+      "max_output_tokens": 256,
+      "percentiles": [
+        95,
+        99
+      ]
+    },
+    "aggregation": "Report each dataset separately; freeze target workload applicability before execution; retain all repetitions and take median of paired rate ratios."
+  },
+  "assessment": {
+    "reviewed_commit": "2ae9c05a277d66eaebcdb9429ef0ec704e8625a7",
+    "scope": "Repository audit at reviewed_commit with subsequent offline policy corrections; no model execution. Read live DELIVERY_INDEX.json and operator evidence for current status.",
+    "execution_complete": false,
+    "acceptance_passed": null,
+    "campaign_identity": null,
+    "targets": {
+      "effective_compute": {
+        "passed": null,
+        "evidence_refs": [],
+        "missing": [
+          "Necessary effective work accounting",
+          "Synchronized uninstrumented timing",
+          "Independent calibration and reference dependency graph"
+        ]
+      },
+      "serving": {
+        "passed": null,
+        "evidence_refs": [],
+        "missing": [
+          "Frozen MOD activation and baseline pair",
+          "All five dataset request and score records",
+          "SSE timestamps and complete solver batch accounting"
+        ]
+      },
+      "stability": {
+        "passed": null,
+        "evidence_refs": [],
+        "missing": [
+          "Matched task coverage and service exit records",
+          "Continuous context windows and tail statistics"
+        ]
+      },
+      "cost": {
+        "passed": null,
+        "evidence_refs": [],
+        "missing": [
+          "Resource price identity and allocated expenses",
+          "Same-window output counts",
+          "Time-weighted per-device utilization samples"
+        ]
+      }
+    },
+    "dataset_execution": {
+      "mmlu": {
+        "tested": false,
+        "evidence_refs": [],
+        "reason": "No qualifying pair for this MOD and frozen protocol found in reviewed repository evidence."
+      },
+      "hle": {
+        "tested": false,
+        "evidence_refs": [],
+        "reason": "No qualifying pair for this MOD and frozen protocol found in reviewed repository evidence."
+      },
+      "frontier": {
+        "tested": false,
+        "evidence_refs": [],
+        "reason": "No qualifying pair for this MOD and frozen protocol found in reviewed repository evidence."
+      },
+      "swe": {
+        "tested": false,
+        "evidence_refs": [],
+        "reason": "No qualifying pair for this MOD and frozen protocol found in reviewed repository evidence."
+      },
+      "terminal": {
+        "tested": false,
+        "evidence_refs": [],
+        "reason": "No qualifying pair for this MOD and frozen protocol found in reviewed repository evidence."
+      }
+    },
+    "skill_validation": {
+      "structural_check": "passed",
+      "structural_check_command": "pytest -q tests/test_benchmark_standard.py::test_mod_skill_structure_and_local_contract_references",
+      "independent_agent_scenarios": "not_run",
+      "reason": "No subagent tool available in this session; manual application is not an independent behavioral evaluation."
+    }
+  }
+}

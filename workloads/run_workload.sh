@@ -16,6 +16,10 @@ TAG="${RUN_TAG:-$(date +%Y%m%d_%H%M%S)}"
 mkdir -p "${OUT_DIR}"
 
 find_sharegpt_dataset() {
+  if [[ -n "${VLLM_HUST_DATASET_SHAREGPT:-}" && ! -f "${VLLM_HUST_DATASET_SHAREGPT}" ]]; then
+    echo "Invalid VLLM_HUST_DATASET_SHAREGPT path" >&2
+    return 1
+  fi
   local candidates=(
     "${VLLM_HUST_DATASET_SHAREGPT:-}"
     "/models/datasets/ShareGPT/ShareGPT_V3_unfiltered_cleaned_split.json"
@@ -64,7 +68,6 @@ case "${WORKLOAD}" in
     )
     if [[ "${DRY_RUN}" == "1" ]]; then
       echo "[DRY-RUN] ${BENCH_CMD[*]}"
-      echo '{"output_throughput": 780.0, "mean_tpot_ms": 36.0, "mean_ttft_ms": 1200.0}' > "${OUT_DIR}/result_random_${TAG}.json"
     else
       "${BENCH_CMD[@]}"
     fi
@@ -76,7 +79,10 @@ case "${WORKLOAD}" in
       echo "检测到本地 ShareGPT 数据集: ${DATASET_PATH}"
       DATASET_ARGS=(--dataset-name sharegpt --dataset-path "${DATASET_PATH}")
     else
-      echo "未检测到本地 ShareGPT 文件，使用默认 sharegpt 数据源"
+      if [[ -n "${VLLM_HUST_DATASET_SHAREGPT:-}" || "${DRY_RUN}" != "1" ]]; then
+        echo "Set VLLM_HUST_DATASET_SHAREGPT to an existing dataset file" >&2
+        exit 1
+      fi
       DATASET_ARGS=(--dataset-name sharegpt)
     fi
     BENCH_CMD=(
@@ -94,7 +100,6 @@ case "${WORKLOAD}" in
     )
     if [[ "${DRY_RUN}" == "1" ]]; then
       echo "[DRY-RUN] ${BENCH_CMD[*]}"
-      echo '{"output_throughput": 650.0, "mean_tpot_ms": 42.0, "mean_ttft_ms": 1500.0}' > "${OUT_DIR}/result_sharegpt_${TAG}.json"
     else
       "${BENCH_CMD[@]}"
     fi
@@ -123,7 +128,6 @@ case "${WORKLOAD}" in
     )
     if [[ "${DRY_RUN}" == "1" ]]; then
       echo "[DRY-RUN] ${BENCH_CMD[*]}"
-      echo '{"output_throughput": 520.0, "mean_tpot_ms": 50.0, "mean_ttft_ms": 2200.0}' > "${OUT_DIR}/result_long_prefix_${TAG}.json"
     else
       "${BENCH_CMD[@]}"
     fi
@@ -134,4 +138,8 @@ case "${WORKLOAD}" in
     ;;
 esac
 
-echo "Workload 压测完成，结果已保存至 ${OUT_DIR}"
+if [[ "${DRY_RUN}" == "1" ]]; then
+  echo "Dry-run only; no benchmark results written."
+else
+  echo "Workload 压测完成，结果已保存至 ${OUT_DIR}"
+fi
