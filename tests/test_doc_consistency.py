@@ -43,6 +43,7 @@ PROSE_SURFACE = (
     ".openbitfun/skills/mod-acceptance/SKILL.md",
     "docs/npu-benchmark-execution-guide.md",
     ".openbitfun/skills/operator-sol-optimizer/SKILL.md",
+    ".openbitfun/skills/github-env-auth/SKILL.md",
     "docs/container-and-plugin-boundary-spec.md",
     "docs/HOST_CONTRACT.md",
     "docs/cohort-and-ownership.md",

@@ -15,3 +15,5 @@ fusion_result.json
 .openbitfun/skills/*
 !.openbitfun/skills/mod-acceptance/
 !.openbitfun/skills/operator-sol-optimizer/
+!.openbitfun/skills/github-env-auth/
+.env
