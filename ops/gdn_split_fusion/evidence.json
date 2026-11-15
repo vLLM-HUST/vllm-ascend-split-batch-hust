@@ -198,12 +198,15 @@
         "off_ms": 8560.0,
         "on_ms": 5163.0,
         "saved_ms": 3397.0,
+        "self_ratio_pct": 39.68,
+        "self_ratio_denominator": "same-window target-group baseline (8560 ms)",
         "pct_of_all_kernels": 5.05
       },
       "note": "this window was affected by device drift: unrelated operators such as Cast (+1928.9 ms) and MatMulV2 (+1298.0 ms) also grew, so only the within-window target group is comparable"
     },
     "net_attributable_ms": -350.2,
     "net_attributable_pct": -2.41,
+    "quotable_caliber": "-39.7% is the 263k-KV cohort target-group self-ratio (8560 -> 5163 ms, denominator = same-window baseline target group). The all-kernel-denominator variants (2.41% / 5.00% / 5.05%) are internal references only and must not be quoted as the operator saving.",
     "all_kernel_total": {
       "off_ms": 14518.0,
       "on_ms": 14198.3,
@@ -216,6 +219,8 @@
         "off_ms": 633.5,
         "on_ms": 283.3,
         "saved_ms": 350.2,
+        "self_ratio_pct": 55.28,
+        "self_ratio_denominator": "same-window target-group baseline (633.5 ms)",
         "pct_of_all_kernels": 2.41
       }
     },
@@ -241,6 +246,8 @@
         "off_ms": 4478.9,
         "on_ms": 2080.6,
         "saved_ms": 2398.3,
+        "self_ratio_pct": 53.55,
+        "self_ratio_denominator": "same-window target-group baseline (4478.9 ms)",
         "pct_of_all_kernels": 5.0
       },
       "note": "device drift in this window: Cast +292.5 ms and MatMulV2 -817.4 ms moved in opposite directions, so only the within-window target group is comparable"
@@ -266,8 +273,8 @@
       "per_token_ms_pct": 1.78,
       "note": "all three blocks negative; -3.17% before dropping one outlier run; baseline-run spread 4.29%"
     },
-    "conclusion": "both cohorts sit inside their own run spread, so neither a gain nor a loss is claimed. Operator-level saving is 5.00% (512) and 5.05% (2048), effectively equal, while the serving results differ in sign; that difference is noise rather than a load effect, so no load-dependent explanation is offered.",
-    "root_cause": "op_statistic sums 14518 ms of kernel time for a bench whose wall time is far shorter, so the kernels do not run back to back; removing 350 ms only widens the gaps."
+    "conclusion": "both cohorts sit inside their own run spread, so neither a gain nor a loss is claimed. Target-group self-ratio is 53.5% (512) and 39.7% (2048), effectively equal, while the serving results differ in sign; that difference is noise rather than a load effect, so no load-dependent explanation is offered.",
+    "root_cause": "observed: op_statistic sums 14518 ms of kernel time while the same bench wall time is far shorter, and the two serving cohorts (+0.46% / -1.27%) both sit inside their own run spread (4.18% / 4.29%). hypothesis, not yet verified: the 350.2 ms saving only widens the gaps between kernels. no msprof timeline was captured and no kernel-bound counter-test was run, so this stays a hypothesis."
   },
   "known_issue": "M=1 pays ~1.4us of custom-op dispatch overhead per component (~84us per step over 30 layers, about 0.13% of TPOT) because the shape gate must stay inside the op",
   "status": "default_off_serving_no_gain",
