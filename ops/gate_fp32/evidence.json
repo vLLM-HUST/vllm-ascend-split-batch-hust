@@ -21,7 +21,8 @@
     "conclusion": "eliminates 40x Cast[256,2048] ops per decode step",
     "baseline_median_us": 1823.11,
     "optimized_median_us": 33.19,
-    "speedup": 54.93
+    "speedup": 54.93,
+    "measurement": "torch.npu.Event, iters=1000, eager per-call issuance; the same 40-layer chain measured inside NPUGraph packed replay gives 125.09 -> 3.11 us (40.2x), local replication 2026-11-14 on host baseline e59aaeef2. The two calibers differ by ~15x in absolute value while the ratio stays close, so the caliber must be stated whenever this number is quoted."
   },
   "l3_numerical_guard": {
     "passed": true,
@@ -70,7 +71,9 @@
       "gen_rate_on": 330.81,
       "gen_rate_delta_pct": 1.68,
       "mean_step_delta_pct": -2.52,
-      "intra_group_spread_pct": {"off": 1.21, "on": 1.07}
+      "intra_group_spread_pct": {"off": 1.21, "on": 1.07},
+      "role": "auxiliary_not_used_for_verdict",
+      "quotable_with": "the primary random workload is -0.16% (within_noise) and the gate stays default-off"
     },
     "cross_phase_result": {
       "workload": "long-prefix",
