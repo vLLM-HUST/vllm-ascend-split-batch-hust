@@ -50,6 +50,7 @@ PROSE_SURFACE = (
     "docs/release.md",
     "docs/delivery-inventory.md",
     "docs/pitfalls.md",
+    "docs/execution-workflow.md",
     "ops/README.md",
 )
 

@@ -93,4 +93,4 @@ JSON/TXT/LOG 结果；混合源码改动、测试、workflow、依赖或打包�
 
 改了什么就要同步它的权威文档(分工表见 [README.md](README.md)):
 行为/开关 → 根 README;patch 面 → HOST_CONTRACT.md + release.md;
-新坑 → pitfalls.md;里程碑/计划 → progress.md。agent 在收尾时自查一遍。
+新坑 → pitfalls.md;当前状态与证据边界 → delivery-inventory.md。agent 在收尾时自查一遍。

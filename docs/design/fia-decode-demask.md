@@ -1,7 +1,7 @@
 # Design note: decode FIA de-mask (drop the redundant 2048² int8 causal template)
 
 - 状态：**新能力，`import_only`**（未进 manifest `active`；三项证据见
-  `../../docs/progress.md` 与
+  `docs/release.md` §3 与
   该实验的探针报告（仓外归档））
 - 开关：`VLLM_HUST_FIA_DEMASK=1`（默认 0，不 patch、不注入、日志零输出）
 - 诊断：`VLLM_HUST_FIA_DEMASK_TRACE=1`（observe-only：只记录、不改调用；

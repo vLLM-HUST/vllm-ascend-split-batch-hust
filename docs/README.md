@@ -18,7 +18,7 @@
 | 10 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
 | 11 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
 | 12 | [算子优化 Skill](../.openbitfun/skills/operator-sol-optimizer/SKILL.md) | SOL 计算、单点优化与证据交接 |
-| 13 | [progress.md](progress.md) | 项目当前状态 |
+| 13 | [delivery-inventory.md](delivery-inventory.md) | 当前各算子状态、收益证据边界 |
 
 ## 单一事实源分工
 
@@ -35,6 +35,7 @@
 | MOD 当前缺项与证据核查 | [mod-acceptance-audit.md](mod-acceptance-audit.md)、[结构化记录](mod-acceptance/evidence.json) |
 | MOD 验收 Agent 流程 | [mod-acceptance skill](../.openbitfun/skills/mod-acceptance/SKILL.md) |
 | 算子测试标准、形状合同与验收报告 | [operator-benchmark-standard.md](operator-benchmark-standard.md) |
+| 各阶段测试执行手册（进入条件、执行命令、回填顺序、决策树） | [execution-workflow.md](execution-workflow.md) |
 | **NPU 带卡环境实测与评测指南** | [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) |
 | **cohort 边界（我们能声称什么）× 四项归属** | [cohort-and-ownership.md](cohort-and-ownership.md)（约束入口 [../AGENTS.md](../AGENTS.md) 硬约束 6） |
 | 宿主提案补丁（tier-2，未提交上游） | [`host-proposals/README.md`](../host-proposals/README.md)（章程）+ `host-proposals/<id>/`（`proposal_meta.json` = env 语法/哈希/版本精确锁定/上游状态）；`docs/upstream/` 只是路径消歧 stub |
