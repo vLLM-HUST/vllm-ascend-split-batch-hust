@@ -81,7 +81,10 @@ COUNT_CLAIMS = (
 OPERATOR_REQUIRED = ("README.md", "REPORT.md", "bench_l0.py", "evidence.json")
 
 #: 术语表必备章节前缀，顺序即文档结构。
-GLOSSARY_SECTIONS = ("## 0.", "## 1.", "## 2.", "## 3.", "## 4.", "## 5.", "## 6.")
+GLOSSARY_SECTIONS = ("## 1.", "## 2.", "## 3.")
+
+#: 术语表的词条小节前缀。
+GLOSSARY_TERM_SECTIONS = "### 1."
 
 #: 锚点里可以按仓库相对路径校验的后缀。
 ANCHOR_SUFFIXES = (".py", ".md", ".json", ".toml", ".sh", ".sha256", ".yaml", ".yml")
@@ -146,7 +149,7 @@ def test_glossary_structure_and_term_uniqueness():
     for line in text.splitlines():
         if line.startswith("## "):
             inside_terms = False
-        if line.startswith("### 3."):
+        if line.startswith(GLOSSARY_TERM_SECTIONS):
             inside_terms = True
             continue
         if inside_terms and line.startswith("|"):

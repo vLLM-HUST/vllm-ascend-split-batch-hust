@@ -40,5 +40,262 @@
     "concurrency": 0,
     "speedup": null,
     "note": "not applicable; operator rejected"
-  }
+  },
+  "device_retests": [
+    {
+      "run_id": "npu-retest-20261115T041855Z-layout-fixed",
+      "scope": "isolated operator, synthetic inputs on current runtime; no model, service or MOD acceptance",
+      "environment": {
+        "timestamp": "2026-11-15T04:49:42+00:00",
+        "triton": {
+          "version": "3.2.0",
+          "path": "/usr/local/python3.12.13/lib/python3.12/site-packages/triton",
+          "key_sha256": "73b738272f0aea6d69eccefdb8a7405173f3f99169f46c355ea9b1beeb1be1da"
+        },
+        "cache": {
+          "dir": "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/triton-cache",
+          "fresh": false,
+          "fresh_effective": true,
+          "always_compile": false
+        },
+        "cann": {
+          "ascend_home_path": "/usr/local/Ascend/cann-9.1.0",
+          "info_sha256": "a9b17ef608ebeb70ade09cde1c12a545eb5e8f3e5312f6806ca0d368b0464848",
+          "info_file": "/usr/local/Ascend/cann-9.1.0/aarch64-linux/ascend_toolkit_install.info",
+          "version": "9.1.0"
+        },
+        "torch": {
+          "version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0.post4"
+        },
+        "device": {
+          "ASCEND_RT_VISIBLE_DEVICES": null,
+          "current_device": 0,
+          "npu_name": "Ascend910B2"
+        },
+        "cmdline": {
+          "triton_impl_name": "triton_ascend_impl",
+          "non_compute": false
+        }
+      },
+      "generic_verifier": {
+        "passed": 3,
+        "total": 3,
+        "returncode": 0,
+        "layout_preserved": true
+      },
+      "strict_check": {
+        "passed": 3,
+        "total": 3,
+        "cases": [
+          {
+            "case": 0,
+            "passed": true,
+            "shape": [
+              [
+                1,
+                2048
+              ],
+              [
+                256,
+                2048
+              ],
+              [
+                1,
+                2048
+              ],
+              [
+                257,
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                1
+              ],
+              [
+                2048,
+                1
+              ],
+              [
+                2048,
+                1
+              ],
+              [
+                2048,
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "baseline": {
+              "median_us": 10.285000130534172,
+              "p90_us": 10.362999886274338,
+              "p99_us": 11.708000302314758
+            },
+            "candidate": {
+              "median_us": 4.404000006616116,
+              "p90_us": 5.369000136852264,
+              "p99_us": 5.593999847769737
+            },
+            "speedup": 2.335376956195061
+          },
+          {
+            "case": 1,
+            "passed": true,
+            "shape": [
+              [
+                8,
+                2048
+              ],
+              [
+                256,
+                2048
+              ],
+              [
+                1,
+                2048
+              ],
+              [
+                257,
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                1
+              ],
+              [
+                2048,
+                1
+              ],
+              [
+                2048,
+                1
+              ],
+              [
+                2048,
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "baseline": {
+              "median_us": 11.20849996805191,
+              "p90_us": 11.401999741792679,
+              "p99_us": 11.569999903440475
+            },
+            "candidate": {
+              "median_us": 8.473499864339828,
+              "p90_us": 8.623000234365463,
+              "p99_us": 8.787000179290771
+            },
+            "speedup": 1.3227710093230958
+          },
+          {
+            "case": 2,
+            "passed": true,
+            "shape": [
+              [
+                32,
+                2048
+              ],
+              [
+                256,
+                2048
+              ],
+              [
+                1,
+                2048
+              ],
+              [
+                257,
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                1
+              ],
+              [
+                2048,
+                1
+              ],
+              [
+                2048,
+                1
+              ],
+              [
+                2048,
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "baseline": {
+              "median_us": 10.345499962568283,
+              "p90_us": 10.512000322341919,
+              "p99_us": 10.631000250577927
+            },
+            "candidate": {
+              "median_us": 13.20899948477745,
+              "p90_us": 13.42799961566925,
+              "p99_us": 13.662000000476837
+            },
+            "speedup": 0.7832160168142052
+          }
+        ]
+      },
+      "measurement_accepted": true,
+      "measurement": {
+        "seed": 42,
+        "warmup": 10,
+        "repetitions_per_graph": 20,
+        "samples": 100,
+        "timing": "NPU event per replay, alternating order"
+      },
+      "limitations": [
+        "single device; frequency not locked",
+        "graph event time includes replay scheduling; not pure kernel time",
+        "memory peak, model L3, L4, service and MOD not retested",
+        "synthetic shapes do not establish current host callsite coverage",
+        "merged weights materialized outside timing; contiguous output copies included"
+      ],
+      "archive": {
+        "uri": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+        "files": {
+          "moe_gate_merge-graph.json": "1d8b6abf9b4e2ddd1516d9dd51eef694782e60f84fd2c61edaa7c417ddf5c343",
+          "moe_gate_merge-verify.json": "c15d94fbc47461caf75e109ba693dda8ab622aa8cf2ce297694ad6c0eda18304",
+          "moe_gate_merge-graph.log": "0cbeb670fbd9e110ef27a2f3679517bea52c752864f7afa6b1dac7a9ed4dc11f"
+        }
+      },
+      "source_sha256": {
+        ".openbitfun/npu-retest-20261115T041855Z/moe_gate_merge/moe_gate_merge.py": "206ebfb6504c6f1f7194bacfa5c38d49589e9f9f15693124e9bf99cceafc77de",
+        ".openbitfun/npu-retest-20261115T041855Z/moe_gate_merge/moe_gate_merge_triton_ascend_impl.py": "719c50d929075d50dd4f42572f432c18853dda2886ae03e81b5ab45679f33023",
+        ".openbitfun/npu-retest-20261115T041855Z/moe_gate_merge/moe_gate_merge_torch.py": "206ebfb6504c6f1f7194bacfa5c38d49589e9f9f15693124e9bf99cceafc77de",
+        ".openbitfun/npu-retest-20261115T041855Z/graph_retest.py": "a853c9c06d77f29ff52b540e81c03a0da4bdf1ca56f098d1918b8ce5cf7400bd",
+        ".openbitfun/skills/triton-op-verifier/scripts/_common_utils.py": "3a31734cee87413b41dd42306fab9470ae4e9bc8c388b9320a41ecfda00ba625",
+        "ops/moe_gate_merge/bench_l0.py": "d7e8be4ed8ccfecf2e992775a3e18aa8e7898517ff3ad9cbcb2de78a9382ff80"
+      },
+      "commands": {
+        "verify": [
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/skills/triton-op-verifier/scripts/verify.py",
+          "--op_name",
+          "moe_gate_merge",
+          "--verify_dir",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/moe_gate_merge"
+        ],
+        "graph": [
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/graph_retest.py",
+          "moe_gate_merge"
+        ]
+      },
+      "graph_returncode": 0
+    }
+  ]
 }

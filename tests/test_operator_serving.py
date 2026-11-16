@@ -36,6 +36,241 @@ timeline_insight = _load_module(
 )
 
 
+longrun = _load_module(
+    "tools.operator_tools.serving_longrun", "tools/operator_tools/serving_longrun.py"
+)
+
+
+operator_status = _load_module(
+    "tools.operator_tools.operator_status", "tools/operator_tools/operator_status.py"
+)
+
+
+def test_status_infers_active_operator_without_progress(tmp_path, monkeypatch):
+    (tmp_path / "plan.json").write_text(
+        json.dumps({"operators": [{"id": "op", "config": {}}]})
+    )
+    stage = tmp_path / "op/bench_0_off"
+    stage.mkdir(parents=True)
+    (stage / "server.log").write_text("Loading model\n")
+    monkeypatch.setattr(operator_status, "process_alive", lambda *a: True)
+    report = operator_status.collect(tmp_path)
+    assert report["status"] == "running"
+    assert report["operators"][0]["stage"] == "bench_0_off"
+    assert report["operators"][0]["latest_log"] == "Loading model"
+
+
+def test_status_rejects_summary_without_guards_and_overrides_old_completion(tmp_path):
+    (tmp_path / "plan.json").write_text(
+        json.dumps({"operators": [{"id": "op", "config": {}}]})
+    )
+    directory = tmp_path / "op"
+    directory.mkdir()
+    (directory / "summary.json").write_text('{"random": {"tested": true}}')
+    (tmp_path / "completion.json").write_text('{"status": "finished_pending_review"}')
+    report = operator_status.collect(tmp_path)
+    assert report["status"] == "finished_with_failures"
+    assert report["operators"][0]["status"] == "incomplete_evidence"
+    for name in ("serving_l3.json", "l4.json"):
+        (directory / name).write_text('{"passed": true}')
+    assert (
+        operator_status.collect(tmp_path)["operators"][0]["status"]
+        == "collected_pending_review"
+    )
+
+
+def test_status_displays_skip_reason_from_plan_over_stale_progress(tmp_path):
+    reason = "尚未接入独立服务开关；本批未执行服务测试"
+    (tmp_path / "plan.json").write_text(
+        json.dumps({"operators": [{"id": "op", "reason": reason}]})
+    )
+    (tmp_path / "progress.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "op",
+                    "status": "not_run",
+                    "reason": "Handled by preceding long run",
+                }
+            ]
+        )
+    )
+    output = tmp_path / "display.json"
+    text = operator_status.refresh([tmp_path], output)
+    assert f"op: not_run | reason: {reason}" in text
+    assert "Handled by preceding" not in text
+    saved = json.loads(output.read_text())["runs"][0]["operators"][0]
+    assert saved["reason"] == reason
+    assert output.with_suffix(".txt").read_text() == text
+
+
+def test_longrun_requires_complete_inventory():
+    import pytest
+
+    with pytest.raises(ValueError, match="every indexed operator"):
+        longrun.validate({"operators": [], "timeout_seconds": 60})
+
+
+def test_longrun_records_failure_and_continues(tmp_path, monkeypatch):
+    def fail(config, output):
+        raise ValueError("numerical guard failed")
+
+    monkeypatch.setattr(longrun.collector, "run", fail)
+    plan = {
+        "timeout_seconds": 60,
+        "operators": [
+            {"id": "first", "config": {}},
+            {"id": "second", "reason": "not integrated"},
+        ],
+    }
+    results = longrun.execute(plan, tmp_path)
+    assert results[0]["status"] == "failed"
+    assert results[1]["status"] == "not_run"
+    assert (tmp_path / "first/failure.json").exists()
+    assert json.loads((tmp_path / "progress.json").read_text()) == results
+
+
+def test_server_records_requested_shutdown_and_early_exit(tmp_path, monkeypatch):
+    import pytest
+
+    module = longrun.collector
+
+    class Process:
+        pid = 123456
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout):
+            self.returncode = -15
+
+    process = Process()
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *a, **kw: process)
+    monkeypatch.setattr(module, "request", lambda *a: None)
+    monkeypatch.setattr(module.os, "killpg", lambda *a: None)
+    config = {"port": 0, "gate": "VLLM_HUST_TEST", "server_command": ["unused"]}
+    with module.server(config, tmp_path / "normal", "off"):
+        pass
+    result = json.loads((tmp_path / "normal/exit.json").read_text())
+    assert result["shutdown_requested"] and result["collection_completed"]
+    assert not result["forced_kill"]
+    process.returncode = None
+    with (
+        pytest.raises(RuntimeError, match="before collection finished"),
+        module.server(config, tmp_path / "early", "off"),
+    ):
+        process.returncode = 1
+    result = json.loads((tmp_path / "early/exit.json").read_text())
+    assert result["returncode_before_shutdown"] == 1
+    assert not result["collection_completed"]
+    assert not result["shutdown_requested"]
+
+
+def test_guard_only_never_enters_performance(tmp_path, monkeypatch):
+    module = longrun.collector
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text("[]")
+    monkeypatch.setattr(module, "verify_host", lambda *a: None)
+    monkeypatch.setattr(module, "collect_guard", lambda *a: ["same"] * 8)
+
+    def forbidden(*args):
+        raise AssertionError("guard-only must not claim attribution or run benchmarks")
+
+    monkeypatch.setattr(module, "verify_profiles", forbidden)
+    module.run({"sharegpt_path": str(dataset), "guard_only": True}, tmp_path)
+    assert json.loads((tmp_path / "serving_l3.json").read_text())["passed"]
+    assert not (tmp_path / "summary.json").exists()
+
+
+def test_longrun_wait_uses_exit_event(monkeypatch):
+    calls = []
+    monkeypatch.setattr(longrun.os, "pidfd_open", lambda pid: 123)
+    monkeypatch.setattr(longrun.os, "close", calls.append)
+    monkeypatch.setattr(longrun.select, "select", lambda *args: ([123], [], []))
+    longrun.wait_previous(99, 60)
+    assert calls == [123]
+
+
+attribution = _load_module(
+    "tools.operator_tools.serving_attribution",
+    "tools/operator_tools/serving_attribution.py",
+)
+
+
+def _kernel(kind, inputs="", output="", dtype=""):
+    return {
+        "Type": kind,
+        "Input Shapes": inputs,
+        "Output Shapes": output,
+        "Input Data Types": dtype,
+        "Output Data Types": "FLOAT" if kind == "Cast" else dtype,
+    }
+
+
+def test_dedicated_attribution_rejects_noop_and_missing_paths():
+    for operator in attribution.GATES:
+        assert not attribution.evaluate(operator, [], [])["passed"]
+    rope = [_kernel("split_qkv_rmsnorm_mrope_kernel")] * 160
+    assert not attribution.evaluate("qwen_text_split_qkv_fuse", rope, rope)["passed"]
+
+
+def test_dedicated_attribution_conv_and_gate_cache():
+    conv = [_kernel("CausalConv1d")] * 480
+    transpose = [_kernel("Transpose", '"4096,4;2"', '"4,4096"')] * 480
+    assert attribution.evaluate("gdn_conv_pack", conv + transpose, conv)["passed"]
+    assert not attribution.evaluate(
+        "gdn_conv_pack", conv + transpose, conv + transpose
+    )["passed"]
+    router = [_kernel("MatMulV2", "1,2048;256,2048", dtype="FLOAT;FLOAT")] * 640
+    cast = [_kernel("Cast", "256,2048", "256,2048", "DT_BF16")] * 640
+    assert attribution.evaluate("gate_fp32", router + cast, router)["passed"]
+    assert not attribution.evaluate("gate_fp32", router + cast, [])["passed"]
+
+
+def test_dedicated_attribution_projection_and_split():
+    def mm(width):
+        return [
+            _kernel("MatMulV2", f"1,2048;{width},2048", dtype="DT_BF16;DT_BF16")
+        ] * 480
+
+    assert attribution.evaluate("gdn_merge_inproj", mm(6144) + mm(32), mm(6176))[
+        "passed"
+    ]
+    assert not attribution.evaluate("gdn_merge_inproj", mm(6144), mm(6176))["passed"]
+    conv = [_kernel("CausalConv1d")] * 480
+    fused = [_kernel("_unpack_kernel"), _kernel("_rearrange_kernel")] * 30
+    assert attribution.evaluate("gdn_split_fusion", conv, conv + fused)["passed"]
+    assert not attribution.evaluate("gdn_split_fusion", conv, conv + fused[:-1])[
+        "passed"
+    ]
+
+
+def test_dedicated_attribution_failure_blocks_benchmarks(tmp_path):
+    import pytest
+
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "hidden_size": 2048,
+                "num_experts": 256,
+                "layer_types": ["linear_attention"] * 30 + ["full_attention"] * 10,
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="Incomplete per-device"):
+        longrun.collector.verify_profiles(
+            {
+                "attribution": "gate_fp32",
+                "gate": attribution.GATES["gate_fp32"],
+                "world_size": 2,
+                "model_path": str(tmp_path),
+                "guard_server_args": ["--enforce-eager", "--no-enable-prefix-caching"],
+            },
+            tmp_path,
+        )
+
+
 def test_canonical_workloads_present_and_characterized():
     catalog = workloads.WORKLOAD_CATALOG
     for wid in ("random", "sharegpt", "long-prefix"):
@@ -268,6 +503,7 @@ def test_real_collection_stops_before_benchmark_on_greedy_mismatch(
         "tools.operator_tools.serving_collect",
         "tools/operator_tools/serving_collect.py",
     )
+    monkeypatch.setattr(collector, "verify_host", lambda *args: None)
     monkeypatch.setattr(collector, "collect_guard", lambda config, output, arm: [arm])
     monkeypatch.setattr(
         collector,
@@ -405,6 +641,7 @@ def test_real_collection_covers_catalog_and_uses_pairing(tmp_path, monkeypatch):
         "tools.operator_tools.serving_collect",
         "tools/operator_tools/serving_collect.py",
     )
+    monkeypatch.setattr(collector, "verify_host", lambda *args: None)
     monkeypatch.setattr(collector, "collect_guard", lambda *args: ["same"])
     monkeypatch.setattr(collector, "verify_profiles", lambda *args: None)
     monkeypatch.setattr(collector, "completion", lambda *args: None)
@@ -539,6 +776,58 @@ def test_collection_rejects_missing_dataset_before_server(tmp_path, monkeypatch)
         collector.run({"sharegpt_path": str(tmp_path / "missing")}, tmp_path)
 
 
+def test_host_probe_uses_explicit_cann_environment(tmp_path, monkeypatch):
+    import subprocess
+
+    collector = _load_module(
+        "tools.operator_tools.serving_collect",
+        "tools/operator_tools/serving_collect.py",
+    )
+    monkeypatch.setenv("PYTHONPATH", "/wrong-host")
+    monkeypatch.setenv("VLLM_HUST_UNUSED", "1")
+
+    def probe(argv, **kwargs):
+        assert argv[0] == "/existing-venv/bin/python"
+        assert kwargs["env"]["PYTHONPATH"] == "/cann/python/site-packages"
+        assert "VLLM_HUST_UNUSED" not in kwargs["env"]
+        assert kwargs["cwd"] == tmp_path
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+    monkeypatch.setattr(collector.subprocess, "run", probe)
+    collector.verify_host(
+        {
+            "python": "/existing-venv/bin/python",
+            "server_command": ["/existing-venv/bin/python", "-m", "vllm"],
+            "environment": {"PYTHONPATH": "/cann/python/site-packages"},
+        },
+        tmp_path,
+    )
+    assert json.loads((tmp_path / "host_preflight.json").read_text())["returncode"] == 0
+
+
+def test_wrong_host_stops_before_server_start(tmp_path, monkeypatch):
+    import pytest
+
+    collector = _load_module(
+        "tools.operator_tools.serving_collect",
+        "tools/operator_tools/serving_collect.py",
+    )
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text("[]")
+
+    def reject_host(*args):
+        raise ValueError("Host mismatch")
+
+    monkeypatch.setattr(collector, "verify_host", reject_host)
+    monkeypatch.setattr(
+        collector,
+        "collect_guard",
+        lambda *args: pytest.fail("wrong host must stop before starting server"),
+    )
+    with pytest.raises(ValueError, match="Host mismatch"):
+        collector.run({"sharegpt_path": str(dataset)}, tmp_path)
+
+
 def test_greedy_cli_rejects_non_string_json_and_preserves_blank_lines(tmp_path):
     import pytest
 
@@ -625,3 +914,98 @@ def test_workload_dry_run_never_writes_fake_metrics(tmp_path):
         text=True,
     )
     assert result.returncode != 0
+
+
+def test_serving_sync_history_idempotence_and_custody(tmp_path, monkeypatch):
+    import pytest
+
+    from tools.operator_tools import custody, serving_sync
+
+    root, raw = tmp_path / "repo", tmp_path / "raw"
+    directory = root / "ops/demo"
+    directory.mkdir(parents=True)
+    raw.mkdir()
+    entry = {
+        "id": "demo",
+        "evidence": "ops/demo/evidence.json",
+        "layer": "host_fork",
+        "serving_status": "pending_outer_loop",
+    }
+    serving_sync.atomic(root / "DELIVERY_INDEX.json", {"operators": [entry]})
+    original = {
+        "$schema": "operator-benchmark-evidence/v1",
+        "l0_microbenchmark": {"speedup": 2},
+    }
+    serving_sync.atomic(directory / "evidence.json", original)
+    custody.write_dir_checksum(str(directory))
+    result = {
+        "serving_sync": {"archive": raw.as_uri(), "completed_ns": 10},
+        "serving_end_to_end": {
+            "status": "within_noise",
+            "tested": True,
+            "speedup": 1.01,
+        },
+        "l3_numerical_guard": {"passed": True},
+        "l4_attribution": {"verified": True},
+    }
+    monkeypatch.setattr(serving_sync, "validate", lambda *args: result)
+    assert serving_sync.sync(raw, "demo", root) == "synced"
+    evidence = serving_sync.load(directory / "evidence.json")
+    assert evidence["serving_history"][0]["evidence"] == original
+    assert evidence["l0_microbenchmark"] == original["l0_microbenchmark"]
+    assert custody.verify_dir_checksum(str(directory))[0]
+    before = (directory / "evidence.json").read_bytes()
+    assert serving_sync.sync(raw, "demo", root) == "already_synced"
+    assert (directory / "evidence.json").read_bytes() == before
+    result["serving_sync"]["completed_ns"] = 11
+    with pytest.raises(ValueError, match="raw data changed"):
+        serving_sync.sync(raw, "demo", root)
+    (directory / "evidence.json").write_bytes(before + b"\n")
+    with pytest.raises(ValueError, match="drift"):
+        serving_sync.sync(raw, "demo", root)
+
+
+def test_serving_sync_rejects_failed_or_missing_collection(tmp_path):
+    import pytest
+
+    from tools.operator_tools import serving_sync
+
+    with pytest.raises(FileNotFoundError):
+        serving_sync.validate(tmp_path, {})
+    (tmp_path / "failure.json").write_text("{}")
+    with pytest.raises(ValueError, match="failed"):
+        serving_sync.validate(tmp_path, {})
+
+
+def test_status_marks_requested_stop_without_erasing_completed_guards(tmp_path):
+    (tmp_path / "plan.json").write_text(
+        json.dumps(
+            {
+                "operators": [
+                    {"id": "queued", "config": {}},
+                    {"id": "done", "config": {}},
+                ]
+            }
+        )
+    )
+    (tmp_path / "progress.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "done",
+                    "finished": 1,
+                    "status": "numerical_only_attribution_pending",
+                }
+            ]
+        )
+    )
+    (tmp_path / "stop-request.json").write_text(
+        json.dumps({"reason": "Switch to combination A/B"})
+    )
+    (tmp_path / "completion.json").write_text(
+        json.dumps({"error": "KeyboardInterrupt"})
+    )
+    result = operator_status.collect(tmp_path)
+    assert result["status"] == "stopped_by_request"
+    assert result["operators"][0]["reason"] == "Switch to combination A/B"
+    assert result["operators"][1]["status"] == "numerical_only_attribution_pending"

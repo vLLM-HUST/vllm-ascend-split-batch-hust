@@ -64,5 +64,511 @@
     "stress_workload": "sharegpt",
     "concurrency": 32,
     "speedup": null
-  }
+  },
+  "device_retests": [
+    {
+      "run_id": "npu-retest-20261115T041855Z",
+      "scope": "isolated operator, synthetic historical shapes on current runtime; model integration, L4 and service not retested",
+      "environment": {
+        "timestamp": "2026-11-15T04:26:42+00:00",
+        "triton": {
+          "version": "3.2.0",
+          "path": "/usr/local/python3.12.13/lib/python3.12/site-packages/triton",
+          "key_sha256": "73b738272f0aea6d69eccefdb8a7405173f3f99169f46c355ea9b1beeb1be1da"
+        },
+        "cache": {
+          "dir": "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/triton-cache",
+          "fresh": false,
+          "fresh_effective": true,
+          "always_compile": false
+        },
+        "cann": {
+          "ascend_home_path": "/usr/local/Ascend/cann-9.1.0",
+          "info_sha256": "a9b17ef608ebeb70ade09cde1c12a545eb5e8f3e5312f6806ca0d368b0464848",
+          "info_file": "/usr/local/Ascend/cann-9.1.0/aarch64-linux/ascend_toolkit_install.info",
+          "version": "9.1.0"
+        },
+        "torch": {
+          "version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0.post4"
+        },
+        "device": {
+          "ASCEND_RT_VISIBLE_DEVICES": null,
+          "current_device": 0,
+          "npu_name": "Ascend910B2"
+        },
+        "cmdline": {
+          "triton_impl_name": "triton_ascend_impl",
+          "non_compute": true
+        }
+      },
+      "host_source_commit": null,
+      "source_sha256": "38f75246c74ee06ad8df20024bc8ac0c3b8767a9d65e6514a44514bd7c766a5e",
+      "generic_verifier": {
+        "passed": 14,
+        "total": 14,
+        "limitation": "device transfer may compact CPU views; layout validation is provided by stride-preserving graph cases"
+      },
+      "stride_preserving_check": {
+        "passed": 14,
+        "total": 14,
+        "cases": [
+          {
+            "case": 0,
+            "passed": true,
+            "shape": [
+              [
+                1,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                32,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 0.9994159106017366,
+            "baseline": {
+              "median_us": 3.4220000728964806,
+              "p90_us": 3.604999929666519,
+              "p99_us": 4.388999938964844
+            },
+            "candidate": {
+              "median_us": 3.42399999499321,
+              "p90_us": 3.596000000834465,
+              "p99_us": 4.4440001249313354
+            }
+          },
+          {
+            "case": 1,
+            "passed": true,
+            "shape": [
+              [
+                1,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                64,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.020578591045826,
+            "baseline": {
+              "median_us": 3.4219998866319656,
+              "p90_us": 3.593999892473221,
+              "p99_us": 4.394000023603439
+            },
+            "candidate": {
+              "median_us": 3.352999873459339,
+              "p90_us": 3.604999929666519,
+              "p99_us": 4.334000125527382
+            }
+          },
+          {
+            "case": 2,
+            "passed": true,
+            "shape": [
+              [
+                8,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                32,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.0007157292623685,
+            "baseline": {
+              "median_us": 3.495500050485134,
+              "p90_us": 4.318999871611595,
+              "p99_us": 4.9139998853206635
+            },
+            "candidate": {
+              "median_us": 3.4930000081658363,
+              "p90_us": 4.241000115871429,
+              "p99_us": 5.353999882936478
+            }
+          },
+          {
+            "case": 3,
+            "passed": true,
+            "shape": [
+              [
+                8,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                64,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.9212334549146906,
+            "baseline": {
+              "median_us": 6.293000280857086,
+              "p90_us": 6.919000297784805,
+              "p99_us": 7.455000281333923
+            },
+            "candidate": {
+              "median_us": 3.275500051677227,
+              "p90_us": 3.5500001162290573,
+              "p99_us": 4.583000019192696
+            }
+          },
+          {
+            "case": 4,
+            "passed": true,
+            "shape": [
+              [
+                16,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                32,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.065204506740192,
+            "baseline": {
+              "median_us": 3.593999892473221,
+              "p90_us": 4.295000061392784,
+              "p99_us": 4.749000072479248
+            },
+            "candidate": {
+              "median_us": 3.3739998936653137,
+              "p90_us": 3.6559998989105225,
+              "p99_us": 4.385000094771385
+            }
+          },
+          {
+            "case": 5,
+            "passed": true,
+            "shape": [
+              [
+                16,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                64,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.9665427377499711,
+            "baseline": {
+              "median_us": 6.612499803304672,
+              "p90_us": 6.679999828338623,
+              "p99_us": 7.558999955654144
+            },
+            "candidate": {
+              "median_us": 3.362499922513962,
+              "p90_us": 3.70899997651577,
+              "p99_us": 4.746999964118004
+            }
+          },
+          {
+            "case": 6,
+            "passed": true,
+            "shape": [
+              [
+                32,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                32,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.3217799524457403,
+            "baseline": {
+              "median_us": 4.3664999306201935,
+              "p90_us": 4.808000102639198,
+              "p99_us": 5.468999966979027
+            },
+            "candidate": {
+              "median_us": 3.3034998923540115,
+              "p90_us": 3.9000000804662704,
+              "p99_us": 4.88400012254715
+            }
+          },
+          {
+            "case": 7,
+            "passed": true,
+            "shape": [
+              [
+                32,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                64,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 2.1176216443825777,
+            "baseline": {
+              "median_us": 7.336500287055969,
+              "p90_us": 7.983999699354172,
+              "p99_us": 8.541999757289886
+            },
+            "candidate": {
+              "median_us": 3.4645000472664833,
+              "p90_us": 3.911999985575676,
+              "p99_us": 4.71000000834465
+            }
+          },
+          {
+            "case": 8,
+            "passed": true,
+            "shape": [
+              [
+                7,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                32,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.0054254992721483,
+            "baseline": {
+              "median_us": 3.5210000351071358,
+              "p90_us": 4.247000068426132,
+              "p99_us": 4.715999960899353
+            },
+            "candidate": {
+              "median_us": 3.5019999369978905,
+              "p90_us": 4.077000170946121,
+              "p99_us": 4.7040000557899475
+            }
+          },
+          {
+            "case": 9,
+            "passed": true,
+            "shape": [
+              [
+                7,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                64,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.8465908764038357,
+            "baseline": {
+              "median_us": 6.337499991059303,
+              "p90_us": 6.569000333547592,
+              "p99_us": 7.535000145435333
+            },
+            "candidate": {
+              "median_us": 3.432000055909157,
+              "p90_us": 3.8260001689195633,
+              "p99_us": 4.549000039696693
+            }
+          },
+          {
+            "case": 10,
+            "passed": true,
+            "shape": [
+              [
+                97,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                32,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.3478198286870402,
+            "baseline": {
+              "median_us": 4.683000035583973,
+              "p90_us": 5.299000069499016,
+              "p99_us": 5.982000008225441
+            },
+            "candidate": {
+              "median_us": 3.4745000302791595,
+              "p90_us": 3.838999941945076,
+              "p99_us": 4.5409999787807465
+            }
+          },
+          {
+            "case": 11,
+            "passed": true,
+            "shape": [
+              [
+                97,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                64,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 2.9085698013594907,
+            "baseline": {
+              "median_us": 10.147999972105026,
+              "p90_us": 11.048000305891037,
+              "p99_us": 11.29700019955635
+            },
+            "candidate": {
+              "median_us": 3.488999977707863,
+              "p90_us": 3.711000084877014,
+              "p99_us": 4.882999882102013
+            }
+          },
+          {
+            "case": 12,
+            "passed": true,
+            "shape": [
+              [
+                266,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                32,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.4363847098045879,
+            "baseline": {
+              "median_us": 4.950499907135963,
+              "p90_us": 5.559999868273735,
+              "p99_us": 6.300999969244003
+            },
+            "candidate": {
+              "median_us": 3.44650000333786,
+              "p90_us": 3.7119999527931213,
+              "p99_us": 4.338999837636948
+            }
+          },
+          {
+            "case": 13,
+            "passed": true,
+            "shape": [
+              [
+                266,
+                32
+              ]
+            ],
+            "stride": [
+              [
+                64,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 4.046177998136019,
+            "baseline": {
+              "median_us": 14.107000082731247,
+              "p90_us": 15.007999539375305,
+              "p99_us": 15.321999788284302
+            },
+            "candidate": {
+              "median_us": 3.48650012165308,
+              "p90_us": 3.8780000060796738,
+              "p99_us": 4.571999981999397
+            }
+          }
+        ]
+      },
+      "measurement": {
+        "warmup": 10,
+        "repetitions_per_graph": 20,
+        "samples": 100,
+        "timing": "NPU event per replay, alternating order"
+      },
+      "limitations": [
+        "single device; frequency not locked",
+        "event timing per graph replay includes replay scheduling gaps",
+        "no memory peak measurement or service conclusion"
+      ],
+      "archive": {
+        "uri": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+        "files": {
+          "gdn_split_ba-graph.json": "d008b9b7ae674696b8a7e2a3645689ccdd05f89691f08f85739926e211a1d392",
+          "gdn_split_ba-verify-v2.json": "1963790fd98d7a5bfd5bc65a555dd9e096fafc39536a2cc4420e1c0581ff4e64",
+          "gdn_split_ba-receipt-v2.json": "aac70cdf4635f109adebee214e3efbf50dcc856956b3bc26dd5817ce3a69b777"
+        },
+        "runner_sha256": "a853c9c06d77f29ff52b540e81c03a0da4bdf1ca56f098d1918b8ce5cf7400bd",
+        "verification_command": {
+          "argv": [
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/skills/triton-op-verifier/scripts/verify.py",
+            "--op_name",
+            "gdn_split_ba",
+            "--verify_dir",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/gdn_split_ba",
+            "--output",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/gdn_split_ba/verify_result.json",
+            "--non-compute"
+          ],
+          "returncode": 0,
+          "duration_s": 28.00462532043457
+        },
+        "graph_command": [
+          "env",
+          "-u",
+          "PYTHONPATH",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/graph_retest.py",
+          "gdn_split_ba"
+        ],
+        "graph_result_note": "Runner exit zero requires per-case status inspection; compilation failures are retained, not accepted timings."
+      },
+      "dependency_sha256": {
+        ".openbitfun/skills/triton-op-verifier/scripts/verify.py": "d7145025abdb33ba126328fc26bf0e66480744d59c18adc329d9dfd38ea647d7",
+        ".openbitfun/skills/triton-op-verifier/scripts/eco_limits.py": "11658fcf93c028a6d6b8f4b3aeef1f74855613cec9c6bef4a8423e65e855f1c0"
+      }
+    }
+  ]
 }

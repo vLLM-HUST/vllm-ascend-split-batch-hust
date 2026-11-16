@@ -72,5 +72,327 @@
     "host_merge": "PR #69 and #70, commits 68c079081 and 8499a55aa",
     "reason": "The host kernel already evaluates y *= z * sigmoid(z), the same RMSNorm-times-silu expression this carrier targets, and it also fuses the following rearrange. This carrier has no caller, so it duplicates a shipped path. The host form carries a serving result; this one does not."
   },
-  "status": "superseded_by_host_fork"
+  "status": "superseded_by_host_fork",
+  "device_retests": [
+    {
+      "run_id": "npu-retest-20261115T041855Z-layout-fixed",
+      "scope": "isolated operator, synthetic inputs on current runtime; no model, service or MOD acceptance",
+      "environment": {
+        "timestamp": "2026-11-15T04:45:16+00:00",
+        "triton": {
+          "version": "3.2.0",
+          "path": "/usr/local/python3.12.13/lib/python3.12/site-packages/triton",
+          "key_sha256": "73b738272f0aea6d69eccefdb8a7405173f3f99169f46c355ea9b1beeb1be1da"
+        },
+        "cache": {
+          "dir": "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/triton-cache",
+          "fresh": false,
+          "fresh_effective": true,
+          "always_compile": false
+        },
+        "cann": {
+          "ascend_home_path": "/usr/local/Ascend/cann-9.1.0",
+          "info_sha256": "a9b17ef608ebeb70ade09cde1c12a545eb5e8f3e5312f6806ca0d368b0464848",
+          "info_file": "/usr/local/Ascend/cann-9.1.0/aarch64-linux/ascend_toolkit_install.info",
+          "version": "9.1.0"
+        },
+        "torch": {
+          "version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0.post4"
+        },
+        "device": {
+          "ASCEND_RT_VISIBLE_DEVICES": null,
+          "current_device": 0,
+          "npu_name": "Ascend910B2"
+        },
+        "cmdline": {
+          "triton_impl_name": "triton_ascend_impl",
+          "non_compute": false
+        }
+      },
+      "generic_verifier": {
+        "passed": 5,
+        "total": 5,
+        "returncode": 0,
+        "layout_preserved": true
+      },
+      "strict_check": {
+        "passed": 5,
+        "total": 5,
+        "cases": [
+          {
+            "case": 0,
+            "passed": true,
+            "shape": [
+              [
+                1,
+                128
+              ],
+              [
+                1,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                128,
+                1
+              ],
+              [
+                256,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "baseline": {
+              "median_us": 13.738500326871872,
+              "p90_us": 14.031000435352325,
+              "p99_us": 14.51600044965744
+            },
+            "candidate": {
+              "median_us": 4.057500138878822,
+              "p90_us": 4.665999859571457,
+              "p99_us": 5.655999854207039
+            },
+            "speedup": 3.385951905516909
+          },
+          {
+            "case": 1,
+            "passed": true,
+            "shape": [
+              [
+                8,
+                128
+              ],
+              [
+                8,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                128,
+                1
+              ],
+              [
+                256,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "baseline": {
+              "median_us": 24.941499531269073,
+              "p90_us": 25.30600130558014,
+              "p99_us": 25.527000427246094
+            },
+            "candidate": {
+              "median_us": 4.0414998307824135,
+              "p90_us": 4.687999933958054,
+              "p99_us": 6.01000003516674
+            },
+            "speedup": 6.171347414467299
+          },
+          {
+            "case": 2,
+            "passed": true,
+            "shape": [
+              [
+                16,
+                128
+              ],
+              [
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                128,
+                1
+              ],
+              [
+                256,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "baseline": {
+              "median_us": 25.45599937438965,
+              "p90_us": 25.67499876022339,
+              "p99_us": 25.907999277114868
+            },
+            "candidate": {
+              "median_us": 3.9525000378489494,
+              "p90_us": 4.453999921679497,
+              "p99_us": 6.077000126242638
+            },
+            "speedup": 6.440480488456478
+          },
+          {
+            "case": 3,
+            "passed": true,
+            "shape": [
+              [
+                32,
+                128
+              ],
+              [
+                32,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                128,
+                1
+              ],
+              [
+                256,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "baseline": {
+              "median_us": 37.37100064754486,
+              "p90_us": 37.860000133514404,
+              "p99_us": 39.07899856567383
+            },
+            "candidate": {
+              "median_us": 3.901500068604946,
+              "p90_us": 4.778999835252762,
+              "p99_us": 6.055000051856041
+            },
+            "speedup": 9.578623603845676
+          },
+          {
+            "case": 4,
+            "passed": true,
+            "shape": [
+              [
+                97,
+                128
+              ],
+              [
+                97,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                128,
+                1
+              ],
+              [
+                256,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "baseline": {
+              "median_us": 38.39550018310547,
+              "p90_us": 39.19200003147125,
+              "p99_us": 39.531999826431274
+            },
+            "candidate": {
+              "median_us": 3.870999999344349,
+              "p90_us": 4.36599999666214,
+              "p99_us": 5.3199999034404755
+            },
+            "speedup": 9.918754892691478
+          }
+        ]
+      },
+      "measurement_accepted": true,
+      "measurement": {
+        "seed": 42,
+        "warmup": 10,
+        "repetitions_per_graph": 20,
+        "samples": 100,
+        "timing": "NPU event per replay, alternating order"
+      },
+      "limitations": [
+        "single device; frequency not locked",
+        "graph event time includes replay scheduling; not pure kernel time",
+        "memory peak, model L3, L4, service and MOD not retested",
+        "synthetic shapes do not establish current host callsite coverage"
+      ],
+      "archive": {
+        "uri": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+        "files": {
+          "gdn_norm_gate-graph.json": "c1c348006e02a06c3238eba091a99279a9538e5930ae5e6b4878456a5b9ea305",
+          "gdn_norm_gate-verify.json": "45377f2a8047afc15faaccd06a4dc140921f80b64040056fa829255b30300410",
+          "gdn_norm_gate-graph.log": "2d00f78e4f419f57b6b9bc91a72006cc872966cca12e5f720b224da5fa999860"
+        }
+      },
+      "source_sha256": {
+        ".openbitfun/npu-retest-20261115T041855Z/gdn_norm_gate/gdn_norm_gate_torch.py": "8ac77bccca63ba24681a602c5fa6b95876c884d0704e114e3ebe5d89dde30d5b",
+        ".openbitfun/npu-retest-20261115T041855Z/gdn_norm_gate/gdn_norm_gate.py": "8ac77bccca63ba24681a602c5fa6b95876c884d0704e114e3ebe5d89dde30d5b",
+        ".openbitfun/npu-retest-20261115T041855Z/gdn_norm_gate/gdn_norm_gate_triton_ascend_impl.py": "0810470f353ad00e935536345e0ffbf9105604fc7573e4bff9776c1ef737759d",
+        ".openbitfun/npu-retest-20261115T041855Z/graph_retest.py": "a853c9c06d77f29ff52b540e81c03a0da4bdf1ca56f098d1918b8ce5cf7400bd",
+        ".openbitfun/skills/triton-op-verifier/scripts/_common_utils.py": "3a31734cee87413b41dd42306fab9470ae4e9bc8c388b9320a41ecfda00ba625",
+        "ops/gdn_norm_gate/bench_l0.py": "20e645b088d67984fc4f922977908531b0021e0220beab3c273f48eb245ef936"
+      },
+      "commands": {
+        "verify": [
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/skills/triton-op-verifier/scripts/verify.py",
+          "--op_name",
+          "gdn_norm_gate",
+          "--verify_dir",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/gdn_norm_gate"
+        ],
+        "graph": [
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/graph_retest.py",
+          "gdn_norm_gate"
+        ]
+      },
+      "graph_returncode": 0,
+      "profiler": {
+        "passed": 5,
+        "total": 5,
+        "returncode": 0,
+        "warmup": 5,
+        "repeats": 20,
+        "scope": "supplemental eager profiling, separate from graph timing",
+        "archive_file": "gdn_norm_gate-profiler-final.json",
+        "sha256": "13e8b8665de8af258dfe9b4fbc42d9e0db367fef1d73df44dcfe7ab0e4f143b2"
+      }
+    }
+  ]
 }

@@ -67,7 +67,7 @@ ATTR_PENDING_ALLOWED = {
     "historical_only",
 }
 
-#: 文档化的归属层（见 GLOSSARY.md §3.4 的 `layer` 词条）。
+#: 文档化的归属层（见 GLOSSARY.md §1.4 的 `layer` 词条）。
 ALLOWED_LAYERS = {"host_fork", "plugin_carrier", "rejected_exploration"}
 
 #: 文档化的 L3 标签；空串表示该算子没有 L3 结论。
@@ -173,10 +173,22 @@ def assert_serving_prerequisites(entry: dict, evidence: dict) -> None:
     attribution = evidence.get("l4_attribution") or {}
     assert attribution.get("status") in (None, "completed")
     assert attribution.get("verified", True) is True
-    for key in ("call_count_expected", "call_count_actual"):
-        assert type(attribution.get(key)) is int and attribution[key] > 0
-    if attribution["call_count_expected"] != attribution["call_count_actual"]:
-        assert attribution.get("verified") is True and attribution.get("note")
+    if "devices" in attribution:
+        assert attribution.get("passed") is True
+        assert attribution.get("sources")
+        assert len(attribution["devices"]) == 2
+        for device in attribution["devices"].values():
+            assert device.get("passed") is True and device.get("checks")
+            for check in device["checks"].values():
+                assert check.get("passed") is True
+                assert type(check.get("expected")) is int and check["expected"] >= 0
+                assert type(check.get("actual")) is int
+                assert check["actual"] == check["expected"]
+    else:
+        for key in ("call_count_expected", "call_count_actual"):
+            assert type(attribution.get(key)) is int and attribution[key] > 0
+        if attribution["call_count_expected"] != attribution["call_count_actual"]:
+            assert attribution.get("verified") is True and attribution.get("note")
     serving = evidence.get("serving_end_to_end") or {}
     assert serving.get("tested") is True
     assert serving.get("applicability", "current") == "current"

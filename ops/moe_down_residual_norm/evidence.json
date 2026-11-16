@@ -63,5 +63,223 @@
     "stress_workload": "sharegpt",
     "concurrency": 32,
     "speedup": null
-  }
+  },
+  "device_retests": [
+    {
+      "run_id": "npu-retest-20261115T041855Z-layout-fixed",
+      "scope": "isolated operator, synthetic inputs on current runtime; no model, service or MOD acceptance",
+      "environment": {
+        "timestamp": "2026-11-15T04:47:07+00:00",
+        "triton": {
+          "version": "3.2.0",
+          "path": "/usr/local/python3.12.13/lib/python3.12/site-packages/triton",
+          "key_sha256": "73b738272f0aea6d69eccefdb8a7405173f3f99169f46c355ea9b1beeb1be1da"
+        },
+        "cache": {
+          "dir": "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/triton-cache",
+          "fresh": false,
+          "fresh_effective": true,
+          "always_compile": false
+        },
+        "cann": {
+          "ascend_home_path": "/usr/local/Ascend/cann-9.1.0",
+          "info_sha256": "a9b17ef608ebeb70ade09cde1c12a545eb5e8f3e5312f6806ca0d368b0464848",
+          "info_file": "/usr/local/Ascend/cann-9.1.0/aarch64-linux/ascend_toolkit_install.info",
+          "version": "9.1.0"
+        },
+        "torch": {
+          "version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0.post4"
+        },
+        "device": {
+          "ASCEND_RT_VISIBLE_DEVICES": null,
+          "current_device": 0,
+          "npu_name": "Ascend910B2"
+        },
+        "cmdline": {
+          "triton_impl_name": "triton_ascend_impl",
+          "non_compute": false
+        }
+      },
+      "generic_verifier": {
+        "passed": 3,
+        "total": 3,
+        "returncode": 0,
+        "layout_preserved": true
+      },
+      "strict_check": {
+        "passed": 3,
+        "total": 3,
+        "cases": [
+          {
+            "case": 0,
+            "passed": true,
+            "shape": [
+              [
+                1,
+                256
+              ],
+              [
+                2048,
+                256
+              ],
+              [
+                1,
+                2048
+              ],
+              [
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                256,
+                1
+              ],
+              [
+                256,
+                1
+              ],
+              [
+                2048,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001
+          },
+          {
+            "case": 1,
+            "passed": true,
+            "shape": [
+              [
+                8,
+                256
+              ],
+              [
+                2048,
+                256
+              ],
+              [
+                8,
+                2048
+              ],
+              [
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                256,
+                1
+              ],
+              [
+                256,
+                1
+              ],
+              [
+                2048,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001
+          },
+          {
+            "case": 2,
+            "passed": true,
+            "shape": [
+              [
+                32,
+                256
+              ],
+              [
+                2048,
+                256
+              ],
+              [
+                32,
+                2048
+              ],
+              [
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                256,
+                1
+              ],
+              [
+                256,
+                1
+              ],
+              [
+                2048,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001
+          }
+        ]
+      },
+      "measurement_accepted": false,
+      "measurement": {
+        "seed": 42,
+        "warmup": 10,
+        "repetitions_per_graph": 20,
+        "samples": 100,
+        "timing": "NPU event per replay, alternating order"
+      },
+      "limitations": [
+        "single device; frequency not locked",
+        "graph event time includes replay scheduling; not pure kernel time",
+        "memory peak, model L3, L4, service and MOD not retested",
+        "synthetic shapes do not establish current host callsite coverage",
+        "candidate and reference are the same PyTorch composition; no fusion or performance claim"
+      ],
+      "archive": {
+        "uri": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+        "files": {
+          "moe_down_residual_norm-graph.json": "aa1970471c1562ec78d38195ec3657f8a8668ce050f50c11dd6df52bdfadbb6a",
+          "moe_down_residual_norm-verify.json": "f19b006e1999bbcdd3e29151281c989e9ac9bf3afd2c536984d10bbb408c9cbc",
+          "moe_down_residual_norm-graph.log": "02108f478bc018263cdbb01717ebcc18b2dc7d492f818f34fb648a4c79776ba9"
+        }
+      },
+      "source_sha256": {
+        ".openbitfun/npu-retest-20261115T041855Z/moe_down_residual_norm/moe_down_residual_norm.py": "17a9de3c8b566eb671d74947e4ac3f1de83bbdbe26dd4445794aa6bda414d7ca",
+        ".openbitfun/npu-retest-20261115T041855Z/moe_down_residual_norm/moe_down_residual_norm_triton_ascend_impl.py": "d75bba6f3cd6e538c07c3d964f355ded639b6687d38ed694970ac3afaafc09be",
+        ".openbitfun/npu-retest-20261115T041855Z/moe_down_residual_norm/moe_down_residual_norm_torch.py": "17a9de3c8b566eb671d74947e4ac3f1de83bbdbe26dd4445794aa6bda414d7ca",
+        ".openbitfun/npu-retest-20261115T041855Z/graph_retest.py": "a853c9c06d77f29ff52b540e81c03a0da4bdf1ca56f098d1918b8ce5cf7400bd",
+        ".openbitfun/skills/triton-op-verifier/scripts/_common_utils.py": "3a31734cee87413b41dd42306fab9470ae4e9bc8c388b9320a41ecfda00ba625",
+        "ops/moe_down_residual_norm/bench_l0.py": "cf6110c02540756ae0c94e7d1845e45a653aa827bd81314c78af59e099181842"
+      },
+      "commands": {
+        "verify": [
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/skills/triton-op-verifier/scripts/verify.py",
+          "--op_name",
+          "moe_down_residual_norm",
+          "--verify_dir",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/moe_down_residual_norm"
+        ],
+        "graph": [
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/graph_retest.py",
+          "moe_down_residual_norm"
+        ]
+      },
+      "graph_returncode": 0
+    }
+  ]
 }
