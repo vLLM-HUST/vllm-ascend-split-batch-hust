@@ -5,7 +5,7 @@ description: Use when 用户需要优化 Ascend 算子、计算 SOL% 达成率�
 
 # 算子 SOL 与优化交付
 
-直接由 Agent 读取任务、采集、修改、验证和交付。不启动自动生成循环，不要求实现框架接口。
+直接由 Agent 读取任务、采集、修改、验证和交付。不启动自动生成循环，不要求实现框架接口。执行顺序、单侧并行状态和端侧长测规则见 [优化工作流](references/optimization-workflow.md)。
 
 ## 先确定事实
 
@@ -53,7 +53,7 @@ python <skill>/scripts/profile.py simulator --application 'python small_case.py'
 
 `--application` 只接受已审阅的本地命令，不能拼接外部文本。采集服务端时必须包住实际服务进程；仅包住 HTTP 客户端不能得到服务 kernel。多卡逐卡核对。硬件指标采集与正式计时分开，避免插桩改变结果。非零退出即使留下部分 CSV，也记录失败及不完整范围。
 
-按需调用已有技能：设备确认用 `ascendc-env-check` 与 `npu-arch`；MFU 用 `triton-mfu-analyzer`；Triton 修改用 `triton-latency-optimizer`，一次只改一个优化点；精度失败用 `triton-precision-debug`；功能与基准用 `triton-op-verifier`。瓶颈不明或准备声明硬件极限时，必须先用 `triton-simulator-optimizer` 采集诊断，不另建优化技术目录。技能不可用时报告缺失，不能声称已完成其步骤。
+按需调用已有技能：设备确认用 `ascendc-env-check` 与 `npu-arch`；MFU 用 `triton-mfu-analyzer`；Triton 修改用 `triton-latency-optimizer`，一次只改一个优化点；精度失败用 `triton-precision-debug`；功能与基准用 `triton-op-verifier`。瓶颈不明或准备声明硬件极限时，必须先用 `triton-simulator-optimizer` 采集诊断，不另建优化技术目录。使用前检查 `SKILL.md` 和声明的脚本是否存在；缺失时按[优化工作流](references/optimization-workflow.md) fail-closed，不得声称已完成该步骤。
 
 Simulator 会执行整个应用，先缩成保持关键布局和计算语义的单次调用，枚举所有相关 kernel 及 Cube/Vector 流水。小 shape 的流水比例只用于诊断；优化后回到真实尺寸计时，不能用缩小用例的结果替代生产工况。
 
