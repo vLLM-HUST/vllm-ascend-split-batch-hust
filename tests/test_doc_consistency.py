@@ -32,6 +32,7 @@ except ModuleNotFoundError:  # Python 3.10
 PROSE_SURFACE = (
     "README.md",
     "AGENTS.md",
+    "workflow.md",
     "GLOSSARY.md",
     "docs/README.md",
     "docs/architecture.md",

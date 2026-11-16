@@ -27,6 +27,7 @@
 | 主题 | 权威位置 |
 |---|---|
 | 术语唯一写法、定义判据、代码锚点、同名异义与废止词 | [../GLOSSARY.md](../GLOSSARY.md) |
+| 参考性执行流程 | [../workflow.md](../workflow.md) |
 | 使用方法、env 开关、验证证据 | [../README.md](../README.md) |
 | **容器运行时分层、宿主Fork边界与证据隔离规范** | [container-and-plugin-boundary-spec.md](container-and-plugin-boundary-spec.md) |
 | 能力激活边界 × 代码位置 | [support-matrix.md](support-matrix.md) |

@@ -133,7 +133,6 @@ def test_checksum_reports_unreadable_files(tmp_path, monkeypatch):
     [
         "ffn_activation",
         "gate_fp32",
-        "gdn_input_norm",
         "gdn_merge_inproj",
         "gdn_norm_gate",
         "gdn_qkv_norm",

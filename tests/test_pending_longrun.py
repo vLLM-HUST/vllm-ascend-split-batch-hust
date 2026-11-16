@@ -34,6 +34,17 @@ def test_default_plan_covers_pending_operators_without_promoting_evidence():
     ids = [entry["id"] for entry in plan["operators"]]
     assert ids == list(pending_longrun.DEFAULT_PENDING_OPS)
     assert "qwen_text_split_qkv_fuse" not in ids
+    assert "moe_epilogue" in ids
+    assert "gdn_input_norm" not in ids
+    assert set(ids).isdisjoint(
+        {
+            "gdn_conv_pack",
+            "gate_fp32",
+            "gdn_split_fusion",
+            "gdn_merge_inproj",
+            "gdn_output_norm_fusion",
+        }
+    )
     assert all(
         entry.get("config", {}).get("sync_mode") == "none"
         for entry in plan["operators"]
@@ -41,7 +52,8 @@ def test_default_plan_covers_pending_operators_without_promoting_evidence():
     )
     by_id = {entry["id"]: entry for entry in plan["operators"]}
     assert "reason" in by_id["gdn_qkv_norm"]
-    assert by_id["gdn_input_norm"]["config"]["guard_only"] is False
+    assert by_id["moe_epilogue"]["config"]["gate"] == "VLLM_HUST_MOE_EPILOGUE"
+    assert by_id["moe_epilogue"]["config"]["kernel"] == "_gate_mul_kernel"
     assert by_id["gdn_split_ba"]["config"]["kernel"] == "gdn_split_ba_2d_kernel"
     assert by_id["moe_down_residual_norm"]["config"]["guard_only"] is True
     assert by_id["ffn_activation"]["config"]["guard_only"] is True
@@ -49,6 +61,6 @@ def test_default_plan_covers_pending_operators_without_promoting_evidence():
 
 
 def test_mode_override_can_disable_a_full_entry():
-    plan, _ = pending_longrun.build_plan(_template(), modes={"gdn_input_norm": "skip"})
-    entry = next(row for row in plan["operators"] if row["id"] == "gdn_input_norm")
+    plan, _ = pending_longrun.build_plan(_template(), modes={"gdn_split_ba": "skip"})
+    entry = next(row for row in plan["operators"] if row["id"] == "gdn_split_ba")
     assert list(entry) == ["id", "reason"]
