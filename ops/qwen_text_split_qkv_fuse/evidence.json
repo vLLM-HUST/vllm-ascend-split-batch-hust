@@ -29,24 +29,69 @@
     "optimized_median_us": 5.7,
     "measurement": "NPU graph, 50 repetitions packed per replay, single 910B2",
     "raw_measurements": {
-      "Tokens_1": {"native_us": 16.7, "candidate_us": 4.9, "speedup": 3.43},
-      "Tokens_8": {"native_us": 27.3, "candidate_us": 5.3, "speedup": 5.19},
-      "Tokens_16": {"native_us": 32.8, "candidate_us": 5.7, "speedup": 5.74},
-      "Tokens_32": {"native_us": 38.1, "candidate_us": 6.8, "speedup": 5.59},
-      "Tokens_64": {"native_us": 59.9, "candidate_us": 8.7, "speedup": 6.84},
-      "Tokens_128": {"native_us": 57.3, "candidate_us": 10.6, "speedup": 5.40}
+      "Tokens_1": {
+        "native_us": 16.7,
+        "candidate_us": 4.9,
+        "speedup": 3.43
+      },
+      "Tokens_8": {
+        "native_us": 27.3,
+        "candidate_us": 5.3,
+        "speedup": 5.19
+      },
+      "Tokens_16": {
+        "native_us": 32.8,
+        "candidate_us": 5.7,
+        "speedup": 5.74
+      },
+      "Tokens_32": {
+        "native_us": 38.1,
+        "candidate_us": 6.8,
+        "speedup": 5.59
+      },
+      "Tokens_64": {
+        "native_us": 59.9,
+        "candidate_us": 8.7,
+        "speedup": 6.84
+      },
+      "Tokens_128": {
+        "native_us": 57.3,
+        "candidate_us": 10.6,
+        "speedup": 5.4
+      }
     }
   },
   "l3_numerical_guard": {
     "passed": false,
     "metric": "allclose",
-    "tolerance": {"atol": 1e-3, "rtol": 1e-3},
+    "tolerance": {
+      "atol": 0.001,
+      "rtol": 0.001
+    },
     "max_abs_diff": 0.03125,
     "note": "Single-token decode is bitwise identical and v/gate are bitwise identical at every size; q/k diverge beyond tolerance at 16 and 32 tokens because the fused kernel accumulates RMSNorm variance in Triton FP32",
     "per_token_shape": {
-      "1": {"q_bitwise": true, "k_bitwise": true, "v_bitwise": true, "gate_bitwise": true, "allclose": true},
-      "16": {"q_max_abs_diff": 0.015625, "k_max_abs_diff": 0.015625, "v_bitwise": true, "gate_bitwise": true, "allclose": false},
-      "32": {"q_max_abs_diff": 0.03125, "k_max_abs_diff": 0.015625, "v_bitwise": true, "gate_bitwise": true, "allclose": false}
+      "1": {
+        "q_bitwise": true,
+        "k_bitwise": true,
+        "v_bitwise": true,
+        "gate_bitwise": true,
+        "allclose": true
+      },
+      "16": {
+        "q_max_abs_diff": 0.015625,
+        "k_max_abs_diff": 0.015625,
+        "v_bitwise": true,
+        "gate_bitwise": true,
+        "allclose": false
+      },
+      "32": {
+        "q_max_abs_diff": 0.03125,
+        "k_max_abs_diff": 0.015625,
+        "v_bitwise": true,
+        "gate_bitwise": true,
+        "allclose": false
+      }
     },
     "serving_greedy_guard": {
       "passed": false,
@@ -94,5 +139,74 @@
     "host_fork_pr": 67,
     "host_merge_commit": "d1014aadb",
     "baseline_state": "merged into based/split-batch-baseline via PR #67"
+  },
+  "serving_recheck": {
+    "archive": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-e2e-resumable/qwen_text_split_qkv_fuse",
+    "host_commits": {
+      "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+      "vllm-ascend": "e59aaeef26788e9f895aefa568d779ad84cc7842"
+    },
+    "greedy_guard": {
+      "passed": true,
+      "matched": 8,
+      "total": 8,
+      "artifact": "serving_l3.json"
+    },
+    "l4_attribution": {
+      "passed": false,
+      "protocol": "single-request-16-tokens",
+      "devices": {
+        "0": {
+          "passed": false,
+          "checks": {
+            "off_rope_kernel": {
+              "actual": 160,
+              "expected": 0,
+              "passed": false
+            },
+            "on_rope_kernel": {
+              "actual": 160,
+              "expected": 160,
+              "passed": true
+            }
+          }
+        },
+        "1": {
+          "passed": false,
+          "checks": {
+            "off_rope_kernel": {
+              "actual": 160,
+              "expected": 0,
+              "passed": false
+            },
+            "on_rope_kernel": {
+              "actual": 160,
+              "expected": 160,
+              "passed": true
+            }
+          }
+        }
+      },
+      "sources": [
+        {
+          "path": "guard_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_746863_20261115155205144_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+          "sha256": "35bbe4666b67a6acfba1ce89b51afcfee8e7ee7d389cd019b7305e444062b107"
+        },
+        {
+          "path": "guard_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_746864_20261115155205142_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+          "sha256": "8c70c36376c06e88f4bc80abad254bf217736e576dc513104c521d547be17f4f"
+        },
+        {
+          "path": "guard_on/profile/dp0_pp0_tp0_dcp0_ep0_rank0_763572_20261115160058212_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+          "sha256": "0122775229246745548d5d396508f64a83af61049004ab93f2e80087320b2e89"
+        },
+        {
+          "path": "guard_on/profile/dp0_pp0_tp1_dcp0_ep1_rank1_763573_20261115160058211_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+          "sha256": "09c59e893210722fac7d2d44401e25a19682bc027c36b338b1706b5773f49c7b"
+        }
+      ]
+    },
+    "outcome": "关闭臂仍命中 rope 核函数，逐卡归因失败，性能阶段未执行；原有数值失败与 default-off 结论不变",
+    "failure_artifact": "failure.json"
   }
 }

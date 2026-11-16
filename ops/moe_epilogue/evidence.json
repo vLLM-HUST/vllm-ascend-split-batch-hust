@@ -1,6 +1,6 @@
 {
   "$schema": "operator-benchmark-evidence/v1",
-  "operator_name": "moe_shared_expert_epilogue",
+  "operator_name": "moe_epilogue",
   "callsite": "vllm_ascend.ops.fused_moe.shared_experts:AscendSharedExperts.part2",
   "environment": {
     "device": "Ascend910B2",
@@ -29,10 +29,30 @@
     "optimized_median_us": 1.34,
     "measurement": "NPU graph, 50 repetitions packed per replay, D=2048, bf16, single 910B2",
     "raw_measurements": {
-      "M1": {"native_us": 1.17, "candidate_us": 1.0, "saved_pct": 14.2, "bitwise_equal": true},
-      "M8": {"native_us": 3.64, "candidate_us": 1.34, "saved_pct": 63.1, "bitwise_equal": true},
-      "M16": {"native_us": 3.68, "candidate_us": 1.71, "saved_pct": 53.4, "bitwise_equal": true},
-      "M32": {"native_us": 3.73, "candidate_us": 2.43, "saved_pct": 34.7, "bitwise_equal": true}
+      "M1": {
+        "native_us": 1.17,
+        "candidate_us": 1.0,
+        "saved_pct": 14.2,
+        "bitwise_equal": true
+      },
+      "M8": {
+        "native_us": 3.64,
+        "candidate_us": 1.34,
+        "saved_pct": 63.1,
+        "bitwise_equal": true
+      },
+      "M16": {
+        "native_us": 3.68,
+        "candidate_us": 1.71,
+        "saved_pct": 53.4,
+        "bitwise_equal": true
+      },
+      "M32": {
+        "native_us": 3.73,
+        "candidate_us": 2.43,
+        "saved_pct": 34.7,
+        "bitwise_equal": true
+      }
     },
     "note": "native baseline is the single aten broadcast multiply gate * out; the host sigmoid is excluded because it stays on the stock path"
   },
@@ -94,5 +114,608 @@
     "host_merge_commit": "8039119f",
     "baseline_state": "merged into based/split-batch-baseline via PR #66",
     "pending": "image rebuild only; L3 has been re-run on the merged baseline and stays 8/8 identical"
-  }
+  },
+  "device_retests": [
+    {
+      "run_id": "npu-retest-20261115T041855Z",
+      "scope": "isolated operator, synthetic historical shapes on current runtime; model integration, L4 and service not retested",
+      "environment": {
+        "timestamp": "2026-11-15T04:25:17+00:00",
+        "triton": {
+          "version": "3.2.0",
+          "path": "/usr/local/python3.12.13/lib/python3.12/site-packages/triton",
+          "key_sha256": "73b738272f0aea6d69eccefdb8a7405173f3f99169f46c355ea9b1beeb1be1da"
+        },
+        "cache": {
+          "dir": "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/triton-cache",
+          "fresh": false,
+          "fresh_effective": true,
+          "always_compile": false
+        },
+        "cann": {
+          "ascend_home_path": "/usr/local/Ascend/cann-9.1.0",
+          "info_sha256": "a9b17ef608ebeb70ade09cde1c12a545eb5e8f3e5312f6806ca0d368b0464848",
+          "info_file": "/usr/local/Ascend/cann-9.1.0/aarch64-linux/ascend_toolkit_install.info",
+          "version": "9.1.0"
+        },
+        "torch": {
+          "version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0.post4"
+        },
+        "device": {
+          "ASCEND_RT_VISIBLE_DEVICES": null,
+          "current_device": 0,
+          "npu_name": "Ascend910B2"
+        },
+        "cmdline": {
+          "triton_impl_name": "triton_ascend_impl",
+          "non_compute": false
+        }
+      },
+      "host_source_commit": "e59aaeef26788e9f895aefa568d779ad84cc7842",
+      "source_sha256": "c172f2cba49b9b9164a44a453a67db9110d34e421c9be0d71b238ef1d5a8183b",
+      "generic_verifier": {
+        "passed": 6,
+        "total": 6,
+        "limitation": "device transfer may compact CPU views; layout validation is provided by stride-preserving graph cases"
+      },
+      "stride_preserving_check": {
+        "passed": 6,
+        "total": 6,
+        "cases": [
+          {
+            "case": 0,
+            "passed": true,
+            "shape": [
+              [
+                1,
+                1
+              ],
+              [
+                1,
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                1,
+                1
+              ],
+              [
+                2048,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 0.9866596618808174,
+            "baseline": {
+              "median_us": 3.73500008136034,
+              "p90_us": 4.187000170350075,
+              "p99_us": 5.747999995946884
+            },
+            "candidate": {
+              "median_us": 3.785499930381775,
+              "p90_us": 4.202000051736832,
+              "p99_us": 4.87699992954731
+            }
+          },
+          {
+            "case": 1,
+            "passed": true,
+            "shape": [
+              [
+                8,
+                1
+              ],
+              [
+                8,
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                1,
+                1
+              ],
+              [
+                2048,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.1862429892313235,
+            "baseline": {
+              "median_us": 4.4235000386834145,
+              "p90_us": 4.944000020623207,
+              "p99_us": 5.169999971985817
+            },
+            "candidate": {
+              "median_us": 3.7289999425411224,
+              "p90_us": 4.249000176787376,
+              "p99_us": 5.383000150322914
+            }
+          },
+          {
+            "case": 2,
+            "passed": true,
+            "shape": [
+              [
+                16,
+                1
+              ],
+              [
+                16,
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                1,
+                1
+              ],
+              [
+                2048,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.0879773207185854,
+            "baseline": {
+              "median_us": 4.031500034034252,
+              "p90_us": 4.961999878287315,
+              "p99_us": 5.218999832868576
+            },
+            "candidate": {
+              "median_us": 3.705500066280365,
+              "p90_us": 4.033999890089035,
+              "p99_us": 5.29399998486042
+            }
+          },
+          {
+            "case": 3,
+            "passed": true,
+            "shape": [
+              [
+                32,
+                1
+              ],
+              [
+                32,
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                1,
+                1
+              ],
+              [
+                2048,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.097679403487137,
+            "baseline": {
+              "median_us": 4.067999869585037,
+              "p90_us": 5.000000074505806,
+              "p99_us": 5.218999832868576
+            },
+            "candidate": {
+              "median_us": 3.7060000002384186,
+              "p90_us": 4.427000135183334,
+              "p99_us": 5.262999981641769
+            }
+          },
+          {
+            "case": 4,
+            "passed": true,
+            "shape": [
+              [
+                33,
+                1
+              ],
+              [
+                33,
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                1,
+                1
+              ],
+              [
+                2048,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.0115820453671154,
+            "baseline": {
+              "median_us": 4.104999825358391,
+              "p90_us": 5.062000080943108,
+              "p99_us": 5.316000059247017
+            },
+            "candidate": {
+              "median_us": 4.057999886572361,
+              "p90_us": 5.161000043153763,
+              "p99_us": 5.3199999034404755
+            }
+          },
+          {
+            "case": 5,
+            "passed": true,
+            "shape": [
+              [
+                97,
+                1
+              ],
+              [
+                97,
+                2048
+              ]
+            ],
+            "stride": [
+              [
+                1,
+                1
+              ],
+              [
+                2048,
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 1.002982083760745,
+            "baseline": {
+              "median_us": 5.044999904930592,
+              "p90_us": 5.931000038981438,
+              "p99_us": 6.241999939084053
+            },
+            "candidate": {
+              "median_us": 5.030000023543835,
+              "p90_us": 6.049000099301338,
+              "p99_us": 6.266999989748001
+            }
+          }
+        ]
+      },
+      "measurement": {
+        "warmup": 10,
+        "repetitions_per_graph": 20,
+        "samples": 100,
+        "timing": "NPU event per replay, alternating order"
+      },
+      "limitations": [
+        "single device; frequency not locked",
+        "event timing per graph replay includes replay scheduling gaps",
+        "no memory peak measurement or service conclusion"
+      ],
+      "archive": {
+        "uri": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+        "files": {
+          "moe_epilogue-graph.json": "29c18dc1daf1447acd002788aaa53f0ea2a9b965fb0cda39bab0ee0b4c564356",
+          "moe_epilogue-verify-v2.json": "fe22948193b0d4527807015b7117d8cd90f8acbdf1cf8aa5fed3e98195e66b41",
+          "moe_epilogue-receipt-v2.json": "9f041117f2f8518ae0f5c2fdcfa6055b75dc31030930cd1abeb24a956705195f"
+        },
+        "runner_sha256": "a853c9c06d77f29ff52b540e81c03a0da4bdf1ca56f098d1918b8ce5cf7400bd",
+        "verification_command": {
+          "argv": [
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/skills/triton-op-verifier/scripts/verify.py",
+            "--op_name",
+            "moe_epilogue",
+            "--verify_dir",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/moe_epilogue",
+            "--output",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/moe_epilogue/verify_result.json"
+          ],
+          "returncode": 0,
+          "duration_s": 45.45357275009155
+        },
+        "graph_command": [
+          "env",
+          "-u",
+          "PYTHONPATH",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/graph_retest.py",
+          "moe_epilogue"
+        ],
+        "graph_result_note": "Runner exit zero requires per-case status inspection; compilation failures are retained, not accepted timings."
+      },
+      "dependency_sha256": {
+        ".openbitfun/skills/triton-op-verifier/scripts/verify.py": "d7145025abdb33ba126328fc26bf0e66480744d59c18adc329d9dfd38ea647d7",
+        ".openbitfun/skills/triton-op-verifier/scripts/eco_limits.py": "11658fcf93c028a6d6b8f4b3aeef1f74855613cec9c6bef4a8423e65e855f1c0"
+      },
+      "profiler": {
+        "warmup": 10,
+        "repeats": 100,
+        "passed_cases": 6,
+        "total_cases": 6,
+        "per_shape_results": [
+          {
+            "case_idx": 1,
+            "input_desc": [
+              {
+                "type": "tensor",
+                "shape": [
+                  1,
+                  1
+                ],
+                "dtype": "torch.bfloat16"
+              },
+              {
+                "type": "tensor",
+                "shape": [
+                  1,
+                  2048
+                ],
+                "dtype": "torch.bfloat16"
+              }
+            ],
+            "status": "pass",
+            "framework": {
+              "avg_duration_ms": 0.0015,
+              "peak_memory_mb": 0.01,
+              "operators": {
+                "aclnnMul_MulAiCore_Mul": {
+                  "avg_us": 1.5476,
+                  "launch_count": 1
+                }
+              }
+            },
+            "implementation": {
+              "avg_duration_ms": 0.0015,
+              "peak_memory_mb": 0.01,
+              "operators": {
+                "_gate_mul_kernel": {
+                  "avg_us": 1.49,
+                  "launch_count": 1
+                }
+              }
+            },
+            "speedup_vs_torch": 1.0,
+            "error_type": null,
+            "error_msg": null
+          },
+          {
+            "case_idx": 2,
+            "input_desc": [
+              {
+                "type": "tensor",
+                "shape": [
+                  8,
+                  1
+                ],
+                "dtype": "torch.bfloat16"
+              },
+              {
+                "type": "tensor",
+                "shape": [
+                  8,
+                  2048
+                ],
+                "dtype": "torch.bfloat16"
+              }
+            ],
+            "status": "pass",
+            "framework": {
+              "avg_duration_ms": 0.0037,
+              "peak_memory_mb": 0.1,
+              "operators": {
+                "aclnnMul_MulAiCore_Mul": {
+                  "avg_us": 3.7283,
+                  "launch_count": 1
+                }
+              }
+            },
+            "implementation": {
+              "avg_duration_ms": 0.0015,
+              "peak_memory_mb": 0.06,
+              "operators": {
+                "_gate_mul_kernel": {
+                  "avg_us": 1.542,
+                  "launch_count": 1
+                }
+              }
+            },
+            "speedup_vs_torch": 2.4667,
+            "error_type": null,
+            "error_msg": null
+          },
+          {
+            "case_idx": 3,
+            "input_desc": [
+              {
+                "type": "tensor",
+                "shape": [
+                  16,
+                  1
+                ],
+                "dtype": "torch.bfloat16"
+              },
+              {
+                "type": "tensor",
+                "shape": [
+                  16,
+                  2048
+                ],
+                "dtype": "torch.bfloat16"
+              }
+            ],
+            "status": "pass",
+            "framework": {
+              "avg_duration_ms": 0.0038,
+              "peak_memory_mb": 0.19,
+              "operators": {
+                "aclnnMul_MulAiCore_Mul": {
+                  "avg_us": 3.7633,
+                  "launch_count": 1
+                }
+              }
+            },
+            "implementation": {
+              "avg_duration_ms": 0.0018,
+              "peak_memory_mb": 0.13,
+              "operators": {
+                "_gate_mul_kernel": {
+                  "avg_us": 1.8345,
+                  "launch_count": 1
+                }
+              }
+            },
+            "speedup_vs_torch": 2.1111,
+            "error_type": null,
+            "error_msg": null
+          },
+          {
+            "case_idx": 4,
+            "input_desc": [
+              {
+                "type": "tensor",
+                "shape": [
+                  32,
+                  1
+                ],
+                "dtype": "torch.bfloat16"
+              },
+              {
+                "type": "tensor",
+                "shape": [
+                  32,
+                  2048
+                ],
+                "dtype": "torch.bfloat16"
+              }
+            ],
+            "status": "pass",
+            "framework": {
+              "avg_duration_ms": 0.0038,
+              "peak_memory_mb": 0.38,
+              "operators": {
+                "aclnnMul_MulAiCore_Mul": {
+                  "avg_us": 3.8396,
+                  "launch_count": 1
+                }
+              }
+            },
+            "implementation": {
+              "avg_duration_ms": 0.0024,
+              "peak_memory_mb": 0.25,
+              "operators": {
+                "_gate_mul_kernel": {
+                  "avg_us": 2.4134,
+                  "launch_count": 1
+                }
+              }
+            },
+            "speedup_vs_torch": 1.5833,
+            "error_type": null,
+            "error_msg": null
+          },
+          {
+            "case_idx": 5,
+            "input_desc": [
+              {
+                "type": "tensor",
+                "shape": [
+                  33,
+                  1
+                ],
+                "dtype": "torch.bfloat16"
+              },
+              {
+                "type": "tensor",
+                "shape": [
+                  33,
+                  2048
+                ],
+                "dtype": "torch.bfloat16"
+              }
+            ],
+            "status": "pass",
+            "framework": {
+              "avg_duration_ms": 0.0039,
+              "peak_memory_mb": 0.39,
+              "operators": {
+                "aclnnMul_MulAiCore_Mul": {
+                  "avg_us": 3.9451,
+                  "launch_count": 1
+                }
+              }
+            },
+            "implementation": {
+              "avg_duration_ms": 0.0039,
+              "peak_memory_mb": 0.26,
+              "operators": {
+                "aclnnMul_MulAiCore_Mul": {
+                  "avg_us": 3.9481,
+                  "launch_count": 1
+                }
+              }
+            },
+            "speedup_vs_torch": 1.0,
+            "error_type": null,
+            "error_msg": null
+          },
+          {
+            "case_idx": 6,
+            "input_desc": [
+              {
+                "type": "tensor",
+                "shape": [
+                  97,
+                  1
+                ],
+                "dtype": "torch.bfloat16"
+              },
+              {
+                "type": "tensor",
+                "shape": [
+                  97,
+                  2048
+                ],
+                "dtype": "torch.bfloat16"
+              }
+            ],
+            "status": "pass",
+            "framework": {
+              "avg_duration_ms": 0.0045,
+              "peak_memory_mb": 1.14,
+              "operators": {
+                "aclnnMul_MulAiCore_Mul": {
+                  "avg_us": 4.5217,
+                  "launch_count": 1
+                }
+              }
+            },
+            "implementation": {
+              "avg_duration_ms": 0.0046,
+              "peak_memory_mb": 0.76,
+              "operators": {
+                "aclnnMul_MulAiCore_Mul": {
+                  "avg_us": 4.5815,
+                  "launch_count": 1
+                }
+              }
+            },
+            "speedup_vs_torch": 0.9783,
+            "error_type": null,
+            "error_msg": null
+          }
+        ],
+        "result_sha256": "64ea6b366c55546527ace20909055600f0c49910553ca8e9bcc826c2d474e4bd",
+        "scope": "eager kernel durations; separate from graph replay timing; rows above 32 use native fallback",
+        "command": "benchmark.py --op_name moe_epilogue --warmup 10 --repeats 100 --no-lock-frequency --keep_res",
+        "returncode": 0
+      }
+    }
+  ]
 }
