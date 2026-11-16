@@ -38,7 +38,7 @@
       "default_enabled": false,
       "gate_env": "VLLM_HUST_D4_CONV_PACK=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "verified_on_par_with_baseline"
+      "serving_status": "within_noise"
     },
     {
       "id": "gate_fp32",
@@ -62,11 +62,11 @@
       "readme": "ops/gdn_split_fusion/README.md",
       "report": "ops/gdn_split_fusion/REPORT.md",
       "evidence": "ops/gdn_split_fusion/evidence.json",
-      "status": "default_off_serving_no_gain",
+      "status": "integrated_host_fork_measured",
       "default_enabled": false,
       "gate_env": "VLLM_HUST_GDN_UNPACK_FUSED=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "measured_no_gain"
+      "serving_status": "within_noise"
     },
     {
       "id": "moe_epilogue",
@@ -90,11 +90,11 @@
       "readme": "ops/gdn_merge_inproj/README.md",
       "report": "ops/gdn_merge_inproj/REPORT.md",
       "evidence": "ops/gdn_merge_inproj/evidence.json",
-      "status": "superseded_by_host_fork",
+      "status": "integrated_host_fork_measured",
       "default_enabled": false,
       "gate_env": "VLLM_HUST_GDN_MERGE_INPROJ=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "superseded_by_host_fork",
+      "serving_status": "within_noise",
       "superseded_by_host_fork": {
         "host_operator": "AscendGatedDeltaNetAttention.process_weights_after_loading",
         "host_gate_env": "VLLM_HUST_GDN_MERGE_INPROJ",
@@ -216,7 +216,7 @@
       "default_enabled": false,
       "gate_env": "VLLM_HUST_GDN_OUTPUT_NORM_FUSED=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "verified_faster"
+      "serving_status": "within_noise"
     },
     {
       "id": "moe_down_residual_norm",

@@ -15,11 +15,13 @@
 |---|---|---|---|---|---|---|
 | `rope-fix` | 是，general plugin + bundle | import_only | 无正式启用路径 | 未证明；不主张性能收益 | 未证明 | - |
 | `zerocost-wiring` | 是，general plugin + bundle | active，双开关默认关闭 | 依赖运行时门控 | A/B inconclusive | 未证明 | - |
-| `gate-fp32` | 是，general plugin + bundle | active，默认关闭 | 受支持权重加载/执行路径 | 局部 40×`Cast` 1823 → 33 µs（eager 口径）、整网 `Cast` 每卡 −640 可核；只适用于原形状与权重 | 主测 −0.16%（噪声内）；辅助档 +1.68% 不作收益判定，默认关闭 | - |
-| `gdn-merge-inproj` | 是，general plugin + bundle | import_only，fail-closed | 插件侧缺少安全消费 seam；不合并权重 | 插件自身无收益；实际权重合并由宿主层承载 | 未证明 | - |
+| `gate-fp32` | 是，general plugin + bundle | active，默认关闭 | 受支持权重加载/执行路径 | 局部 40×`Cast` 1823 → 33 µs（eager 口径）、整网 `Cast` 每卡 −640 可核；只适用于原形状与权重 | 当前服务配对为 `within_noise`，不主张收益 | [ops/gate_fp32](../ops/gate_fp32/REPORT.md) |
+| `gdn-merge-inproj` | 是，general plugin + bundle | import_only，fail-closed | 插件侧缺少安全消费 seam；不合并权重 | 插件自身无收益；实际权重合并由宿主层承载 | 当前服务配对为 `within_noise`，不主张收益 | [ops/gdn_merge_inproj](../ops/gdn_merge_inproj/REPORT.md) |
 | `split-batch-full-graph` planner | 是，bundle | import_only，不可激活 | 仅纯规划函数；没有宿主执行面 | 不适用 | 未证明 | - |
 | `aot-cache-guard` | 是，general plugin | 无 bundle | 宿主修复后 no-op | 不主张稳态收益 | 仅冷启动问题另行评估 | - |
 | `mlp-chunk` | 是，general plugin | 无 bundle，默认 chunks=1 | 仅配置启用时 | 目标是内存控制，不主张延迟收益 | 未证明容量/并发收益 | - |
+
+`rope-fix`、`zerocost-wiring`、`aot-cache-guard`、`mlp-chunk` 是已注册入口，不是算子交付单元，因此没有 `ops/<operator>/` 目录，也不进入 `DELIVERY_INDEX.json`。入口注册和默认关闭检查通过，只说明可发现性与隔离边界成立，不代表数值护栏、逐卡归因或服务 A/B 已完成。若要把其中某项纳入算子验收，必须先建立交付目录、补齐证据并登记索引，不能凭注册通过升级结论。
 
 ### 2.1 运行时源码变换退役记录（2026-11-01，issue #33 方案 A）
 
@@ -37,7 +39,7 @@
 
 宿主侧下沉算子索引：
 - **GDN 卷积权重加载期预打包 (GDN conv-weight 转置外提与连续打包)**：专属报告与证据结构见 [ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)。宿主分支 `work/d4-conv-pack`（宿主 PR #64，叠层于 PR #63）。
-- **GDN in_proj 输入投影权重加载期合并 (GDN 输入投影两次 MatMul 合一)**：专属报告与证据结构见 [ops/gdn_merge_inproj](../ops/gdn_merge_inproj/REPORT.md)。宿主分支 `work/w3f2-inproj-merge`（宿主 PR #63）。L0/L3/L4/端到端均未测，放行前必须补齐 L3 数值护栏。
+- **GDN in_proj 输入投影权重加载期合并 (GDN 输入投影两次 MatMul 合一)**：专属报告与证据结构见 [ops/gdn_merge_inproj](../ops/gdn_merge_inproj/REPORT.md)。宿主分支 `work/w3f2-inproj-merge`（宿主 PR #63）。已有数值护栏、逐卡调用归因和当前服务配对，主测结论为 `within_noise`，不主张服务收益。
 - **MoE 共享专家后置门控乘融合 (`moe_epilogue`)**：把 `AscendSharedExperts.part2` 里的广播乘换成单 kernel，保留宿主 `sigmoid`。算子层单次 3.64 → 1.34 µs，输出逐字一致；全链路 Mul 家族 −37.0 ms；端到端不可判定，不主张服务收益。见 [ops/moe_epilogue](../ops/moe_epilogue/REPORT.md)。
 - **Qwen Attention 纯文本 Split-QKV 与 RoPE 融合 (`qwen_text_split_qkv_fuse`)**：在纯文本路径下消除 Split、RMSNorm 与 RoPE 的多步离散调用，统一接驳至片上 UB 的 Triton 融合 Kernel。见 [ops/qwen_text_split_qkv_fuse](../ops/qwen_text_split_qkv_fuse/REPORT.md)。宿主分支 `work/qwen-text-split-qkv-fuse`。
 - **GDN 投影解包 / 混合 qkv 重排融合 (`gdn_split_fusion`)**：把投影分支的 split + reshape + chunk + 2×contiguous，以及 `rearrange_mixed_qkv` 的 split + 3×reshape + cat，各合成单 kernel；单仓库、单开关，prefill 全形状正收益。微基准 M=8 省 6.36 µs/层·step；图内归因两档负载目标组自比分别省 53.5%（66k KV）与 **39.7%（263k KV，对外引用口径）**，同窗口全 kernel 分母为 5.00% / 5.05%，不作对外数字；端到端 8/8 一致；服务端 8 / 12 轮的差异均落在同配置组间极差内，不主张收益。见 [ops/gdn_split_fusion](../ops/gdn_split_fusion/REPORT.md)。
