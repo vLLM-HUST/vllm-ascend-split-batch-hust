@@ -191,20 +191,6 @@
       "serving_status": "negative_or_pending"
     },
     {
-      "id": "qwen_text_split_qkv_fuse",
-      "display_name": "Qwen Text Attention Split-QKV RoPE Fusion",
-      "layer": "host_fork",
-      "directory": "ops/qwen_text_split_qkv_fuse",
-      "readme": "ops/qwen_text_split_qkv_fuse/README.md",
-      "report": "ops/qwen_text_split_qkv_fuse/REPORT.md",
-      "evidence": "ops/qwen_text_split_qkv_fuse/evidence.json",
-      "status": "default_off_serving_l3_failed",
-      "default_enabled": false,
-      "gate_env": "VLLM_HUST_SPLIT_QKV_ROPE_FUSED=1",
-      "l3_numerical_guard": "failed",
-      "serving_status": "l3_failed_default_off"
-    },
-    {
       "id": "gdn_output_norm_fusion",
       "display_name": "GDN Part 3 Output Norm and Rearrange Fusion",
       "layer": "host_fork",

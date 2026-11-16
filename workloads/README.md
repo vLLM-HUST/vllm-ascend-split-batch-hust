@@ -49,8 +49,8 @@ bash workloads/run_workload.sh sharegpt 8350 qwen35-35b /tmp/workload_results
 
 # 4. 使用显式配置启动真实采集，输出目录必须尚不存在
 SERVING_CONFIG=/path/to/collection_config.json \
-  bash workloads/evaluate_outer_loop.sh qwen_text_split_qkv_fuse \
-  "VLLM_HUST_SPLIT_QKV_ROPE_FUSED=1" 8350 qwen35-text-rope /path/to/new_run
+  bash workloads/evaluate_outer_loop.sh gate_fp32 \
+  "VLLM_HUST_GATE_FP32=1" 8350 qwen35-gate-fp32 /path/to/new_run
 ```
 
 真实采集由 `tools/operator_tools/serving_collect.py` 执行。配置 JSON 必须包含：

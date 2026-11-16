@@ -259,7 +259,6 @@
         "gdn_split_ba": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
         "moe_gate_merge": "Rejected exploration; retain history, no service retest",
         "moe_gating_routing": "Rejected exploration; retain history, no service retest",
-        "qwen_text_split_qkv_fuse": "Current Qwen3.5 multimodal branch precedes this gate; no independent OFF/ON effect proven; historical numerical failure retained",
         "moe_down_residual_norm": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
         "ffn_activation": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination"
       },
