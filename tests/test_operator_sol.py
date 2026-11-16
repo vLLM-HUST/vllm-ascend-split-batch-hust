@@ -140,6 +140,22 @@ def test_skill_references_and_evaluation_scope():
     assert evaluations["baseline"] == evaluations["with_skill"] == "not_run"
 
 
+def test_optimizer_workflow_reference_exists_and_covers_current_flow():
+    skill = SCRIPTS.parent / "SKILL.md"
+    text = skill.read_text()
+    workflow_link = "references/optimization-workflow.md"
+    assert workflow_link in text
+    workflow = SCRIPTS.parent / workflow_link
+    assert workflow.is_file()
+    body = workflow.read_text()
+    assert "单侧候选" in body
+    assert "端侧长测" in body
+    assert "fail-closed" in body
+    assert "pending_longrun.py" in body
+    assert "sync_mode: none" in body
+    assert "serving_sync.validate" in body
+
+
 def test_active_entrypoints_do_not_reference_removed_optimizer():
     removed = (
         "tools/" + "op_agent",
