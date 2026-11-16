@@ -39,6 +39,7 @@ PROSE_SURFACE = (
     "docs/agent-guide.md",
     "docs/support-matrix.md",
     "docs/operator-benchmark-standard.md",
+    "docs/hotspot-profile-method.md",
     "docs/mod-acceptance-standard.md",
     "docs/mod-acceptance-audit.md",
     ".openbitfun/skills/mod-acceptance/SKILL.md",
