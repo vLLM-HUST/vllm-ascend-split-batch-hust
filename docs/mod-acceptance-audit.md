@@ -36,7 +36,6 @@
 | `gdn_input_norm` | 旧字段 `l0_benchmark` 和 `l3_verification` 已有记录 | 不是“没有微基准”；缺公开入口、实际调用及服务证据，字段规范化须保留原记录 |
 | `gdn_split_ba` | 有微基准与数值记录 | 有函数和环境变量，不等于服务已接线；缺调用归因与服务配对 |
 | `moe_down_residual_norm`、`ffn_activation` | 有独立算子实现与历史证据 | 当前源码未注册公开入口；先补接入，再做调用与服务验证 |
-| `qwen_text_split_qkv_fuse` | 数值与服务贪心对拍均失败 | 一票否决，保持关闭，修复并重新通过前置检查后才能纳入组合 |
 | `moe_gate_merge`、`moe_gating_routing` | 已否定的负收益探索 | 保留记录，不作为必须补跑的正式候选 |
 
 未公开接入的算子使用待验证标签；旧服务结果使用 `historical_only`，不能证明当前版本表现。调用可达性以源码、公开注册和当前运行证据为准。

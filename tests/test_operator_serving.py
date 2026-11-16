@@ -211,8 +211,6 @@ def _kernel(kind, inputs="", output="", dtype=""):
 def test_dedicated_attribution_rejects_noop_and_missing_paths():
     for operator in attribution.GATES:
         assert not attribution.evaluate(operator, [], [])["passed"]
-    rope = [_kernel("split_qkv_rmsnorm_mrope_kernel")] * 160
-    assert not attribution.evaluate("qwen_text_split_qkv_fuse", rope, rope)["passed"]
 
 
 def test_dedicated_attribution_conv_and_gate_cache():

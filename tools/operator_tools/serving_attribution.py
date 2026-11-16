@@ -12,7 +12,6 @@ GATES = {
     "gate_fp32": "VLLM_HUST_GATE_FP32",
     "gdn_merge_inproj": "VLLM_HUST_GDN_MERGE_INPROJ",
     "gdn_split_fusion": "VLLM_HUST_GDN_UNPACK_FUSED",
-    "qwen_text_split_qkv_fuse": "VLLM_HUST_SPLIT_QKV_ROPE_FUSED",
 }
 
 
@@ -89,13 +88,6 @@ def evaluate(operator, off, on, steps=16, gdn_layers=30, moe_layers=40):
             exact(f"on_{kernel}", count(on, kernel), gdn_layers)
         for arm, rows in (("off", off), ("on", on)):
             exact(f"{arm}_conv", count(rows, "CausalConv1d"), gdn_calls)
-    elif operator == "qwen_text_split_qkv_fuse":
-        for arm, rows in (("off", off), ("on", on)):
-            exact(
-                f"{arm}_rope_kernel",
-                count(rows, "split_qkv_rmsnorm_mrope_kernel"),
-                0 if arm == "off" else steps * 10,
-            )
     else:
         raise ValueError(f"Unsupported attribution: {operator}")
     return {"passed": all(c["passed"] for c in checks.values()), "checks": checks}
