@@ -21,26 +21,26 @@ if str(ROOT) not in sys.path:
 from tools.operator_tools.serving_e2e_auto import validate_plan  # noqa: E402
 
 DEFAULT_PENDING_OPS = (
+    "moe_epilogue",
     "gdn_qkv_norm",
-    "gdn_input_norm",
     "gdn_split_ba",
     "moe_down_residual_norm",
     "ffn_activation",
 )
 
 SPECS: dict[str, dict[str, Any]] = {
+    "moe_epilogue": {
+        "mode": "full",
+        "gate": "VLLM_HUST_MOE_EPILOGUE",
+        "kernel": "_gate_mul_kernel",
+        "attention_layers": 40,
+    },
     "gdn_qkv_norm": {
         "mode": "skip",
         "reason": (
             "索引 gate_env=unexposed，历史服务门控已撤回；缺公开调用点和归因规则，"
             "不能安排有效服务 A/B"
         ),
-    },
-    "gdn_input_norm": {
-        "mode": "full",
-        "gate": "VLLM_HUST_GDN_INPUT_NORM",
-        "kernel": "rms_norm_kernel",
-        "attention_layers": 30,
     },
     "gdn_split_ba": {
         "mode": "full",

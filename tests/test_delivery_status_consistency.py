@@ -79,12 +79,7 @@ ALLOWED_SERVING = MEASURED_CLAIMS | NO_CLAIM | ATTR_PENDING_ALLOWED
 GATE_ENV_RE = re.compile(r"^VLLM_HUST_[A-Z0-9_]+=\S+$")
 
 #: 旧 schema 证据的存量债：文件 -> 现状说明。迁移到 v1 后删除对应条目。
-LEGACY_EVIDENCE = {
-    "ops/gdn_input_norm/evidence.json": (
-        "旧字段名（operator / l3_verification / l0_benchmark），未迁移到 v1；"
-        "缺少 serving_end_to_end 与 l4_attribution"
-    ),
-}
+LEGACY_EVIDENCE = {}
 
 
 def _index() -> dict:

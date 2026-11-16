@@ -76,11 +76,11 @@
       "readme": "ops/moe_epilogue/README.md",
       "report": "ops/moe_epilogue/REPORT.md",
       "evidence": "ops/moe_epilogue/evidence.json",
-      "status": "default_off_host_fork_measured",
+      "status": "integrated_host_fork_measured",
       "default_enabled": false,
       "gate_env": "VLLM_HUST_MOE_EPILOGUE=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "historical_only"
+      "serving_status": "within_noise"
     },
     {
       "id": "gdn_merge_inproj",
@@ -109,20 +109,6 @@
       "readme": "ops/gdn_qkv_norm/README.md",
       "report": "ops/gdn_qkv_norm/REPORT.md",
       "evidence": "ops/gdn_qkv_norm/evidence.json",
-      "status": "l0_measured_pending_outer_loop",
-      "default_enabled": false,
-      "gate_env": "unexposed",
-      "l3_numerical_guard": "passed",
-      "serving_status": "pending_outer_loop"
-    },
-    {
-      "id": "gdn_input_norm",
-      "display_name": "gdn_input_norm (vllm_ascend/ops/gdn.py:in_proj_norm)",
-      "layer": "plugin_carrier",
-      "directory": "ops/gdn_input_norm",
-      "readme": "ops/gdn_input_norm/README.md",
-      "report": "ops/gdn_input_norm/REPORT.md",
-      "evidence": "ops/gdn_input_norm/evidence.json",
       "status": "l0_measured_pending_outer_loop",
       "default_enabled": false,
       "gate_env": "unexposed",

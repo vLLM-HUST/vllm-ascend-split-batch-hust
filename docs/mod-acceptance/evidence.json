@@ -254,7 +254,6 @@
       },
       "excluded": {
         "gdn_qkv_norm": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
-        "gdn_input_norm": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
         "gdn_norm_gate": "Superseded by gdn_output_norm_fusion; do not count twice",
         "gdn_split_ba": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
         "moe_gate_merge": "Rejected exploration; retain history, no service retest",
