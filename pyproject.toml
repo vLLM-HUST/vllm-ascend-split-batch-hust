@@ -66,7 +66,7 @@ markers = [
     # deselects them: `pytest -q -m "not host_tree"`.  The full local run keeps
     # them, which is what makes the guard loud.
     "host_tree: needs host source or live host imports; missing dependencies fail (excluded from CPU CI)",
-
+    "npu: requires an available Ascend device",
 ]
 
 [tool.ruff]

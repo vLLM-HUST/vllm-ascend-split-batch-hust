@@ -16,6 +16,8 @@
 
 ## 2. 算子特征驱动的三负载绑定规则
 
+单算子端到端 A/B 按需选测，完整配对优先用于实际交付组合；以下规则只约束已决定执行的 A/B，不要求每个算子各跑一套。组合仍逐项核验数值和调用，并预先冻结主测负载，不能事后挑选。
+
 在内外环分离架构（见 [算子基准规范](../docs/operator-benchmark-standard.md)）中，外环评测不再随意挑选单一负载，而是按算子生效条件绑定 **"主测受控负载 + 动态分布压力负载 + 相位交叉检查负载"**。三个角色各答一个问题，缺一个就可能得出片面结论。
 
 1. **主测受控负载（`primary_workload`，用于判定端到端收益）**：
@@ -54,6 +56,7 @@ SERVING_CONFIG=/path/to/collection_config.json \
 真实采集由 `tools/operator_tools/serving_collect.py` 执行。配置 JSON 必须包含：
 
 - `python`：已安装匹配宿主 Fork 的隔离 Python 绝对路径。
+- `host_commits`：以 `vllm`、`vllm-ascend` 为键的完整提交；采集前在服务解释器内核验安装来源，不匹配即停止。
 - `server_command`：完整起服参数数组，必须显式绑定本地地址、端口、模型别名、并行规模和随机种子。
 - `gate`、`port`、`model_alias`：与 shell 参数一致的目标开关名、端口和模型别名。
 - `model_path`、`sharegpt_path`：本地 tokenizer 和真实对话数据集路径。

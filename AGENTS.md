@@ -6,6 +6,8 @@
 
 ## 1. 核心架构与边界约束
 
+**测试前先核对宿主**：已安装的社区版不等于 HUST 基线，源码目录存在也不等于服务正在使用它。服务采集配置必须提供两个宿主的完整 `host_commits`，由 `tools/operator_tools/host_runtime.py` 在服务解释器内核验实际安装来源；缺失或不匹配即停止。单独加载参考源码只支持局部算子结论，不能作为宿主集成或服务证据。
+
 1. **宿主与插件两层分工**（详见 [docs/container-and-plugin-boundary-spec.md](docs/container-and-plugin-boundary-spec.md)）：
    - **宿主层**：承载模型私有前向拦截、权重加载后处理钩子与底层运行时修复，随宿主镜像原生发布；
    - **插件层**：仅通过官方公开插件接口接入，承载纯 Python / Triton 算子实现与调度策略；
@@ -37,7 +39,8 @@
 ## 2. 算子开发与评测约束
 
 1. **四级验证阶梯**（详见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) 与 [docs/npu-benchmark-execution-guide.md](docs/npu-benchmark-execution-guide.md)）：
-   - 严格遵循 `L0 纯算子微基准 -> L3 数值正确性护栏 -> L4 调用链路归因 -> 服务端到端实测` 阶梯；
+   - 所有纳入组合的候选保留算子数值校验与逐卡调用归因；单算子端到端 A/B 按需选测，不作为每个算子的必经门槛。组合重新检查数值与各候选调用，再做组合 A/B，最终按 MOD 合同验收；
+   - 只有优化方向记录、未接入实现、已拒绝或已被替代的路线不强制补测；保留历史数据，不将组合收益分摊为单算子收益；
    - MOD 最终验收按 [docs/mod-acceptance-standard.md](docs/mod-acceptance-standard.md) 执行；算子服务结论不能替代冻结数据集、连续窗口与四项目标验收；执行完整性与目标达标分开记录；
    - 数值失败（L3 未过）一票否决，严格保持 default-off；
    - 负收益或在噪声范围内的结论必须如实记录，绝不夸大或伪造加速比。
@@ -87,7 +90,7 @@
 5. **术语以 [GLOSSARY.md](GLOSSARY.md) 为准**：
    - 统一语言（Ubiquitous Language）词表在 [GLOSSARY.md](GLOSSARY.md)，一律按其中的唯一写法与定义判据说话、命名代码与写文档；
    - 一物一名、一名一物：不造同义词，不裸用同名异义词（如 `gate`、`L3`/`L4`），废止词不得复活；
-   - 引入新概念或新标签时，先按 `GLOSSARY.md` §1.4 登记词条与锚点，再改代码与文档；
+   - 引入新概念或新标签时，先在 `GLOSSARY.md` 登记词条与锚点，再改代码与文档；
    - `GLOSSARY.md` 只定义词与判据，不承载数字、阈值与状态值，不得成为第二事实源。
 
 ---

@@ -9,6 +9,8 @@ description: Use when 用户需要优化 Ascend 算子、计算 SOL% 达成率�
 
 ## 先确定事实
 
+设备重测或服务采集前，先按 [宿主环境选择](references/host-environment.md) 查找已有 venv，核验实际模块来源、宿主提交及原生库。系统 Python 不匹配不代表容器没有 HUST；未经查找，不重新克隆或构建宿主。
+
 读取项目的 `AGENTS.md`、`GLOSSARY.md`、`docs/operator-benchmark-standard.md`、目标源码、`ops/<operator>/evidence.json` 和 `DELIVERY_INDEX.json`。查明真实调用点、模型和权重格式、dtype、形状、stride、专家分布、相位、输出别名及中间舍入。不要把连续向量链猜成同一种计算，也不要根据模型名称猜调用次数。
 
 本仓历史输入与公式保存在 [legacy-case-facts.json](references/legacy-case-facts.json)。它们仅帮助复现旧实验；重新提取当前宿主事实后再测试，不把 CPU 分支当作设备数值参考。现有算子实现、历史性能、失败记录与证据必须保留。临时项目放仓内隔离且忽略的目录，原始采集放仓外。
@@ -69,6 +71,8 @@ Simulator 会执行整个应用，先缩成保持关键布局和计算语义的�
 
 先写 `ops/<operator>/evidence.json`，再同步索引，最后用 `tools/operator_tools/custody.py` 生成并校验目录指纹。实现或依赖改变后，旧服务记录保留为历史；重新核对适用性，不能自动继承。没有独立测量的 `bench_l0.py` 必须退出码为 3。
 
-`layer` 按实际交付归属选现有值，不按调优方式新建层。没有公开可达入口的候选使用 `gate_env=unexposed` 和待验证状态，不捏造门控。算子通过后按外环规范核对真实接入、服务数值和逐卡归因；进入 MOD 交接时使用 `mod-acceptance`，不把局部 SOL 升级为最终合格结论。
+`layer` 按实际交付归属选现有值，不按调优方式新建层。没有公开可达入口的候选使用 `gate_env=unexposed` 和待验证状态，不捏造门控。所有纳入组合的候选均按外环规范保留数值校验和逐卡归因，可共用采集但须逐项判定。单算子端到端 A/B 按需选测，先按关键路径占比、风险和归因需要决定，不为全部目录逐个起服。仅有方向记录、未接入、已拒绝或被替代的路线明确排除，不制造缺测债务。
+
+冻结实际可用的组合，关闭组与启用组只改变目标开关集合；先重验组合数值及各候选调用，再做组合 A/B。退化时分组消融，必要时才做单项 A/B；不得事后删掉失败样本或把组合收益分摊给单项。已有局部、单项服务、失败和中断产物保留；未单测保持无单项服务结论，不因此阻止证据充分的组合交付。进入 MOD 交接时使用 `mod-acceptance`，不把局部 SOL 或组合诊断升级为最终合格结论。
 
 修改后跑 `pytest @tests/offline-checks.args` 和隔离 CPU 门禁。行为评估场景见 [cases.json](evals/cases.json)；没有独立 Agent 或 NPU 时明确记录未执行，不把脚本测试当成行为验证。

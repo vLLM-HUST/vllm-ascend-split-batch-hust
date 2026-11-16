@@ -83,5 +83,139 @@
     "stress_workload": "sharegpt",
     "concurrency": 32,
     "speedup": null
-  }
+  },
+  "device_retests": [
+    {
+      "run_id": "npu-retest-20261115T041855Z",
+      "status": "blocked_missing_host_reference",
+      "returncode": 1,
+      "error": "ModuleNotFoundError(\"No module named 'vllm.third_party.flash_linear_attention'\")",
+      "scope": "reference import failed before any numerical or timing measurement",
+      "command": [
+        "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+        "/root/vllm-workspace/vllm-ascend-split-batch-hust/tools/bench_gdn_qkv_norm.py",
+        "--out",
+        "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/gdn_qkv_norm-retest.json",
+        "--iters",
+        "40"
+      ],
+      "archive": {
+        "uri": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+        "files": {
+          "gdn_qkv_norm-retest.json": "45c50ef23cd4429620b5c5e9f79ccb2761681b9480f6e4108aa3e583f4a29177",
+          "gdn_qkv_norm-retest.log": "855cf4da7ed337e1c3d845c977b743a9d2baa31e81a2f2446a624de82081d001"
+        }
+      },
+      "script_sha256": "d4005dce603aeb40564c318bd4f567d9df9539ea18ef8a8cc7edc2577f945f46"
+    },
+    {
+      "run_id": "npu-retest-20261115T041855Z-hust-source",
+      "scope": "isolated kernel with HUST baseline reference source and installed community runtime; not full host integration",
+      "status": "passed",
+      "reference": {
+        "archived_path": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/source-snapshots/hust-core-l2norm.py",
+        "path": "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/host-core/vllm/third_party/flash_linear_attention/ops/l2norm.py",
+        "sha256": "520f4513ef4fc97e6b88dc07877cca8e29da0d34e44673fe989e3af002d86381"
+      },
+      "host_core_commit": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+      "activation": {
+        "USE_DEFAULT_FLA_NORM": "0"
+      },
+      "correctness": [
+        {
+          "case": "random",
+          "status": "PASS"
+        },
+        {
+          "case": "zero",
+          "status": "PASS"
+        },
+        {
+          "case": "small",
+          "status": "PASS"
+        },
+        {
+          "case": "special",
+          "status": "PASS"
+        },
+        {
+          "case": "offset",
+          "status": "PASS"
+        }
+      ],
+      "graph_check": {
+        "status": "PASS",
+        "replays": 8,
+        "changing_input": true,
+        "stable_output_addresses": true,
+        "scope": "isolated kernel graph only"
+      },
+      "measurement": {
+        "iters": 100,
+        "repeats": 3,
+        "warmup": 3,
+        "medians": {
+          "baseline": {
+            "host_enqueue_us": 752.7232449501753,
+            "event_eager_chain_us": 752.4085998535156,
+            "host_total_us": 754.5259594917297
+          },
+          "candidate": {
+            "host_enqueue_us": 249.32715110480785,
+            "event_eager_chain_us": 248.7424087524414,
+            "host_total_us": 250.12986734509468
+          },
+          "candidate_launch_only": {
+            "host_enqueue_us": 115.19834399223328,
+            "event_eager_chain_us": 114.66279983520508,
+            "host_total_us": 115.92426337301731
+          }
+        },
+        "timing_contract": "host enqueue and event overlap; event includes host supply gaps, never subtract them for kernel time"
+      },
+      "commands": [
+        {
+          "argv": [
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/tools/bench_gdn_qkv_norm.py",
+            "--reference-source",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/host-core/vllm/third_party/flash_linear_attention/ops/l2norm.py",
+            "--out",
+            "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/gdn_qkv_norm-hust-source-retest.json",
+            "--iters",
+            "100"
+          ],
+          "returncode": 0,
+          "host_core_commit": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a"
+        },
+        {
+          "argv": [
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/tools/bench_gdn_qkv_norm.py",
+            "--reference-source",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/host-core/vllm/third_party/flash_linear_attention/ops/l2norm.py",
+            "--out",
+            "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/gdn_qkv_norm-hust-graph-check.json",
+            "--graph-only"
+          ],
+          "returncode": 0
+        }
+      ],
+      "limitations": [
+        "historical synthetic shape; current model callsite not exercised",
+        "community runtime helpers remain installed",
+        "eager event includes host submission gaps; no pure kernel speedup derived",
+        "no model L3, L4, serving or MOD retest"
+      ],
+      "archive": {
+        "uri": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+        "files": {
+          "gdn_qkv_norm-hust-source-retest.json": "a7cce010e023be1369eb8d14e0bbbaf188cfa0e1783c4ee228892c6b1e3bf1d5",
+          "gdn_qkv_norm-hust-graph-check.json": "c72b2fb3d98fa0b15aa926a74b42692dd8df51f0edbfd82f05cdb60a000fff3f",
+          "gdn_qkv_norm-hust-command.json": "df1940e7bcadd512a1ad5563480e60c822004b1ae0847a3907b80e9ea5f56b22",
+          "gdn_qkv_norm-hust-graph-command.json": "a71d97356ac261b0ee2c295619aecbd62849e7ac075110f97d7ece11e3d8f74e"
+        }
+      }
+    }
+  ]
 }

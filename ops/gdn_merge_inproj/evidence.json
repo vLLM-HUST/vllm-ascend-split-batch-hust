@@ -151,10 +151,7 @@
       }
     ],
     "status": "completed",
-    "verified": true,
-    "call_count_expected": 960,
-    "call_count_actual": 960,
-    "call_count_caliber": "sum of expected ON-arm target kernel calls across ranks; detailed per-check values remain in devices"
+    "verified": true
   },
   "serving_end_to_end": {
     "tested": true,

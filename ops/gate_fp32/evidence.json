@@ -109,10 +109,7 @@
       }
     ],
     "status": "completed",
-    "verified": true,
-    "call_count_expected": 1280,
-    "call_count_actual": 1280,
-    "call_count_caliber": "sum of expected ON-arm target kernel calls across ranks; detailed per-check values remain in devices"
+    "verified": true
   },
   "l4_serving_elimination": {
     "target_op": "Cast",

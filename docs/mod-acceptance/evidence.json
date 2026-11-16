@@ -235,6 +235,102 @@
       "structural_check_command": "pytest -q tests/test_benchmark_standard.py::test_mod_skill_structure_and_local_contract_references",
       "independent_agent_scenarios": "not_run",
       "reason": "No subagent tool available in this session; manual application is not an independent behavioral evaluation."
+    },
+    "combination_plan": {
+      "tested": false,
+      "single_operator_ab": "optional",
+      "required_guards": [
+        "numerical",
+        "per_operator_attribution"
+      ],
+      "status": "planned_guards_pending",
+      "candidates": {
+        "gdn_conv_pack": "VLLM_HUST_D4_CONV_PACK",
+        "gate_fp32": "VLLM_HUST_GATE_FP32",
+        "gdn_split_fusion": "VLLM_HUST_GDN_UNPACK_FUSED",
+        "moe_epilogue": "VLLM_HUST_MOE_EPILOGUE",
+        "gdn_merge_inproj": "VLLM_HUST_GDN_MERGE_INPROJ",
+        "gdn_output_norm_fusion": "VLLM_HUST_GDN_OUTPUT_NORM_FUSED"
+      },
+      "excluded": {
+        "gdn_qkv_norm": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
+        "gdn_input_norm": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
+        "gdn_norm_gate": "Superseded by gdn_output_norm_fusion; do not count twice",
+        "gdn_split_ba": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
+        "moe_gate_merge": "Rejected exploration; retain history, no service retest",
+        "moe_gating_routing": "Rejected exploration; retain history, no service retest",
+        "qwen_text_split_qkv_fuse": "Current Qwen3.5 multimodal branch precedes this gate; no independent OFF/ON effect proven; historical numerical failure retained",
+        "moe_down_residual_norm": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
+        "ffn_activation": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination"
+      },
+      "arms": {
+        "off": {
+          "VLLM_HUST_D4_CONV_PACK": "0",
+          "VLLM_HUST_GATE_FP32": "0",
+          "VLLM_HUST_GDN_UNPACK_FUSED": "0",
+          "VLLM_HUST_MOE_EPILOGUE": "0",
+          "VLLM_HUST_GDN_MERGE_INPROJ": "0",
+          "VLLM_HUST_GDN_OUTPUT_NORM_FUSED": "0"
+        },
+        "on": {
+          "VLLM_HUST_D4_CONV_PACK": "1",
+          "VLLM_HUST_GATE_FP32": "1",
+          "VLLM_HUST_GDN_UNPACK_FUSED": "1",
+          "VLLM_HUST_MOE_EPILOGUE": "1",
+          "VLLM_HUST_GDN_MERGE_INPROJ": "1",
+          "VLLM_HUST_GDN_OUTPUT_NORM_FUSED": "1"
+        }
+      },
+      "fixed_off": [
+        "VLLM_HUST_SPLIT_QKV_ROPE_FUSED",
+        "VLLM_HUST_GDN_NORM_GATE"
+      ],
+      "primary_workload": "random",
+      "stress_workload": "sharegpt",
+      "cross_check_workload": "long-prefix",
+      "order": [
+        "off",
+        "on",
+        "on",
+        "off"
+      ],
+      "host_commits": {
+        "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+        "vllm-ascend": "e59aaeef26788e9f895aefa568d779ad84cc7842"
+      },
+      "blocking": [
+        "Revalidate combined numerical outputs and each candidate attribution in actual benchmark graph mode",
+        "Audit row limits and prefill/decode fallbacks; eager-only attribution does not prove graph replay",
+        "Existing collector supports a single gate only; explicit multi-gate activation and per-candidate attribution are required before execution"
+      ],
+      "retained_experiments": [
+        {
+          "archive": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/serving-gdn-output-norm",
+          "files": {
+            "summary.json": "4645e869d2c427c2f74ce638778c7bf7d35d7cb702c5eaded25a853d88e495e2"
+          }
+        },
+        {
+          "archive": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/remaining-longrun",
+          "files": {
+            "completion.json": "e96808d6d13cc4778e98d74bc5abb42200de47e48cf578c35fffcb938aade62e",
+            "stop-request.json": "3993cd463ccd99b795be3a1d9b93d807ef2f5a8213707894754e19dff41e651b",
+            "gdn_conv_pack/serving_l3.json": "bfc9c0c4cbebd6e1067c0cb81937b286582477e7494968857cdd6898edda0424",
+            "gate_fp32/serving_l3.json": "bfc9c0c4cbebd6e1067c0cb81937b286582477e7494968857cdd6898edda0424",
+            "moe_epilogue/serving_l3.json": "bfc9c0c4cbebd6e1067c0cb81937b286582477e7494968857cdd6898edda0424",
+            "gdn_split_fusion/serving_l3.json": "bfc9c0c4cbebd6e1067c0cb81937b286582477e7494968857cdd6898edda0424",
+            "moe_epilogue/l4.json": "27c4a25f2596b414e1dce32547f31745e0678c84e0112b6b1861942145753334"
+          }
+        },
+        {
+          "archive": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-longrun",
+          "files": {
+            "completion.json": "476fb4cc3b4d32438e5166a69299d8f040e8635389d8354dd01e773c3d643036",
+            "stop-request.json": "2558caad9e327fd5f5f479a3c55b5f965cd3f536a0ffae225b27dce52e77a33e"
+          }
+        }
+      ],
+      "note": "No experiment result or operator serving claim is changed by this plan. Candidate inclusion is not acceptance. Frozen MOD datasets and targets remain untested."
     }
   }
 }
