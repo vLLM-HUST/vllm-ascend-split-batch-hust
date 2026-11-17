@@ -179,16 +179,27 @@ def server(config, output, arm, profile=False):
 
 
 def collect_guard(config, output, arm):
+    """Run the guard probe sequence and analyse the captured profile.
+
+    Token counts and prompt count come from ``config["collection_shape"]`` when
+    present, so a run can target a different output-length regime without
+    editing this function. The defaults preserve the original shape.
+    """
+    shape = config.get("collection_shape") or {}
+    warmup_tokens = int(shape.get("warmup_tokens") or 16)
+    l3_tokens = int(shape.get("l3_tokens") or 128)
+    profile_tokens = int(shape.get("profile_tokens") or 16)
+    warmup_repeats = int(shape.get("warmup_repeats") or 10)
     with server(config, output, arm, profile=True):
-        for _ in range(10):
-            completion(config, "Explain RMSNorm briefly.", 16)
-        responses = [completion(config, p, 128) for p in FIXED_L3_PROMPTS]
+        for _ in range(warmup_repeats):
+            completion(config, "Explain RMSNorm briefly.", warmup_tokens)
+        responses = [completion(config, p, l3_tokens) for p in FIXED_L3_PROMPTS]
         save(output / "responses.json", responses)
         texts = [r["choices"][0]["text"] for r in responses]
         save(output / "greedy.json", texts)
         request(config["port"], "/start_profile", {})
         try:
-            response = completion(config, "Explain a binary heap.", 16)
+            response = completion(config, "Explain a binary heap.", profile_tokens)
             save(output / "profile_response.json", response)
         finally:
             request(config["port"], "/stop_profile", {})

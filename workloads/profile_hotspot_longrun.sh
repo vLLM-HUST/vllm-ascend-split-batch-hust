@@ -3,11 +3,20 @@
 #
 # 必需环境变量: BASE_PLAN —— 提供 `config.environment`（CANN 依赖路径等）的 plan JSON，
 #   无默认值；脚本从该 plan 首条带 environment 的条目取运行环境，取不到直接退出。
-# 可选环境变量: PY / RUNTIME_PY / RUN_ID / RUN_DIR / ARCHIVE_ROOT / PORT_BASE /
-#   PROFILE_GATE / PROFILE_ROUNDS / PROFILE_SLEEP_SECONDS（下方取值即默认）。
+# 可选环境变量（下方取值即默认）:
+#   PY / RUNTIME_PY / RUN_ID / RUN_DIR / ARCHIVE_ROOT / PORT_BASE /
+#   PROFILE_GATE / PROFILE_ROUNDS / PROFILE_SLEEP_SECONDS
+#   采集形态: MODEL_PATH / MODEL_ALIAS / TP_SIZE / MAX_MODEL_LEN /
+#   SERVER_MODE（eager|graph）/ WORKLOAD / PREFIX_CACHING /
+#   HOST_VLLM_COMMIT / HOST_ASCEND_COMMIT /
+#   WARMUP_TOKENS / L3_TOKENS / PROFILE_TOKENS / WARMUP_REPEATS
 # 产物落点: 仓内 $RUN_DIR（默认 <仓根>/.openbitfun/profile-hotspot-longrun-<RUN_ID>）落
 #   config.json / status.json / hotspots_NN.json / nohup.log / summary.txt；
 #   设备侧原始采集落仓外 $ARCHIVE_ROOT 下的 round_NN_off/。
+#
+# 换形态只改环境变量，不改脚本：输出长度、并发与提示数由 --workload 选中的
+# 预设决定（见 tools/operator_tools/workloads.py），SERVER_MODE=graph 时不再传
+# --enforce-eager，采集落进 ACLGraph 形态。
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -21,6 +30,28 @@ BASE_PLAN=${BASE_PLAN:?需显式指定 BASE_PLAN（提供 config.environment 的
 GATE=${PROFILE_GATE:-"VLLM_HUST_GDN_SPLIT_BA"}
 ROUNDS=${PROFILE_ROUNDS:-3}
 SLEEP_SECONDS=${PROFILE_SLEEP_SECONDS:-30}
+
+MODEL_PATH=${MODEL_PATH:-"/models/Qwen3.5-35B-A3B"}
+MODEL_ALIAS=${MODEL_ALIAS:-"qwen35-35b"}
+TP_SIZE=${TP_SIZE:-2}
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
+WORKLOAD=${WORKLOAD:-"random"}
+SERVER_MODE=${SERVER_MODE:-"eager"}
+PREFIX_CACHING=${PREFIX_CACHING:-0}
+HOST_VLLM_COMMIT=${HOST_VLLM_COMMIT:-"f18cf803c5f63625e2c71253ddaf8b0bad0bad1a"}
+HOST_ASCEND_COMMIT=${HOST_ASCEND_COMMIT:-"320eced8c1bba71c0329bf59caa721a2382e7499"}
+
+case "$SERVER_MODE" in
+  eager) GUARD_ARGS='["--enforce-eager", "--no-enable-prefix-caching"]' ;;
+  graph) GUARD_ARGS='["--no-enable-prefix-caching"]' ;;
+  *)
+    echo "SERVER_MODE must be eager or graph, got: $SERVER_MODE" >&2
+    exit 1
+    ;;
+esac
+if [[ "$PREFIX_CACHING" == "1" ]]; then
+  GUARD_ARGS=$(printf '%s' "$GUARD_ARGS" | sed 's/, "--no-enable-prefix-caching"//')
+fi
 
 if [[ ! -x "$PY" || ! -x "$RUNTIME_PY" ]]; then
   echo "python not found: py=$PY runtime=$RUNTIME_PY" >&2
@@ -57,38 +88,45 @@ cat > config.json <<JSON
     "-m",
     "vllm.entrypoints.cli.main",
     "serve",
-    "/models/Qwen3.5-35B-A3B",
+    "$MODEL_PATH",
     "--host",
     "127.0.0.1",
     "--port",
     "__PORT__",
     "--served-model-name",
-    "qwen35-35b",
+    "$MODEL_ALIAS",
     "--tensor-parallel-size",
-    "2",
+    "$TP_SIZE",
     "--seed",
     "42",
     "--max-model-len",
-    "4096"
+    "$MAX_MODEL_LEN"
   ],
   "host_commits": {
-    "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
-    "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+    "vllm": "$HOST_VLLM_COMMIT",
+    "vllm-ascend": "$HOST_ASCEND_COMMIT"
   },
   "gate": "$GATE",
   "port": 0,
-  "model_alias": "qwen35-35b",
-  "model_path": "/models/Qwen3.5-35B-A3B",
+  "model_alias": "$MODEL_ALIAS",
+  "model_path": "$MODEL_PATH",
   "sharegpt_path": "/models/datasets/ShareGPT/ShareGPT_V3_unfiltered_cleaned_split.json",
-  "world_size": 2,
+  "world_size": $TP_SIZE,
   "attention_layers": 30,
   "phase": "decode",
   "startup_timeout": 1200,
   "environment": $ENVIRONMENT_JSON,
-  "guard_server_args": [
-    "--enforce-eager",
-    "--no-enable-prefix-caching"
-  ]
+  "guard_server_args": $GUARD_ARGS,
+  "collection_shape": {
+    "server_mode": "$SERVER_MODE",
+    "prefix_caching": $PREFIX_CACHING,
+    "workload": "$WORKLOAD",
+    "max_model_len": $MAX_MODEL_LEN,
+    "warmup_tokens": ${WARMUP_TOKENS:-16},
+    "l3_tokens": ${L3_TOKENS:-128},
+    "profile_tokens": ${PROFILE_TOKENS:-16},
+    "warmup_repeats": ${WARMUP_REPEATS:-10}
+  }
 }
 JSON
 

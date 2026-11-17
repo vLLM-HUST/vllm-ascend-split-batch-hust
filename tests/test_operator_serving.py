@@ -403,6 +403,30 @@ def test_outer_loop_greedy_l3_and_op_statistic_l4(tmp_path):
     assert snr_large["recommend_full_ab"] is True
 
 
+def test_snr_gate_scales_by_device_share():
+    """Kernel savings cannot reach the idle part of the wall-clock window."""
+    full = serving_loop.evaluate_e2e_snr_gate(
+        net_saved_ms=120.0, all_kernel_total_ms=5700.0, serving_noise_floor_pct=1.5
+    )
+    assert full["recommend_full_ab"] is True
+    assert full["device_share"] == 1.0
+
+    idle = serving_loop.evaluate_e2e_snr_gate(
+        net_saved_ms=120.0,
+        all_kernel_total_ms=5700.0,
+        serving_noise_floor_pct=1.5,
+        device_share=0.25,
+    )
+    assert (
+        abs(
+            idle["expected_all_kernel_delta_pct"]
+            - full["expected_all_kernel_delta_pct"] * 0.25
+        )
+        < 1e-3
+    )
+    assert idle["recommend_full_ab"] is False
+
+
 def test_outer_loop_ab_summary_is_read_only(tmp_path):
     op_dir = tmp_path / "demo_op"
     op_dir.mkdir()

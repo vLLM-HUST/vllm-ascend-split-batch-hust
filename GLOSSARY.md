@@ -102,7 +102,7 @@
 | 动态形状探针 | 未参与预热编译的尺寸；编译缓存或日志用于核查是否重编译。 | `.openbitfun/skills/operator-sol-optimizer/SKILL.md` | 单次时间不能证明重编译 |
 | 短路评估 | 数值检查失败后不接受该候选的性能结论。 | `.openbitfun/skills/operator-sol-optimizer/SKILL.md` | — |
 | 泳道图 | 由 timeline 折叠出的高层级子图片段可视化，供人工审阅。 | `tools/operator_tools/timeline_insight.py` | 不能自动推定计算语义 |
-| SNR 预筛 | 用算子份额估算是否值得投入服务实验，不构成服务收益判定。 | `tools/operator_tools/serving_loop.py` | 全核份额不等于墙钟关键路径 |
+| SNR 预筛 | 用算子份额估算是否值得投入服务实验，不构成服务收益判定；已知墙钟构成时按设备时间占比缩放。 | `tools/operator_tools/serving_loop.py` 的 `evaluate_e2e_snr_gate`（参数 `device_share`） | 全核份额不等于墙钟关键路径 |
 | 负载（workload） | 主测、动态压力和跨相位诊断输入，按算子生效条件配对。 | `tools/operator_tools/workloads.py`；`workloads/README.md` | MOD 冻结任务 |
 | `primary_workload` / `stress_workload` | 主测对比负载与动态形状压力负载，缺一即证据不完整。 | `workloads/README.md` | — |
 | 载体状态快照（`carriers.env`） | 一次起服窗口里被核验的开关与入口点状态集合，唯一来源是与 serve 日志同名的环境记录。 | `tools/bench-ladder.sh` | 插件载体 |
@@ -119,6 +119,16 @@
 | provenance（溯源） | 从历史实现或提交提取代码时的原貌保存：版权头、commit、只读。 | `provenance/`；`docs/PROVENANCE.md` | — |
 | CPU 门禁 | 不接 NPU 也能跑的测试集；纯逻辑不依赖设备包，可选张量测试缺包时跳过；`host_tree` 排除的宿主源码与入口集成在显式选择后缺依赖即失败。 | `docs/operator-benchmark-standard.md` §6；`pyproject.toml` 的 `markers` | 与统一离线交付检查的范围不同 |
 | `MOD_METADATA.json` | 仓库身份、责任人、default-off、回滚与证据限定。 | `MOD_METADATA.json` | — |
+
+### 1.7 采集产物与时间口径
+
+| 术语 | 定义与判据 | 锚点 | 易混项 |
+|---|---|---|---|
+| 采集产物（collection artifact） | 归档目录里按契约命名的类型化文件，落盘形状由 schema 固定；不符合契约的产物不进判据。 | `tools/operator_tools/artifact_contract.py` | 原始 profiler 输出（`profile/`、`ASCEND_PROFILER_OUTPUT/`）不属于采集产物 |
+| 归档（archive） | 一次采集的完整落盘目录，物理存放在仓外；仓内只引路径，不复制原始数据。 | `docs/npu-benchmark-execution-guide.md` | 不等于仓内证据目录 |
+| 墙钟时间（wall clock） | 采集窗口的总时长，即 `Stage` 字段；判据只看它，不拿算子耗时替代。 | `tools/operator_tools/artifact_view.py` 的 `wall` 视图 | 与设备时间混用 |
+| 设备时间占比（device share） | `Computing / Stage`，即算子能影响的那部分窗口；小于 1 时任何算子优化的上限都要按它折算。 | `tools/operator_tools/serving_loop.py` 的 `evaluate_e2e_snr_gate` 参数 `device_share` | 不是 SOL%，也不等于算子份额 |
+| 长调用（long call） | `total_us − median_us × calls`，即少数慢调用额外贡献的时间；prefill 与 decode 混采时它近似 prefill 段。 | `tools/operator_tools/artifact_view.py` 的 `hotspot` 视图 | 不等于单次最长调用 |
 
 ## 2. 易混术语
 
