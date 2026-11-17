@@ -33,3 +33,11 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      - id: profile-hotspot-path
+        name: profile 热点汇总路径检查
+        description: 拦住 collect_guard 产物目录与热点汇总目录不一致、空热点表被当成无热点的情况
+        entry: env -u PYTHONPATH pytest -q tests/test_operator_sol.py::test_profile_hotspot_scripts_read_actual_profile_directory tests/test_operator_sol.py::test_optimizer_workflow_reference_exists_and_covers_current_flow
+        language: system
+        pass_filenames: false
+        always_run: true
