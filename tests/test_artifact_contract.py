@@ -431,3 +431,109 @@ class TestArchiveViews:
         archive.wall_clock()
         assert "step_trace_*.csv" in archive.sources
         assert "1 of 2" in archive.sources["step_trace_*.csv"]
+
+
+API_COLUMNS = ("Device_id", "Level", "API Name", "Time(us)", "Count", "Avg(us)")
+
+
+def write_api(path: Path, rows: list[tuple[str, str, float, int]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=API_COLUMNS)
+        writer.writeheader()
+        for level, name, total, count in rows:
+            writer.writerow(
+                {
+                    "Device_id": 0,
+                    "Level": level,
+                    "API Name": name,
+                    "Time(us)": total,
+                    "Count": count,
+                    "Avg(us)": total / count if count else 0.0,
+                }
+            )
+    return path
+
+
+KERNEL_COLUMNS = ("Device_id", "Name", "Duration(us)", "Wait Time(us)")
+
+
+def write_kernel_details(path: Path, rows: list[tuple[str, float, float]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=KERNEL_COLUMNS)
+        writer.writeheader()
+        for name, duration, wait in rows:
+            writer.writerow(
+                {
+                    "Device_id": 0,
+                    "Name": name,
+                    "Duration(us)": duration,
+                    "Wait Time(us)": wait,
+                }
+            )
+    return path
+
+
+class TestApiView:
+    def test_ranks_by_total_time_and_derives_average(self, tmp_path):
+        write_api(
+            tmp_path / "profile/api_statistic_rank0.csv",
+            [
+                ("acl", "aclrtLaunchKernelWithHostArgs", 120.0, 20),
+                ("acl", "aclrtSynchronizeEvent", 2400.0, 4),
+            ],
+        )
+        rows = Archive(tmp_path).api()
+        assert rows is not None
+        assert [row["api"] for row in rows] == [
+            "aclrtSynchronizeEvent",
+            "aclrtLaunchKernelWithHostArgs",
+        ]
+        # A blocking synchronise is visible as a large average, not a large count.
+        assert rows[0]["avg_us"] == pytest.approx(600.0)
+        assert rows[1]["count"] == 20
+
+    def test_absent_artifact_returns_none(self, tmp_path):
+        assert Archive(tmp_path).api() is None
+
+    def test_survives_rows_with_unparseable_numbers(self, tmp_path):
+        path = tmp_path / "api_statistic.csv"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "Device_id,Level,API Name,Time(us),Count\n"
+            "0,acl,good_call,100.0,2\n"
+            "0,acl,bad_call,N/A,2\n"
+        )
+        rows = Archive(tmp_path).api()
+        assert rows is not None
+        assert [row["api"] for row in rows] == ["good_call"]
+
+
+class TestKernelWaitView:
+    def test_flags_synchronisation_points_by_wait_over_duration(self, tmp_path):
+        write_kernel_details(
+            tmp_path / "profile/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+            [
+                ("busy_kernel", 1000.0, 10.0),
+                ("sync_point", 5.0, 500.0),
+                ("sync_point", 5.0, 500.0),
+            ],
+        )
+        rows = Archive(tmp_path).kernel_wait()
+        assert rows is not None
+        assert rows[0]["kernel"] == "sync_point"
+        assert rows[0]["count"] == 2
+        assert rows[0]["wait_us"] == pytest.approx(1000.0)
+        # wait dwarfs duration: a synchronisation point, not compute
+        assert rows[0]["wait_over_duration"] == pytest.approx(100.0)
+        assert rows[1]["wait_over_duration"] == pytest.approx(0.01)
+
+    def test_absent_artifact_returns_none(self, tmp_path):
+        assert Archive(tmp_path).kernel_wait() is None
+
+    def test_zero_duration_does_not_divide_by_zero(self, tmp_path):
+        write_kernel_details(tmp_path / "kernel_details.csv", [("empty", 0.0, 50.0)])
+        rows = Archive(tmp_path).kernel_wait()
+        assert rows is not None
+        assert rows[0]["wait_over_duration"] == 0.0

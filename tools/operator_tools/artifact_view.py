@@ -129,6 +129,70 @@ class Archive:
             return None
         return json.loads(path.read_text())
 
+    def api(self) -> list[dict] | None:
+        """Host-side API time, largest first.
+
+        This is where a blocking wait shows up. A synchronize call that takes
+        tens of milliseconds per invocation is the host waiting for the device,
+        not the device doing work.
+        """
+        path = self._first("api_statistic*.csv")
+        if path is None:
+            return None
+        rows = []
+        with path.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                try:
+                    total = float(row["Time(us)"])
+                    count = int(row["Count"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                rows.append(
+                    {
+                        "level": row.get("Level", ""),
+                        "api": row.get("API Name", ""),
+                        "total_us": total,
+                        "count": count,
+                        "avg_us": total / count if count else 0.0,
+                    }
+                )
+        rows.sort(key=lambda item: item["total_us"], reverse=True)
+        return rows
+
+    def kernel_wait(self) -> list[dict] | None:
+        """Per-kernel wait time against its own duration.
+
+        A kernel whose wait dwarfs its duration is a synchronisation point, not
+        compute: the interesting ones are the ones you can remove.
+        """
+        path = self._first("kernel_details.csv")
+        if path is None:
+            return None
+        agg: dict[str, dict] = {}
+        with path.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                try:
+                    duration = float(row["Duration(us)"])
+                    wait = float(row.get("Wait Time(us)") or 0.0)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                name = row.get("Name", "")
+                slot = agg.setdefault(
+                    name,
+                    {"kernel": name, "count": 0, "duration_us": 0.0, "wait_us": 0.0},
+                )
+                slot["count"] += 1
+                slot["duration_us"] += duration
+                slot["wait_us"] += wait
+        rows = []
+        for slot in agg.values():
+            ratio = (
+                slot["wait_us"] / slot["duration_us"] if slot["duration_us"] else 0.0
+            )
+            rows.append({**slot, "wait_over_duration": ratio})
+        rows.sort(key=lambda item: item["wait_us"], reverse=True)
+        return rows
+
 
 def hotspot_view(archive: Archive) -> list[dict]:
     """Per-operator time split between typical and long calls.
@@ -229,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("archive", type=Path)
     parser.add_argument(
         "--view",
-        choices=("wall", "hotspot", "sol", "e2e", "all"),
+        choices=("wall", "hotspot", "sol", "e2e", "api", "wait", "all"),
         default="all",
     )
     parser.add_argument("--top", type=int, default=20)
@@ -245,6 +309,8 @@ def main(argv: list[str] | None = None) -> int:
     archive.pipes()
     archive.hotspots()
     archive.checklist()
+    archive.api()
+    archive.kernel_wait()
     if archive.sources:
         print("== artifacts read ==")
         for pattern, name in sorted(archive.sources.items()):
@@ -324,6 +390,44 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"  candidates above the noise floor: {len(reachable)} of {len(rows)}"
             )
+        print()
+
+    if args.view in ("api", "all"):
+        rows = archive.api()
+        print("== host api ==")
+        if not rows:
+            print("  no api_statistic artifact in this archive")
+        else:
+            grand = sum(row["total_us"] for row in rows) or 1.0
+            print(
+                f"  {'api':<40}{'time_ms':>10}{'count':>8}{'avg_us':>10}{'share%':>8}"
+            )
+            for row in rows[: args.top]:
+                print(
+                    f"  {row['api'][:38]:<40}{row['total_us'] / 1000:>10.1f}"
+                    f"{row['count']:>8}{row['avg_us']:>10.1f}"
+                    f"{row['total_us'] / grand * 100:>8.1f}"
+                )
+        print()
+
+    if args.view in ("wait", "all"):
+        rows = archive.kernel_wait()
+        print("== kernel wait ==")
+        if not rows:
+            print("  no kernel_details artifact in this archive")
+        else:
+            total_wait = sum(row["wait_us"] for row in rows) or 1.0
+            print(
+                f"  {'kernel':<40}{'count':>8}{'dur_us':>11}"
+                f"{'wait_us':>10}{'wait/dur':>10}"
+            )
+            for row in rows[: args.top]:
+                print(
+                    f"  {row['kernel'][:38]:<40}{row['count']:>8}"
+                    f"{row['duration_us']:>11.0f}{row['wait_us']:>10.0f}"
+                    f"{row['wait_over_duration']:>10.2f}"
+                )
+            print(f"  total wait {total_wait:.0f} us")
     return 0
 
 

@@ -129,6 +129,9 @@
 | 墙钟时间（wall clock） | 采集窗口的总时长，即 `Stage` 字段；判据只看它，不拿算子耗时替代。 | `tools/operator_tools/artifact_view.py` 的 `wall` 视图 | 与设备时间混用 |
 | 设备时间占比（device share） | `Computing / Stage`，即算子能影响的那部分窗口；小于 1 时任何算子优化的上限都要按它折算。 | `tools/operator_tools/serving_loop.py` 的 `evaluate_e2e_snr_gate` 参数 `device_share` | 不是 SOL%，也不等于算子份额 |
 | 长调用（long call） | `total_us − median_us × calls`，即少数慢调用额外贡献的时间；prefill 与 decode 混采时它近似 prefill 段。 | `tools/operator_tools/artifact_view.py` 的 `hotspot` 视图 | 不等于单次最长调用 |
+| 宿主侧时间（host api time） | `api_statistic` 里按 `API Name` 累计的调用耗时，反映 host 线程花在哪；它接近墙钟时说明窗口由 host 串行推进。 | `tools/operator_tools/artifact_view.py` 的 `api` 视图 | 不是设备执行时间，也不能与算子耗时相加 |
+| 宿主阻塞（host blocking） | 单次调用平均耗时达到毫秒量级且调用次数与输出步数同阶的宿主侧等待，判据看 `api` 视图的 `avg_us` 与 `count` 两项配合，不看总时间一项。 | `tools/operator_tools/artifact_view.py` 的 `api` 视图 | 不等于集合通信慢；通信耗时另有独立条目 |
+| 同步点（synchronisation point） | `wait/dur` 远大于 1 的算子，其 `Wait Time` 是排队等前序完成而非自身计算；这类项可移除，不算优化空间。 | `tools/operator_tools/artifact_view.py` 的 `wait` 视图 | 与热点算子同列但性质相反，不得计入可优化份额 |
 
 ## 2. 易混术语
 
