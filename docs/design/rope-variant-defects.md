@@ -1,6 +1,6 @@
 # Design note: RoPE 变体三缺陷（fork 缺陷的插件侧 carrier + 漂移守卫）
 
-- 状态：**新能力，`import_only`**（三证据未齐，见 `docs/release.md` §3 与 `docs/progress.md`）
+- 状态：**新能力，`import_only`**（三证据未齐，见 `docs/release.md` §3）
 - 开关：`VLLM_HUST_ROPE_FIX=1`（默认 0：不 import `vllm_ascend`/`torch`/`torch_npu`、
   不 patch、不注入、日志零输出）
 - 落点：`src/vllm_ascend_split_batch/rope_fix_plugin.py`（+ bundle marker

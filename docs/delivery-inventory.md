@@ -33,7 +33,7 @@
 | `VLLM_HUST_GDN_UNPACK_VIEWS` | 删除 | 早期探索已定性为被宿主卷积权重预打包方案覆盖；其变换表依赖卷积预打包锚点注入的行，无法独立成立 |
 | `VLLM_HUST_MOE_INIT_TRITON` | 删除 | 仓内无已归档的 L0 门通过记录（`tools/bench_moe_init_triton_only.py` 的 10% 门从未回填结果），收益未证明；其唯一仓内消费点是本模块注入 token_dispatcher 的分支。若重启，须按宿主提案流程下沉 |
 | `VLLM_HUST_NZ_SKIP_GATE` | 删除 | 全仓无评测证据、无交付登记，仅为 `aclnnMatmulWeightNz` EZ1001（n=1/k=1）的应急豁免；宿主如有同类需要，按宿主提案流程处理 |
-| `VLLM_HUST_DBO_ENABLE` | 删除 | [docs/comm-overlap-dbo-feasibility.md](comm-overlap-dbo-feasibility.md) 已结题"不可行"（2026-10-22）：起服拦截于 microbatching 后端配置校验断言，且 DBO 钩子消费者仅存在于 DeepEP 系内核，TP allReduce 路径无可行切入点 |
+| `VLLM_HUST_DBO_ENABLE` | 删除 | 已结题"不可行"（2026-10-22）：起服拦截于 microbatching 后端配置校验断言，且 DBO 钩子消费者仅存在于 DeepEP 系内核，TP allReduce 路径无可行切入点 |
 
 退役守卫：`tests/test_runtime_patch_manifest_guard.py` 断言上述模块不再存在、`gate-fp32` 入口不再挂接源码变换、seam 断言表不再登记源码变换条目。
 
