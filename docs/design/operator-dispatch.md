@@ -1,7 +1,7 @@
 # 算子调度(选择)机制 — 设计与骨架
 
-> 状态:**骨架 / 预留接口**。代码 `src/vllm_ascend_split_batch/op_selector.py`,
-> 测试 `tests/test_op_selector.py`。**未接线任何现网路径**,不注册任何真实算子,
+> 状态:**骨架 / 预留接口,实现暂存于 `experiments/op_selector.py`**。测试
+> `tests/test_op_selector.py` 按文件路径加载该实现。**未接线任何现网路径**,不注册任何真实算子,
 > 不 import torch。本文只定接口与扩展点,落地实现(热点表、真 bench、宿主接线)
 > 是后续任务。
 

@@ -1,123 +1,52 @@
-# AGENTS.md — 开发规范与工作约束
+# AGENTS.md — 工作契约
 
-本文件是面向开发者与 Agent 的最高工作契约。只保留必要的架构约束、开发规则与言行准则，不记录历史沿革、实现叙事或具体环境路径。
+本文件只定义必须遵守的约束。操作流程见 [workflow.md](workflow.md)。统一语言以 [GLOSSARY.md](GLOSSARY.md) 为准。权威规范见 [docs/README.md](docs/README.md)。
 
----
+## 1. 边界
 
-## 1. 核心架构与边界约束
+1. 宿主层与插件层分工必须符合 [容器与插件边界规范](docs/container-and-plugin-boundary-spec.md)。插件层只使用官方公开接口。
+2. 禁止运行时修改宿主环境，禁止维护就地补丁脚本。宿主改动必须走宿主 Fork 的 `based/split-batch-baseline`。
+3. 服务采集配置必须包含两个宿主的完整 `host_commits`，并由 `tools/operator_tools/host_runtime.py` 在服务解释器内核验。缺失或不匹配即停止。
+4. 算子与优化能力必须 default-off。未启用时与原生行为一致，零导入、零副作用。
+5. 插件对外暴露必须惰性加载。元数据发现期间不得触发重型实现模块导入。
+6. 原始数据、Trace、调试数据库和临时产物不得提交。仓内只保留结构化证据、报告和索引。
+7. 原始采集放仓外；临时修改放仓库内隔离目录。执行环境不得被本地源码遮蔽。
 
-1. **宿主与插件两层分工**（详见 [docs/container-and-plugin-boundary-spec.md](docs/container-and-plugin-boundary-spec.md)）：
-   - **宿主层**：承载模型私有前向拦截、权重加载后处理钩子与底层运行时修复，随宿主镜像原生发布；
-   - **插件层**：仅通过官方公开插件接口接入，承载纯 Python / Triton 算子实现与调度策略；
-   - **严禁运行时打补丁**：严禁在仓内维护任何就地修改宿主运行环境的动态补丁脚本。
-2. **默认关闭（default-off）**：
-   - 所有算子与优化能力必须由环境变量明确门控，未启用时与原生行为严格一致、零开销、零副作用。
-3. **算子优化 Skill**（详见 [.openbitfun/skills/operator-sol-optimizer/SKILL.md](.openbitfun/skills/operator-sol-optimizer/SKILL.md)）：
-   - Agent 直接按真实形状、布局和数值合同优化；先采集再单点修改，核对 SOL 账目与乐观上界，按基准规范交接证据，不维护自动生成循环。
-4. **元数据发现延迟导入（Lazy Import）**：
-   - 插件对外暴露必须采用惰性加载机制，保证在包元数据发现和生命周期扫描期间，绝不触发重型实现模块的导入。
-5. **外部数据与知识库物理隔离**：
-   - 原始采集数据、大体积性能分析 Trace、调试数据库及外部参考资料库一律在仓外物理隔离管理，严禁提交进 Git 仓库；
-   - 仓内仅沉淀标准化的算子技术文档、结构化验收报告及权威索引清单。
-6. **执行环境路径隔离纪律**：
-   - 严禁在可能遮蔽已安装依赖的顶层或未隔离目录中执行命令，确保执行环境与依赖包路径清晰解耦；
-   - 调优临时项目与候选代码严格受限于仓库根目录内部，严禁引用或向仓外物理路径写文件。
-7. **宿主 Fork 必须定死基线分支（严禁在 main 上提 PR）**：
-   - 两个宿主仓库在当前容器运行时中的基线分支定死如下，严禁以追新脱节的 `main` 为 Base：
-     - `vLLM-HUST/vllm-ascend-hust`：Base 定死为 **`based/split-batch-baseline`**（锚定镜像 `74f0c0a27`，分支头 `ad82d77cb`，内容为镜像源码 + 3 个构建文件修复）；
-     - `vLLM-HUST/vllm-hust`：Base 定死为 **`based/split-batch-baseline`**（锚定镜像 `f18cf803c`，当前与旧 `based/image-baseline` 指向同一 commit）；
-   - 任何针对宿主源码的修改必须基于对应仓库的上述基线分支切分支，发起 PR 时的 Target / Base 分支必须指定为该基线分支；
-   - 宿主侧算子的修改与收益必须在当前插件仓的 `ops/<operator>/` 与 `DELIVERY_INDEX.json`（标记 `layer: host_fork`）中登记验收报告与证据，实现全生命周期可追溯。
-8. **GitHub API 访问凭据配置**：
-   - 容器持久化环境变量文件 `<凭据环境变量文件>` 中配置了 GitHub API 鉴权凭据 `GITHUB_TOKEN`；
-   - 严禁将 Token 真实字面值提交至 Git 仓库或明文写入任何版本受控文档；需要调用 GitHub API 或进行自动化操作时，通过读取系统环境变量 `GITHUB_TOKEN` 或引用 `<凭据环境变量文件>` 接入。
+## 2. 证据与结论
 
----
+1. 算子评测按 [算子基准规范](docs/operator-benchmark-standard.md) 执行。数值失败一票否决。负收益和噪声内结果如实记录。
+2. 对比只使用形状事实和权重标签。不同条件只比方向，不混算数字。
+3. `DELIVERY_INDEX.json` 的结论标签必须与 `ops/<operator>/evidence.json` 同向。标签不得超出证据。
+4. L3 失败时不得写服务收益标签。L4 未完成时不得给出服务结论。历史结果必须使用 `historical_only`。
+5. MOD 验收按 [MOD 最终验收规范](docs/mod-acceptance-standard.md) 执行。算子服务结论不能替代 MOD 验收。
+6. 修改 `ops/<operator>/` 被 `checksum.sha256` 覆盖的文件后，必须重新生成指纹。
 
-## 2. 算子开发与评测约束
+## 3. 文档与行文
 
-1. **四级验证阶梯**（详见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) 与 [docs/npu-benchmark-execution-guide.md](docs/npu-benchmark-execution-guide.md)）：
-   - 严格遵循 `L0 纯算子微基准 -> L3 数值正确性护栏 -> L4 调用链路归因 -> 服务端到端实测` 阶梯；
-   - MOD 最终验收按 [docs/mod-acceptance-standard.md](docs/mod-acceptance-standard.md) 执行；算子服务结论不能替代冻结数据集、连续窗口与四项目标验收；执行完整性与目标达标分开记录；
-   - 数值失败（L3 未过）一票否决，严格保持 default-off；
-   - 负收益或在噪声范围内的结论必须如实记录，绝不夸大或伪造加速比。
-2. **可比性事实口径**：
-   - 算子对比只认**形状事实**（张量维度、专家分布、执行相位、调用点）与**权重标签**（模型、精度格式），条件不同只比方向，不混算数字。
-3. **注释与文档原则**：
-   - 代码只写必需注释，不写解释性叙事或改动沿革；
-   - 文档只写技术规范、判据与约束，不写心路历程。
-4. **推送前本地全绿与组织政策合规**（详见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) §5）：
-   - 推送或发 PR 前必须在本地完整跑通 §4 全部命令；CI package job 的 `ruff check .`、`ruff format --check .` 对 `ops/`、`docs/`、`tests/` 下新增文件同样生效，不得借排除清单绕过；
-   - CPU 门禁必须用隔离虚拟环境、清空 `PYTHONPATH` 并执行 CI 的 `pytest` 命令复验；不能只用 `python -m pytest` 或依赖本机预装包。仓内未安装工具按文件路径加载，不得为导入错误跳过守护测试；
-   - 组织工作流 `Benchmark-only data (organization)` 对 PR 变更文件执行 fail-closed 审查：文本新增行命中下行任一关键词后同行出现数字即拒绝：
-     `ttft`、`tpot`、`throughput`、`latency`、`tokens/s`、`实测`、`吞吐`、`延迟`；
-     度量数字一律落在结构化 `evidence.json`，行文与标题避免"关键词+数字"同段；
-   - 算子交付面由 `pytest -q tests/test_ops_delivery_policy.py` 把关；修改 `ops/<operator>/` 下被 `checksum.sha256` 覆盖的文件后，必须用 `tools/operator_tools/custody.py` 重新生成指纹。
-5. **文档行文与仓库事实必须一致**（由 `pytest -q tests/test_doc_consistency.py` 与工作流 `Text invariants` 把关）：
-   - 任何 Markdown 里写的"N 个插件 / N 个 bundle"必须等于 `pyproject.toml` 中 `vllm.general_plugins` 与 `vllm_hust.extension_bundles` 的实际条目数；改入口点必须同步改行文；
-   - `ops/<operator>/` 必须齐备 `README.md`、`REPORT.md`、`bench_l0.py`、`evidence.json`；未提供独立微基准脚本时按占位脚本交付（退出码 3 表示"无测量"），不得留空或伪造脚本；
-   - `GLOSSARY.md` 词条四列必须填满、术语不得重复、锚点里的路径必须真实存在，且必须被 `AGENTS.md` 与 `docs/README.md` 引用；
-   - 对外规范文档不得出现"关键词 + 数字"同段与 `AGENTS.md` §3.2 的禁用暗语；新增对外规范文档需登记进 `tests/test_doc_consistency.py` 的 `PROSE_SURFACE`。
-6. **索引状态必须被证据支撑**（由 `pytest -q tests/test_delivery_status_consistency.py`、工作流 `Text invariants` 与 `.pre-commit-config.yaml` 钩子把关）：
-   - `DELIVERY_INDEX.json` 的 `serving_status`、`l3_numerical_guard`、`status` 是结论标签，必须与同一算子的 `ops/<operator>/evidence.json` 同向；
-   - `verified_faster` / `within_noise` / `verified_on_par_with_baseline` 要求 `serving_end_to_end.tested` 为真且有 `speedup` 数字；`pending_outer_loop` / `negative_or_pending` 不得出现 `tested: true`；
-   - `l4_attribution` 仍为 `pending_outer_loop` 时不得给出服务收益结论；L3 失败一票否决，禁止任何服务收益标签；
-   - 标签比证据走得远（如把 L0 加速比写成服务结论）属禁止项，发现即改索引或补证据，不得两边都留着。
+1. 文档只写技术规范、判据和约束。不写沿革和心路。代码只写必需注释。
+2. Markdown 中的插件数、bundle 数必须与 `pyproject.toml` 一致。
+3. `ops/<operator>/` 必须齐备 `README.md`、`REPORT.md`、`bench_l0.py`、`evidence.json`。
+4. `GLOSSARY.md` 词条四列完整、术语不重复、锚点真实，且必须被本文件和 `docs/README.md` 引用。
+5. 对外文档不得出现“关键词 + 数字”同段。度量数字写入结构化 `evidence.json`。
+6. 新增对外规范文档时，必须登记进 `tests/test_doc_consistency.py` 的 `PROSE_SURFACE`。
+7. 使用工程大白话。禁止使用“载波”“领地”“点钉”“husk”“档2 载体”“短跑”“活守卫”等暗语。
+8. 一律使用 [GLOSSARY.md](GLOSSARY.md) 的唯一写法。新概念先登记词条和锚点，再改代码与文档。
 
-7. **仓库边界不变量**（由 `pytest -q tests/test_pitfall_guards.py` 与工作流 `Text invariants` 把关）：
-   - manifest 的宿主范围两端有界、不带 `+local`，`activation.environment` 是真实注入值；根 bundle 保持 `import_only` 且不注入环境变量；manifest `extension_version` 与包版本一致；sdist 只含运行时、元数据、README、许可与溯源；
-   - 仓内不得出现原始数据后缀文件、超过 2 MB 的被追踪文件与缓存/构建垃圾；对外行文不写死宿主工作区绝对路径；
-   - `plugin_carrier` 已公开的门控变量必须在 `src/` 里真实存在；尚未接线的算子使用 `gate_env=unexposed`，不得标记已集成。
-
----
-
-## 3. Agent 交互与输出规范（言行准则）
-
-1. **一律使用通俗大白话**：
-   - 无论是进度汇报、技术分析、方案梳理、PR 描述还是执行回执，必须一律使用简明平实、逻辑严密的**工程大白话**；
-   - 严禁把用于内部记录的比喻、缩写或黑话代入对外交流，不说让人费解的行话。
-2. **坚决杜绝隐晦黑话与内部暗语**：
-   - 严禁使用诸如“载波”、“领地”、“点钉”、“husk”、“档2 载体”、“短跑”、“活守卫”等隐晦暗语；
-   - 一律直接指出具体的物理实体：如具体环境变量名、涉及的代码文件相对路径、确切的分支名称或具体的测试命令。
-3. **实事求是与如实汇报**：
-   - 测试通过就是通过、未测试就是未测试、负收益或在噪声范围内就据实记录；
-   - 绝不夸大局部微基准收益，严禁将算子耗时直接外推为服务端到端收益，不掩盖任何发现的问题。
-4. **直奔主题、拒绝废话**：
-   - 汇报直击核心结论与关键依据，给出清晰明确的下一步行动，不写冗长虚泛的铺垫、感叹或毫无意义的沿革叙事。
-5. **术语以 [GLOSSARY.md](GLOSSARY.md) 为准**：
-   - 统一语言（Ubiquitous Language）词表在 [GLOSSARY.md](GLOSSARY.md)，一律按其中的唯一写法与定义判据说话、命名代码与写文档；
-   - 一物一名、一名一物：不造同义词，不裸用同名异义词（如 `gate`、`L3`/`L4`），废止词不得复活；
-   - 引入新概念或新标签时，先按 `GLOSSARY.md` §1.4 登记词条与锚点，再改代码与文档；
-   - `GLOSSARY.md` 只定义词与判据，不承载数字、阈值与状态值，不得成为第二事实源。
-
----
-
-## 4. 常用验证命令
+## 4. 提交前检查
 
 ```bash
-# 代码风格检查
 ruff check .
 ruff format --check .
-
-# 统一离线交付检查（本地、pre-commit 与 CI 共用）
 pytest @tests/offline-checks.args
-
-# 本地提交钩子（安装一次；只跑纯文本快检，与上面两条判据一致）
-python -m pip install pre-commit pytest ruff && pre-commit install
-pre-commit run --all-files
-
-# 全量 CPU 门禁套件
 pytest -q -m "not host_tree"
 ```
 
----
+CPU 门禁必须使用隔离虚拟环境、清空 `PYTHONPATH`，并执行 CI 使用的 pytest 命令。
 
-## 5. 权威文档导航
+## 5. 仓库检索
 
-详细技术规范与权威文档均位于 [docs/README.md](docs/README.md)，请按单一事实源原则查阅与维护。
+仓库检索优先使用本地 FlashGrep daemon：先用 `glob_files` 找文件，再用 `search_code` 查内容；索引未建好时直接搜索，不等索引完成。FlashGrep 不可用时再用内置搜索。
 
-| 主题 | 权威位置 |
-|---|---|
-| 术语唯一写法、定义判据、代码锚点、同名异义与废止词 | [GLOSSARY.md](GLOSSARY.md) |
-| 架构约束、开发规则、言行准则（本文件） | [AGENTS.md](AGENTS.md) |
-| 交付规范、架构契约、支持边界与发布检查 | [docs/README.md](docs/README.md) |
+## 6. 凭据
+
+GitHub API 凭据只能来自进程变量或用户指定的环境文件。不得提交、打印、写入日志或写入仓库。

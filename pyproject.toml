@@ -66,7 +66,11 @@ markers = [
     # deselects them: `pytest -q -m "not host_tree"`.  The full local run keeps
     # them, which is what makes the guard loud.
     "host_tree: needs host source or live host imports; missing dependencies fail (excluded from CPU CI)",
-
+    "npu: requires an available Ascend device",
+    # Applied by tests/conftest.py, not written per file: every test carries
+    # exactly one of these two, so `pytest -m mirror` runs the static layer alone.
+    "contract: runs this repository's code and asserts its behaviour",
+    "mirror: reads in-repo artefacts and asserts a declaration still mirrors them",
 ]
 
 [tool.ruff]

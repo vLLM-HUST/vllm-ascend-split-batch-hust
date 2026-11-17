@@ -9,9 +9,10 @@
 #   stop                  停 ladder serve
 #   wait [timeout_s]      等待 /health 就绪（默认 1800s）
 #   l1 [iters]            L1 单请求延迟（~1 min, 对 per-op 改进最敏感）
-#   l2 [prompts] [conc]   L2 并发吞吐突发（默认 128 题 2048/256 @ 并发32, ~3-5 min; 0.28 里 range-ratio 0=定长）
-#                         LADDER_L2_LOAD=synthetic（唯一支持档位）
-#                         产物带 load_caliber/cohort（ladder-stamp.py）；两形态只比方向不比数值
+#   l2 [prompts] [conc]   L2 并发突发（默认 128 题 2048/256 @ 并发32, ~3-5 min; 0.28 里 range-ratio 0=定长）
+#                         负载形态固定为 synthetic 合成定长; LADDER_L2_LOAD 不再切换档位,
+#                         给别的值只打一行警告（见下方环境变量一览）
+#                         产物带 load_caliber/cohort（ladder-stamp.py）；不同口径只比方向不比数值
 #   l3                    L3 数值护栏捕获（8 条固定 prompt 贪心输出）
 #   compare <A> <B>       L3 对比两次捕获（不一致 = 数值回归）
 #   screen <tag>          plain serve 晋级筛选：L1×3 + L2×3 + L3×1，生成 screen.json；
@@ -36,8 +37,10 @@
 #                         则明确失败并说明"需另行受控解析", 不写任何文件
 #   l0 [op] [bench-l0 flags]  L0 算子微基准（bench-l0.py; op=all 列全部;
 #                             余下参数原样透传, 如 --sig 4 --decode-tokens 11912 --iters 100）
-#                             op=GdnQkvUnpack 走 tools/bench_gdn_qkv_unpack.py
-#                             （rearrange_mixed_qkv 配对 A/B; 落 <ts>-l0-gdn-qkv-unpack.json）
+#                             op=GdnQkvNorm 走本仓 tools/bench_gdn_qkv_norm.py；
+#                             op=GdnQkvUnpack 的工具（tools/bench_gdn_qkv_unpack.py）**不在本仓**，
+#                             该分支只报错并指向归档，不假装能跑。其余算子一律走 bench-l0.py，
+#                             但该脚本也不随本仓发布（见下方 LADDER_SCRIPTS）。
 #   run <tag> [steps]     一条龙: l1,l2,l3 -> records/ladder/<tag>/（默认全三步）
 #                         产出: run.json 索引 + steps.log + 单页实验门禁报告
 #                         （不再拷贝 l1/l2/l3 json; 权威产物是 records/ladder/<ts>-*.json）
@@ -57,9 +60,39 @@
 #   - 离线 trace 解析: LADDER_PARSE_PYTHON（默认 serving python, torch_npu 自带 analyse）
 #     + ascend_pt 父目录口径 + ulimit -v 45G（cgroup 64G, 与 serve 错峰;
 #     要解析前停 serve 设 LADDER_STOP_SERVE_FOR_PARSE=1, 默认 0）
+#
+# 环境变量一览（全部可选; 未设置时用括号里的默认值）:
+#   路径与解释器
+#     LADDER_SCRIPTS (=/root/包体恢复/scripts) 外部 ladder 工具脚本目录。下面的脚本**不随本仓发布**:
+#                    ladder-l1.py ladder-l3.py ladder-stamp.py bench-l0.py ladder-opstat.py
+#                    extract-l0-shapes-db.py ladder-report.py check-tree-seams.py
+#                    缺哪个, 用到它的子命令就报「本仓无此工具, 见归档」并返回非零, 不再报成环境故障
+#     LADDER_MODEL (=/models/Qwen3.5-35B-A3B) 服务模型目录（不存在时回退 modelscope 缓存）
+#     LADDER_PYTHON (本机栈解释器; 不存在则回退 PATH 的 python3)
+#     LADDER_PARSE_PYTHON (=LADDER_PYTHON) 离线 trace 解析解释器; LADDER_PARSE_ULIMIT_MB (=45000)
+#     LADDER_ATB_HOME (=/usr/local/Ascend/nnal/atb) 起服前置自检用的 ATB 路径
+#   起服与画像
+#     LADDER_SERVE_EXTRA (0.28 栈固化的编译/图档参数) 追加 serve 参数; 设空串则不加参数
+#     LADDER_SKIP_ENV_CHECK (=0) 跳过 ATB/动态库前置自检; LADDER_SKIP_SEAM_CHECK (=0) 跳过接口面校验
+#     LADDER_COHORT_ID (=028-qwen35-35b-a3b-tp2-fullgraph) 窗口权重/配置标签
+#     LADDER_PROFILE_TIER (=light) / LADDER_PROFILE_MAX_ITERS (=32 light, 0 deep)
+#     LADDER_PROFILE_LOAD (=synthetic) light|deep 之外只有 synthetic|external; external 需 LADDER_PROFILE_LOAD_CMD
+#     LADDER_PROFILE_WITH_STACK (=false) / LADDER_PROF_ROOT (=/root/prof) / LADDER_MIN_FREE_GB (=20)
+#   负载口径与瘦身
+#     LADDER_LOAD_CALIBER (=unmarked) 负载口径 id（A/B 只在同一口径内比数值）
+#     LADDER_LOAD_CALIBER_DETAIL 口径说明; LADDER_RUN_NOTE 窗口备注
+#     LADDER_L2_LOAD (=synthetic) **只作记录**: L2 形态已固定为 synthetic 合成定长,
+#                    给别的值只打一行警告后照跑, 不再切换档位, 也不会失败
+#     LADDER_SLIM (=1) 解析后瘦身; LADDER_SLIM_DRYRUN (=0) 只说不做; LADDER_SLIM_RESCUE_DB
+#     LADDER_SLIM_KEEP_RAW (=0) / LADDER_SLIM_OPSTAT / LADDER_REQUIRE_SHAPES / LADDER_RECOVER_OPSTAT
+#     LADDER_STOP_SERVE_FOR_PARSE (=0) 解析前先停 serve
+#   其余
+#     LADDER_SCREEN_REPEATS (=3) / LADDER_RUN_BASELINE / LADDER_LOG_KEEP_DAYS (=3)
+#     LADDER_CARRIER_PYTHON / LADDER_SERVE_LOG / LADDER_SERVE_ENV  载体探针的三个输入
+#     LADDER_RUN_ACTIVE (=0) 内部用: run 内联调用时不另写日志
 set -uo pipefail
 
-SCRIPTS=/root/包体恢复/scripts
+SCRIPTS=${LADDER_SCRIPTS:-/root/包体恢复/scripts}
 RECORDS=/root/包体恢复/records/ladder
 LOGS=/root/包体恢复/logs
 PY=/usr/local/python3.12.13/bin/python
@@ -99,6 +132,21 @@ export TORCHINDUCTOR_FX_GRAPH_CACHE=0
 export TORCHINDUCTOR_AUTOGRAD_CACHE=0
 
 serve_pid() { [ -f "$LADDER_PIDFILE" ] && cat "$LADDER_PIDFILE" 2>/dev/null || true; }
+
+# 外部工具脚本路径解析（本仓不发布这些脚本）:
+#   缺文件时明确说「本仓无此工具, 见归档」+ 当前目录 + 怎么改, 而不是让调用者
+#   以为是 python/环境坏了。返回非零即表示不可用, 调用方必须据此中止本子命令。
+ladder_tool() {   # $1=脚本文件名
+  local name=${1:?need tool name} path
+  path=$SCRIPTS/$name
+  if [ ! -f "$path" ]; then
+    echo "bench-ladder: 本仓无此工具: $name" >&2
+    echo "   期望位置: $path （外部 ladder 工具脚本目录, 不随本仓发布, 见归档）" >&2
+    echo "   该目录在别处时用 LADDER_SCRIPTS=<dir> 指定; 当前 LADDER_SCRIPTS=$SCRIPTS" >&2
+    return 1
+  fi
+  printf '%s\n' "$path"
+}
 
 health_ok() { curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; }
 
@@ -614,13 +662,13 @@ serve_env_preflight() {
     *)
       echo "bench-ladder: LD_LIBRARY_PATH 缺 nnal/atb 路径 → worker dlopen libatb.so 将失败 → 拒绝起服" >&2
       echo "  修复: 起服 shell 依次 source ascend-toolkit / cann ascendnpu-ir / nnal-atb 三个 set_env.sh" >&2
-      echo "  （持久修复: tools/repair-ascend-login-env.sh; LADDER_SKIP_ENV_CHECK=1 自担）" >&2
+      echo "  （持久修复脚本 repair-ascend-login-env.sh 不随本仓发布, 见归档; LADDER_SKIP_ENV_CHECK=1 自担）" >&2
       return 1 ;;
   esac
   if "$PY" -c 'import ctypes; ctypes.CDLL("libatb.so")' 2>/dev/null; then return 0; fi
   echo "bench-ladder: LD_LIBRARY_PATH 含 nnal/atb 条目但 dlopen libatb.so 失败 → 拒绝起服" >&2
   echo "  修复: 起服 shell 依次 source ascend-toolkit / cann ascendnpu-ir / nnal-atb 三个 set_env.sh" >&2
-  echo "  （持久修复: tools/repair-ascend-login-env.sh; LADDER_SKIP_ENV_CHECK=1 自担）" >&2
+  echo "  （持久修复脚本 repair-ascend-login-env.sh 不随本仓发布, 见归档; LADDER_SKIP_ENV_CHECK=1 自担）" >&2
   return 1
 }
 
@@ -664,7 +712,12 @@ cmd_serve() {
   #   断言表: scripts/tree-seam-assertions.json; 树可用 SEAM_TREE 覆盖（默认运行树）
   #   跳过: LADDER_SKIP_SEAM_CHECK=1（需自担）
   if [ "${LADDER_SKIP_SEAM_CHECK:-0}" != "1" ]; then
-    if ! "$PY" "$SCRIPTS/check-tree-seams.py" --quiet; then
+    local seam_tool
+    seam_tool=$(ladder_tool check-tree-seams.py) || {
+      echo "bench-ladder: 缺接口面校验脚本 → 拒绝起服（确有需要可 LADDER_SKIP_SEAM_CHECK=1 跳过）" >&2
+      return 1
+    }
+    if ! "$PY" "$seam_tool" --quiet; then
       echo "bench-ladder: 接口面校验未过 → 拒绝起服（LADDER_SKIP_SEAM_CHECK=1 可跳过）" >&2
       return 1
     fi
@@ -864,32 +917,34 @@ cmd_wait() {
 }
 
 cmd_l1() {
-  local ts; ts=$(date +%m%d-%H%M%S)
+  local ts tool; ts=$(date +%m%d-%H%M%S)
+  tool=$(ladder_tool ladder-l1.py) || return 2
   # run 内联调用时不另写日志（统一进 <run>/steps.log）；单独调用仍落 logs/。
   if [ "${LADDER_RUN_ACTIVE:-0}" = "1" ]; then
-    "$PY" "$SCRIPTS/ladder-l1.py" --port "$PORT" --iters "${1:-10}" --out "$RECORDS/${ts}-l1.json"
+    "$PY" "$tool" --port "$PORT" --iters "${1:-10}" --out "$RECORDS/${ts}-l1.json"
   else
-    "$PY" "$SCRIPTS/ladder-l1.py" --port "$PORT" --iters "${1:-10}" \
+    "$PY" "$tool" --port "$PORT" --iters "${1:-10}" \
       --out "$RECORDS/${ts}-l1.json" | tee "$LOGS/ladder-l1-${ts}.log"
   fi
 }
 
 cmd_l2() {
   local ts; ts=$(date +%m%d-%H%M%S)
-  # 2026-10-14 负载形态: synthetic（唯一支持档位）合成固定协议:
+  # 2026-10-14 负载形态: synthetic 合成固定协议（**唯一形态, 不再由环境变量切换**）
   #   random 2048/256 定长 @并发 32 —— 算子 A/B 复现口径
   # 产物一律带 load_caliber/cohort 标记（产物自证；否则口径门禁看不见它, 见 ladder-stamp.py）
   local load=${LADDER_L2_LOAD:-synthetic}
   local n conc outfile
   local -a ds=() extra=()
-  case "$load" in
-    synthetic)
-      n=${1:-128}; conc=${2:-32}
-      outfile="${ts}-l2.json"
-      ds=(--dataset-name random --num-prompts "$n"
-          --random-input-len 2048 --random-output-len 256 --random-range-ratio 0) ;;
-    *) echo "未知 LADDER_L2_LOAD=$load（仅支持 synthetic）"; return 1 ;;
-  esac
+  if [ "$load" != synthetic ]; then
+    echo "bench-ladder: LADDER_L2_LOAD=$load 没有对应档位, 仍按 synthetic 合成定长跑（唯一形态）" >&2
+  fi
+  n=${1:-128}; conc=${2:-32}
+  outfile="${ts}-l2.json"
+  ds=(--dataset-name random --num-prompts "$n"
+      --random-input-len 2048 --random-output-len 256 --random-range-ratio 0)
+  # 口径标记在采集之后才打: 先确认打标记的脚本在, 别白跑一遍采集
+  local stamp_tool; stamp_tool=$(ladder_tool ladder-stamp.py) || return 2
   local args=(bench serve
     --backend openai-chat --endpoint /v1/chat/completions
     --host 127.0.0.1 --port "$PORT"
@@ -912,7 +967,7 @@ cmd_l2() {
   if [ -z "$calib_detail" ]; then
     calib_detail="合成固定协议 L2: random 2048/256 定长 @并发 $conc（算子 A/B 复现口径）"
   fi
-  "$PY" "$SCRIPTS/ladder-stamp.py" --file "$RECORDS/$outfile" \
+  "$PY" "$stamp_tool" --file "$RECORDS/$outfile" \
     --load-caliber "$calib_id" --load-caliber-detail "$calib_detail" \
     --cohort-id "${LADDER_COHORT_ID:-028-qwen35-35b-a3b-tp2-fullgraph}" \
     --run-note "L2 load=$load n=$n conc=$conc max_out=$maxout"
@@ -927,10 +982,14 @@ cmd_l3() {
       --out "$RECORDS/${ts}-gdn16-l3.json"
     return $?
   fi
-  "$PY" "$SCRIPTS/ladder-l3.py" capture --port "$PORT" --out "$RECORDS/${ts}-l3.json"
+  local tool; tool=$(ladder_tool ladder-l3.py) || return 2
+  "$PY" "$tool" capture --port "$PORT" --out "$RECORDS/${ts}-l3.json"
 }
 
-cmd_compare() { "$PY" "$SCRIPTS/ladder-l3.py" compare "$1" "$2"; }
+cmd_compare() {
+  local tool; tool=$(ladder_tool ladder-l3.py) || return 2
+  "$PY" "$tool" compare "$1" "$2"
+}
 
 cmd_l0() {
   local ts; ts=$(date +%m%d-%H%M%S)
@@ -943,16 +1002,16 @@ cmd_l0() {
     return $?
   fi
   if [ "$op" = "GdnQkvUnpack" ]; then
-    # rearrange_mixed_qkv（split+reshape×3+cat 4 launch）配对 A/B：单算子单入口,
-    # 其余算子仍走 bench-l0.py; 产物同落 records/ladder 的带时间戳新文件
-    local self_dir; self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    "$PY" "$self_dir/bench_gdn_qkv_unpack.py" "$@" \
-      --out "$RECORDS/${ts}-l0-gdn-qkv-unpack.json"
-    return $?
+    # rearrange_mixed_qkv 配对 A/B 的入口 tools/bench_gdn_qkv_unpack.py **不在本仓**
+    # （随归档一起留在仓外）: 直接说清楚, 不要因为找不到文件就报成环境故障。
+    echo "bench-ladder: 本仓无此工具: tools/bench_gdn_qkv_unpack.py（op=GdnQkvUnpack 的 L0 入口, 见归档）" >&2
+    echo "   要重跑该配对 A/B 需自备该脚本; 本仓现有 L0 入口只有 op=<其他算子> 与 op=GdnQkvNorm" >&2
+    return 2
   fi
   # 余下参数原样透传给 bench-l0.py（--sig/--decode-tokens/--iters...）;
   # 自带 --out 放最后, 保证落 L2 的带时间戳新文件（只追加, 不覆盖既有归档）
-  "$PY" "$SCRIPTS/bench-l0.py" --op "$op" "$@" \
+  local bench_tool; bench_tool=$(ladder_tool bench-l0.py) || return 2
+  "$PY" "$bench_tool" --op "$op" "$@" \
     --out "$RECORDS/${ts}-l0.json"
 }
 
@@ -978,6 +1037,8 @@ cmd_profile() {
   fi
   local plan="$prof_dir/profile-plan.json" tier max_iters require_shapes capture_scope
   [ -f "$plan" ] || { echo "缺 profile-plan.json：拒绝无档位窗口 $prof_dir" >&2; return 3; }
+  # L4 产物生成靠外部脚本; 先确认在, 别等解析/瘦身跑完才发现缺工具
+  local opstat_tool; opstat_tool=$(ladder_tool ladder-opstat.py) || return 2
   IFS=$'\t' read -r tier max_iters require_shapes capture_scope < <("$PY" - "$plan" <<'PYEOF'
 import json, sys
 p = json.load(open(sys.argv[1]))
@@ -1273,7 +1334,7 @@ PYEOF
   # 通信（hcom_*，Accelerator Core=COMMUNICATION，本栈占 ~22% device）系统性不在视线里。
   # 2026-10-14 扩展: 同窗一并产出 op_profile（aic/aiv/mac/mte + cube_util）与 comm_detail
   # （analysis.db CommAnalyzer*: wait/sync/transit、消息大小、带宽），供"算子在算还是搬"归因。
-  if ! "$PY" "$SCRIPTS/ladder-opstat.py" --asc-dir "$asc_dir" --out "$out_json" \
+  if ! "$PY" "$opstat_tool" --asc-dir "$asc_dir" --out "$out_json" \
        --load-caliber "${LADDER_LOAD_CALIBER:-unmarked}" \
        --load-caliber-detail "${LADDER_LOAD_CALIBER_DETAIL:-未声明负载口径的窗口（消费端不得据此外推）}" \
        --window-manifest "$prof_dir/load-manifest.json" \
@@ -1308,11 +1369,12 @@ PYEOF
   fi
   if [ "$require_shapes" = "1" ]; then
     # deep 才把 per-shape 作为交付硬门。
-    local ptdb out_shapes
+    local ptdb out_shapes shapes_tool
+    shapes_tool=$(ladder_tool extract-l0-shapes-db.py) || return 2
     ptdb=$(ls "$outd"/ascend_pytorch_profiler_*.db 2>/dev/null | head -1)
     out_shapes=$(reserve_path "$RECORDS/${ts}-l0-shapes.json") || out_shapes=""
     if [ -z "$ptdb" ] || [ -z "$out_shapes" ] || \
-       ! "$PY" "$SCRIPTS/extract-l0-shapes-db.py" "$ptdb" "$out_shapes"; then
+       ! "$PY" "$shapes_tool" "$ptdb" "$out_shapes"; then
       echo "!! deep profile 交付门: shape 抽取失败（ptdb=${ptdb:-缺}）→ 不自动瘦身, 原始输入保留。"
       return 1
     fi
@@ -1621,7 +1683,8 @@ PYEOF
   # 独占/预留文件名: 绝不覆盖既有证据（用户传入相同 ts 也不会覆盖）
   local out_json; out_json=$(reserve_path "$RECORDS/${ts}-recover-opstat.json") \
     || { echo "recover-profile: 无法预留产物路径"; return 1; }
-  if ! "$PY" "$SCRIPTS/ladder-opstat.py" --asc-dir "$asc_dir" --out "$out_json" \
+  local opstat_tool; opstat_tool=$(ladder_tool ladder-opstat.py) || return 2
+  if ! "$PY" "$opstat_tool" --asc-dir "$asc_dir" --out "$out_json" \
        --load-caliber "$caliber" --load-caliber-detail "$detail" \
        --window-manifest "$manifest_path" --model-config "$model_cfg"; then
     echo "!! recover-profile: L4 产物生成失败（$out_json）→ 不报恢复完成, 现场保留。"
@@ -1778,7 +1841,11 @@ EOF
   fi
   if [ -n "$baseline" ]; then
     echo; echo "== 实验门禁报告（基线 $(basename "$baseline") → $tag）=="
-    "$PY" "$SCRIPTS/ladder-report.py" "$baseline" "$dir" || true
+    # 报告脚本不在本仓时, 只少这一段报告, 不推翻已跑完的 run（如实提示, 不静默）
+    local report_tool
+    if report_tool=$(ladder_tool ladder-report.py); then
+      "$PY" "$report_tool" "$baseline" "$dir" || true
+    fi
   else
     echo "（无基线指针: 这是第一个 run；下次 run 会自动与它对比，或显式 LADDER_RUN_BASELINE=<tag>）"
   fi
@@ -1787,7 +1854,10 @@ EOF
   cmd_logs || true
 }
 
-cmd_report() { "$PY" "$SCRIPTS/ladder-report.py" "$@"; }
+cmd_report() {
+  local tool; tool=$(ladder_tool ladder-report.py) || return 2
+  "$PY" "$tool" "$@"
+}
 
 # 日志收尾：gzip 已完结的 ladder-*.log，默认保留最近 LADDER_LOG_KEEP_DAYS=3 天未压缩。
 # 只动 logs/ 下的日志，绝不触碰 records/** 的 csv/json（那些是被卡与台账引用的证据路径）。
@@ -1820,6 +1890,12 @@ cmd_logs() {
   [ "$dry" = 1 ] || echo "== 压缩 $n 个, 省 $((freed / 1024)) KB; 当前 logs: $(du -sh "$LOGS" | cut -f1) =="
 }
 
+# 用法帮助: 抽取文件头注释块 —— 从第 2 行到 `set -uo pipefail` 前一行。
+# 不再写死行号区间（旧写法 2,26 只覆盖到 l2, 后面的子命令与纪律说明全被截掉）。
+usage() {
+  sed -n '2,/^set -uo pipefail$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
+}
+
 case "${1:-help}" in
   serve) shift; cmd_serve "$@" ;;
   stop) cmd_stop ;;
@@ -1837,5 +1913,10 @@ case "${1:-help}" in
   recover-profile) shift; cmd_recover_profile "$@" ;;
   run) shift; cmd_run "$@" ;;
   report) shift; cmd_report "$@" ;;
-  *) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *)
+    case "${1:-help}" in
+      help|-h|--help) ;;
+      *) echo "bench-ladder: 未知子命令: $1（下面是完整用法）" >&2 ;;
+    esac
+    usage ;;
 esac

@@ -16,4 +16,10 @@ fusion_result.json
 !.openbitfun/skills/mod-acceptance/
 !.openbitfun/skills/operator-sol-optimizer/
 !.openbitfun/skills/github-env-auth/
+!.openbitfun/skills/triton-op-verifier/
+.openbitfun/skills/triton-op-verifier/*
+!.openbitfun/skills/triton-op-verifier/scripts/
+.openbitfun/skills/triton-op-verifier/scripts/*
+!.openbitfun/skills/triton-op-verifier/scripts/_common_utils.py
 .env
+/.flashgrep-index-engine/

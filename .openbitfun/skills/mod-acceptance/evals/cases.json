@@ -49,6 +49,17 @@
         "Does not infer model guard or integration from local verification",
         "Keeps missing evidence pending"
       ]
+    },
+    {
+      "prompt": "有大量优化目录，部分只是宿主优化方向记录。所有实际候选必须各自跑完整服务 A/B 才能组合吗？组合变快后能否把收益填回每个算子？",
+      "checks": [
+        "Require numerical validation and per-candidate attribution for included implementations",
+        "Select individual A/B only by risk or attribution need",
+        "Exclude direction-only and superseded duplicate records",
+        "Require combination A/B and separate frozen MOD acceptance",
+        "Preserve individual history and interrupted artifacts; never allocate combination gain to members"
+      ],
+      "id": "combination-not-every-directory"
     }
   ]
 }

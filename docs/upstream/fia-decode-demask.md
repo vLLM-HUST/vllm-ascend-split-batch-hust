@@ -26,8 +26,8 @@
 4. **守卫面**：仅当 `input_layout=="TND" && sparse_mode==3 && pre/next==INT_MAX
    && atten_mask 为方形 int8 && 累计 actual_seq_lengths==T（= 每请求恰 1 查询
    token）` 时改写；prefill / chunked-prefill / 混批 / 滑窗 / spec-decode 一律
-   原样。实现参考：本仓 `fia_demask_plugin.py`（同谓词的 op 面包装，可作
-   上游 in-tree 化的底稿）。
+   原样。实现参考：[设计稿](../design/fia-decode-demask.md)里的谓词描述——该设计稿
+   未实施，本仓没有 `fia_demask_plugin.py`，只能作上游 in-tree 化的文字底稿。
 
 ## 上游化形态（建议）
 

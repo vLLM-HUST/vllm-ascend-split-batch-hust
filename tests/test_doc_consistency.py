@@ -32,12 +32,14 @@ except ModuleNotFoundError:  # Python 3.10
 PROSE_SURFACE = (
     "README.md",
     "AGENTS.md",
+    "workflow.md",
     "GLOSSARY.md",
     "docs/README.md",
     "docs/architecture.md",
     "docs/agent-guide.md",
     "docs/support-matrix.md",
     "docs/operator-benchmark-standard.md",
+    "docs/hotspot-profile-method.md",
     "docs/mod-acceptance-standard.md",
     "docs/mod-acceptance-audit.md",
     ".openbitfun/skills/mod-acceptance/SKILL.md",
@@ -63,7 +65,7 @@ MEASURED = re.compile(
     re.IGNORECASE,
 )
 
-#: `AGENTS.md` §3.2 明令禁止的隐晦暗语。
+#: `AGENTS.md` 的「禁止使用隐晦暗语」条列出的暗语。
 BANNED_WORDS = ("载波", "领地", "点钉", "husk", "档2 载体", "短跑", "活守卫")
 
 #: "N 个插件 / N 个 bundle" 的数量陈述；组 1 是数字，键是实际数量来源。
@@ -82,7 +84,10 @@ COUNT_CLAIMS = (
 OPERATOR_REQUIRED = ("README.md", "REPORT.md", "bench_l0.py", "evidence.json")
 
 #: 术语表必备章节前缀，顺序即文档结构。
-GLOSSARY_SECTIONS = ("## 0.", "## 1.", "## 2.", "## 3.", "## 4.", "## 5.", "## 6.")
+GLOSSARY_SECTIONS = ("## 1.", "## 2.", "## 3.")
+
+#: 术语表的词条小节前缀。
+GLOSSARY_TERM_SECTIONS = "### 1."
 
 #: 锚点里可以按仓库相对路径校验的后缀。
 ANCHOR_SUFFIXES = (".py", ".md", ".json", ".toml", ".sh", ".sha256", ".yaml", ".yml")
@@ -147,7 +152,7 @@ def test_glossary_structure_and_term_uniqueness():
     for line in text.splitlines():
         if line.startswith("## "):
             inside_terms = False
-        if line.startswith("### 3."):
+        if line.startswith(GLOSSARY_TERM_SECTIONS):
             inside_terms = True
             continue
         if inside_terms and line.startswith("|"):
@@ -215,7 +220,7 @@ def test_prose_surface_has_no_measured_metric_pairs():
 
 
 def test_prose_surface_has_no_retired_slang():
-    """对外规范行文不得出现 `AGENTS.md` §3.2 禁用的隐晦暗语。"""
+    """对外规范行文不得出现 `AGENTS.md`「禁止使用隐晦暗语」条列出的暗语。"""
     violations = []
     for name in PROSE_SURFACE:
         if name in BANNED_WORD_SOURCES:

@@ -5,9 +5,11 @@ description: Use when 用户需要优化 Ascend 算子、计算 SOL% 达成率�
 
 # 算子 SOL 与优化交付
 
-直接由 Agent 读取任务、采集、修改、验证和交付。不启动自动生成循环，不要求实现框架接口。
+直接由 Agent 读取任务、采集、修改、验证和交付。不启动自动生成循环，不要求实现框架接口。执行顺序、单侧并行状态和端侧长测规则见 [优化工作流](references/optimization-workflow.md)。
 
 ## 先确定事实
+
+设备重测或服务采集前，先按 [宿主环境选择](references/host-environment.md) 查找已有 venv，核验实际模块来源、宿主提交及原生库。系统 Python 不匹配不代表容器没有 HUST；未经查找，不重新克隆或构建宿主。
 
 读取项目的 `AGENTS.md`、`GLOSSARY.md`、`docs/operator-benchmark-standard.md`、目标源码、`ops/<operator>/evidence.json` 和 `DELIVERY_INDEX.json`。查明真实调用点、模型和权重格式、dtype、形状、stride、专家分布、相位、输出别名及中间舍入。不要把连续向量链猜成同一种计算，也不要根据模型名称猜调用次数。
 
@@ -51,7 +53,7 @@ python <skill>/scripts/profile.py simulator --application 'python small_case.py'
 
 `--application` 只接受已审阅的本地命令，不能拼接外部文本。采集服务端时必须包住实际服务进程；仅包住 HTTP 客户端不能得到服务 kernel。多卡逐卡核对。硬件指标采集与正式计时分开，避免插桩改变结果。非零退出即使留下部分 CSV，也记录失败及不完整范围。
 
-按需调用已有技能：设备确认用 `ascendc-env-check` 与 `npu-arch`；MFU 用 `triton-mfu-analyzer`；Triton 修改用 `triton-latency-optimizer`，一次只改一个优化点；精度失败用 `triton-precision-debug`；功能与基准用 `triton-op-verifier`。瓶颈不明或准备声明硬件极限时，必须先用 `triton-simulator-optimizer` 采集诊断，不另建优化技术目录。技能不可用时报告缺失，不能声称已完成其步骤。
+按需调用已有技能：设备确认用 `ascendc-env-check` 与 `npu-arch`；MFU 用 `triton-mfu-analyzer`；Triton 修改用 `triton-latency-optimizer`，一次只改一个优化点；精度失败用 `triton-precision-debug`；功能与基准用 `triton-op-verifier`。瓶颈不明或准备声明硬件极限时，必须先用 `triton-simulator-optimizer` 采集诊断，不另建优化技术目录。使用前检查 `SKILL.md` 和声明的脚本是否存在；缺失时按[优化工作流](references/optimization-workflow.md) fail-closed，不得声称已完成该步骤。
 
 Simulator 会执行整个应用，先缩成保持关键布局和计算语义的单次调用，枚举所有相关 kernel 及 Cube/Vector 流水。小 shape 的流水比例只用于诊断；优化后回到真实尺寸计时，不能用缩小用例的结果替代生产工况。
 
@@ -69,6 +71,8 @@ Simulator 会执行整个应用，先缩成保持关键布局和计算语义的�
 
 先写 `ops/<operator>/evidence.json`，再同步索引，最后用 `tools/operator_tools/custody.py` 生成并校验目录指纹。实现或依赖改变后，旧服务记录保留为历史；重新核对适用性，不能自动继承。没有独立测量的 `bench_l0.py` 必须退出码为 3。
 
-`layer` 按实际交付归属选现有值，不按调优方式新建层。没有公开可达入口的候选使用 `gate_env=unexposed` 和待验证状态，不捏造门控。算子通过后按外环规范核对真实接入、服务数值和逐卡归因；进入 MOD 交接时使用 `mod-acceptance`，不把局部 SOL 升级为最终合格结论。
+`layer` 按实际交付归属选现有值，不按调优方式新建层。没有公开可达入口的候选使用 `gate_env=unexposed` 和待验证状态，不捏造门控。所有纳入组合的候选均按外环规范保留数值校验和逐卡归因，可共用采集但须逐项判定。单算子端到端 A/B 按需选测，先按关键路径占比、风险和归因需要决定，不为全部目录逐个起服。仅有方向记录、未接入、已拒绝或被替代的路线明确排除，不制造缺测债务。
+
+冻结实际可用的组合，关闭组与启用组只改变目标开关集合；先重验组合数值及各候选调用，再做组合 A/B。退化时分组消融，必要时才做单项 A/B；不得事后删掉失败样本或把组合收益分摊给单项。已有局部、单项服务、失败和中断产物保留；未单测保持无单项服务结论，不因此阻止证据充分的组合交付。进入 MOD 交接时使用 `mod-acceptance`，不把局部 SOL 或组合诊断升级为最终合格结论。
 
 修改后跑 `pytest @tests/offline-checks.args` 和隔离 CPU 门禁。行为评估场景见 [cases.json](evals/cases.json)；没有独立 Agent 或 NPU 时明确记录未执行，不把脚本测试当成行为验证。

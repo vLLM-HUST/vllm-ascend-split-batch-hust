@@ -1,6 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 vLLM-HUST contributors.
 
+"""GDN 专用 L3 抓取工具（只抓贪心输出，**不计时、不产出性能数字**）。
+
+用途: 在固定提示词下并发抓取 16 条贪心输出，作为数值护栏的比对基线或候选。
+
+三条边界，读产物时务必记住：
+
+1. **只做数值抓取**。文件里没有任何耗时 / 时间字段；文件名里的 `bench` 是历史
+   前缀，不代表本工具做过计时。
+2. **提示词是 GDN 专用**（本文件内的单个长数学提示词模板），与
+   `tools/operator_tools/serving_loop.py` 的 `FIXED_L3_PROMPTS` 是**两套不同
+   提示词**，产物**不可直接互比**；要跨工具比较，必须两臂用同一套提示词重抓。
+3. **产物 id 前缀 `gdn16-` / `batch16-` 与文件名带时间戳前缀属于归档 id**，
+   外部归档按它索引，改名会打断追溯。
+
+用法::
+
+    python tools/bench_gdn_l3.py --port 8000 --out records/raw/<窗>/<ts>-gdn16-l3.json
+    python tools/bench_gdn_l3.py --port 8000 --batched-raw --out <path>
+
+对比两次抓取: 产物是带 `id`/`text` 的对象数组, 按 `id` 对齐比 `text` 字段即可；
+`serving_loop.py compare-greedy` 只吃字符串数组, 不直接吃本工具的产物。
+"""
+
 import argparse
 import concurrent.futures
 import json

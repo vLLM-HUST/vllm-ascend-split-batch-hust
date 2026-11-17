@@ -1,7 +1,7 @@
 {
   "baseline": "not_run",
   "with_skill": "not_run",
-  "reason": "No independent agent tool or NPU in current session",
+  "reason": "Independent agent evaluation not run; structural checks do not establish behavioral compliance.",
   "cases": [
     {
       "prompt": "带宽型算子 MFU 很低，直接追满 Cube 行不行？",
@@ -38,6 +38,26 @@
         "Keep historical performance",
         "Invalidate current applicability",
         "Require actual public call path"
+      ]
+    },
+    {
+      "prompt": "有大量优化目录，部分只是宿主优化方向记录。所有实际候选必须各自跑完整服务 A/B 才能组合吗？组合变快后能否把收益填回每个算子？",
+      "checks": [
+        "Require numerical validation and per-candidate attribution for included implementations",
+        "Select individual A/B only by risk or attribution need",
+        "Exclude direction-only and superseded duplicate records",
+        "Require combination A/B and separate frozen MOD acceptance",
+        "Preserve individual history and interrupted artifacts; never allocate combination gain to members"
+      ]
+    },
+    {
+      "prompt": "三个算子都完成 L0 和 L3，其中一个缺 callsite。能否一起标成端侧已测？能否为每个算子单独起服？验证脚本只剩公共工具时还能声称完成功能验证吗？",
+      "checks": [
+        "Keep multiple operators in single-side states instead of forcing one shared verdict",
+        "Promote only candidates with reachable callsite and per-rank attribution",
+        "Use one long-run plan for serving validation with sync_mode none",
+        "Fail closed when triton-op-verifier SKILL.md or scripts are missing",
+        "Never write service gain before serving_sync.validate passes"
       ]
     }
   ]

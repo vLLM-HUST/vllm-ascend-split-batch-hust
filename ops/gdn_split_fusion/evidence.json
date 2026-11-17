@@ -131,146 +131,190 @@
   },
   "l3_numerical_guard": {
     "passed": true,
-    "scope": "operator-level bitwise equivalence across M in {1,8,32,266,1867}, plus an 8-prompt greedy end-to-end comparison over a live server",
-    "metric": "exact_bitwise_equal and exact_token_match",
-    "max_abs_diff": 0,
-    "end_to_end": {
-      "date": "2026-11-02",
-      "baseline": "based/split-batch-baseline @ 8039119f",
-      "result": "8/8 identical",
-      "artifacts": "opt-qwen35b records/gdn-unpack-off.json, records/gdn-unpack-on.json"
-    },
-    "detail": "two separately started servers on the same baseline, gate unset versus VLLM_HUST_GDN_UNPACK_FUSED=1; process environment verified before sampling"
+    "matched": 8,
+    "total": 8,
+    "match_summary": "8/8",
+    "mismatched_indices": []
   },
   "l4_attribution": {
-    "tested": true,
-    "verified": true,
-    "caliber": "32 requests, 366 input tokens total, 16384 output tokens, TP2 FULL graph, op_statistic over the whole bench window, rank0",
-    "call_count_expected": 15330,
-    "call_count_actual": 15324,
-    "fused_kernels": {
-      "_unpack_kernel": {
-        "count": 15324,
-        "total_ms": 106.1,
-        "per_call_us": 6.93
+    "passed": true,
+    "operator": "gdn_split_fusion",
+    "protocol": "single-request-16-tokens",
+    "devices": {
+      "0": {
+        "passed": true,
+        "checks": {
+          "off__unpack_kernel": {
+            "actual": 0,
+            "expected": 0,
+            "passed": true
+          },
+          "on__unpack_kernel": {
+            "actual": 30,
+            "expected": 30,
+            "passed": true
+          },
+          "off__rearrange_kernel": {
+            "actual": 0,
+            "expected": 0,
+            "passed": true
+          },
+          "on__rearrange_kernel": {
+            "actual": 30,
+            "expected": 30,
+            "passed": true
+          },
+          "off_conv": {
+            "actual": 480,
+            "expected": 480,
+            "passed": true
+          },
+          "on_conv": {
+            "actual": 480,
+            "expected": 480,
+            "passed": true
+          }
+        }
       },
-      "_rearrange_kernel": {
-        "count": 15324,
-        "total_ms": 101.9,
-        "per_call_us": 6.65
+      "1": {
+        "passed": true,
+        "checks": {
+          "off__unpack_kernel": {
+            "actual": 0,
+            "expected": 0,
+            "passed": true
+          },
+          "on__unpack_kernel": {
+            "actual": 30,
+            "expected": 30,
+            "passed": true
+          },
+          "off__rearrange_kernel": {
+            "actual": 0,
+            "expected": 0,
+            "passed": true
+          },
+          "on__rearrange_kernel": {
+            "actual": 30,
+            "expected": 30,
+            "passed": true
+          },
+          "off_conv": {
+            "actual": 480,
+            "expected": 480,
+            "passed": true
+          },
+          "on_conv": {
+            "actual": 480,
+            "expected": 480,
+            "passed": true
+          }
+        }
       }
     },
-    "replaced": {
-      "ConcatD": {
-        "off_count": 15420,
-        "off_ms": 265.7,
-        "on_count": 30,
-        "on_ms": 0.5,
-        "off_per_call_us": 17.2
+    "sources": [
+      {
+        "path": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-e2e-resumable/gdn_split_fusion/guard_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_459916_20261115132035899_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+        "sha256": "4078c9cdff69452ab585c9f2a4cbb63a4b71e50d78b0018066815f1ed572d72a"
       },
-      "Slice": {
-        "off_count": 117550,
-        "off_ms": 367.9,
-        "on_count": 25557,
-        "on_ms": 74.7,
-        "note": "the qkv/qkvz/ba splits collapse into the kernels"
+      {
+        "path": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-e2e-resumable/gdn_split_fusion/guard_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_459917_20261115132035900_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+        "sha256": "9d79ef9f5d868388075575236a165e2384f1eaccbb7cead53160c4f192158e93"
+      },
+      {
+        "path": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-e2e-resumable/gdn_split_fusion/guard_on/profile/dp0_pp0_tp0_dcp0_ep0_rank0_476618_20261115132933152_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+        "sha256": "c3b3905a098f5a4617315a49268db96d89409befdf9c16b9bc506089f0b271ee"
+      },
+      {
+        "path": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-e2e-resumable/gdn_split_fusion/guard_on/profile/dp0_pp0_tp1_dcp0_ep1_rank1_476619_20261115132933148_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+        "sha256": "12387acc0d368cce568b742364b5843424250ba0ed2c47e654dd2d32e0971e42"
       }
-    },
-    "cohort_2048": {
-      "caliber": "128 requests x 2048 in / 256 out @32, op_statistic over the whole bench window, rank0",
-      "slice": {
-        "off_count": 262339,
-        "off_ms": 6507.8,
-        "on_count": 54556,
-        "on_ms": 1444.0
-      },
-      "concatd": {
-        "off_count": 41359,
-        "off_ms": 2052.3,
-        "on_count": 4278,
-        "on_ms": 595.4
-      },
-      "fused_kernels": {
-        "_unpack_kernel_ms": 1322.8,
-        "_rearrange_kernel_ms": 1801.3
-      },
-      "target_group": {
-        "off_ms": 8560.0,
-        "on_ms": 5163.0,
-        "saved_ms": 3397.0,
-        "pct_of_all_kernels": 5.05
-      },
-      "note": "this window was affected by device drift: unrelated operators such as Cast (+1928.9 ms) and MatMulV2 (+1298.0 ms) also grew, so only the within-window target group is comparable"
-    },
-    "net_attributable_ms": -350.2,
-    "net_attributable_pct": -2.41,
-    "all_kernel_total": {
-      "off_ms": 14518.0,
-      "on_ms": 14198.3,
-      "delta_pct": -2.2
-    },
-    "note": "the attributable saving covers Slice plus ConcatD replaced by the two kernels (633.5 -> 283.3 ms). The all-kernel delta is smaller because other operators drift in the opposite direction. 15324 calls = 30 layers x 511 steps.",
-    "pure_decode": {
-      "caliber": "32 requests, 366 input tokens total, 16384 output tokens",
-      "target_group": {
-        "off_ms": 633.5,
-        "on_ms": 283.3,
-        "saved_ms": 350.2,
-        "pct_of_all_kernels": 2.41
-      }
-    },
-    "cohort_512": {
-      "caliber": "128 requests x 512 in / 256 out @32, op_statistic over the whole bench window, rank0",
-      "slice": {
-        "off_count": 243583,
-        "off_ms": 3336.7,
-        "on_count": 52320,
-        "on_ms": 698.4
-      },
-      "concatd": {
-        "off_count": 33828,
-        "off_ms": 1142.2,
-        "on_count": 1221,
-        "on_ms": 172.1
-      },
-      "fused_kernels": {
-        "_unpack_kernel_ms": 611.1,
-        "_rearrange_kernel_ms": 599.1
-      },
-      "target_group": {
-        "off_ms": 4478.9,
-        "on_ms": 2080.6,
-        "saved_ms": 2398.3,
-        "pct_of_all_kernels": 5.0
-      },
-      "note": "device drift in this window: Cast +292.5 ms and MatMulV2 -817.4 ms moved in opposite directions, so only the within-window target group is comparable"
-    }
+    ],
+    "status": "completed",
+    "verified": true
   },
   "serving_end_to_end": {
     "tested": true,
-    "concurrency": 32,
-    "input_output": "128 requests x (512 or 2048) in / 256 out",
-    "cohort_512": {
-      "kv_tokens": 66000,
-      "runs": 8,
-      "design": "two ABBA blocks of 4 runs",
-      "tok_s_pct": 0.46,
-      "per_token_ms_pct": -2.6,
-      "note": "both blocks positive; baseline-run spread 4.18%"
+    "diagnostic_only": false,
+    "status": "within_noise",
+    "workload": "random",
+    "num_runs_off": 2,
+    "num_runs_on": 2,
+    "speedup": 1.0054,
+    "gen_rate_off": 586.91,
+    "gen_rate_on": 590.08,
+    "gen_rate_delta_pct": 0.54,
+    "intra_group_spread_pct": {
+      "off": 4.36,
+      "on": 2.97
     },
-    "cohort_2048": {
-      "kv_tokens": 263000,
-      "runs": 12,
-      "design": "three ABBA blocks of 4 runs",
-      "tok_s_pct": -1.27,
-      "per_token_ms_pct": 1.78,
-      "note": "all three blocks negative; -3.17% before dropping one outlier run; baseline-run spread 4.29%"
-    },
-    "conclusion": "both cohorts sit inside their own run spread, so neither a gain nor a loss is claimed. Operator-level saving is 5.00% (512) and 5.05% (2048), effectively equal, while the serving results differ in sign; that difference is noise rather than a load effect, so no load-dependent explanation is offered.",
-    "root_cause": "op_statistic sums 14518 ms of kernel time for a bench whose wall time is far shorter, so the kernels do not run back to back; removing 350 ms only widens the gaps."
+    "mean_step_off_ms": 46.25,
+    "mean_step_on_ms": 46.69,
+    "mean_step_delta_pct": 0.96,
+    "applicability": "current",
+    "scope": "operator serving A/B; not MOD acceptance",
+    "workloads": {
+      "random": {
+        "tested": true,
+        "diagnostic_only": true,
+        "status": "within_noise",
+        "workload": "random",
+        "num_runs_off": 2,
+        "num_runs_on": 2,
+        "speedup": 1.0054,
+        "gen_rate_off": 586.91,
+        "gen_rate_on": 590.08,
+        "gen_rate_delta_pct": 0.54,
+        "intra_group_spread_pct": {
+          "off": 4.36,
+          "on": 2.97
+        },
+        "mean_step_off_ms": 46.25,
+        "mean_step_on_ms": 46.69,
+        "mean_step_delta_pct": 0.96
+      },
+      "sharegpt": {
+        "tested": true,
+        "diagnostic_only": true,
+        "status": "within_noise",
+        "workload": "sharegpt",
+        "num_runs_off": 2,
+        "num_runs_on": 2,
+        "speedup": 1.0086,
+        "gen_rate_off": 403.52,
+        "gen_rate_on": 406.97,
+        "gen_rate_delta_pct": 0.86,
+        "intra_group_spread_pct": {
+          "off": 4.82,
+          "on": 0.24
+        },
+        "mean_step_off_ms": 78.74,
+        "mean_step_on_ms": 75.26,
+        "mean_step_delta_pct": -4.42
+      },
+      "long-prefix": {
+        "tested": true,
+        "diagnostic_only": true,
+        "status": "verified_faster",
+        "workload": "long-prefix",
+        "num_runs_off": 2,
+        "num_runs_on": 2,
+        "speedup": 1.0517,
+        "gen_rate_off": 53.09,
+        "gen_rate_on": 55.84,
+        "gen_rate_delta_pct": 5.17,
+        "intra_group_spread_pct": {
+          "off": 4.11,
+          "on": 4.48
+        },
+        "mean_step_off_ms": 15.98,
+        "mean_step_on_ms": 15.1,
+        "mean_step_delta_pct": -5.5
+      }
+    }
   },
   "known_issue": "M=1 pays ~1.4us of custom-op dispatch overhead per component (~84us per step over 30 layers, about 0.13% of TPOT) because the shape gate must stay inside the op",
-  "status": "default_off_serving_no_gain",
+  "status": "integrated_host_fork_measured",
   "default_enabled": false,
   "evidence_fingerprint": {
     "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
@@ -281,5 +325,201 @@
     "pending": "image rebuild only; end-to-end numerics, in-graph attribution and serving A/B are all done",
     "host_merge_commit": "201adc93a",
     "baseline_state": "merged into based/split-batch-baseline via PR #68"
+  },
+  "serving_sync": {
+    "archive": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-e2e-resumable/gdn_split_fusion",
+    "files": {
+      "config.json": "ff7fb6af75acc1b2b3c293acb4692173d97e334c456b20d6b425e5d6348eef9e",
+      "host_preflight.json": "6cd3e7d59dad2566ab33f2e6dfa75520e28ac1aaac185803c2da009b42c3ff1f",
+      "guard_off/invocation.json": "aff234197f1b8a087c73474553cf4d42e5e14ae57fe6493453c6e013e8401ec6",
+      "guard_off/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "guard_off/responses.json": "c6348822866a0485744fd2ebcdbef7ac9f7bc61a659900f3c2ccab69b0f1891c",
+      "guard_off/greedy.json": "758bd7566c1cb0f2adc22049ccb5862b5ce55be7ce2dd3f17a30e2b22c3aed79",
+      "guard_on/invocation.json": "9688965bb818e96211fb6c1608edf12470d670987bfc97d0663d11ad602843d7",
+      "guard_on/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "guard_on/responses.json": "c2d6432d5847e454dc56dcdfc95edaf6975367744a1dea2a019be91a78b6333d",
+      "guard_on/greedy.json": "758bd7566c1cb0f2adc22049ccb5862b5ce55be7ce2dd3f17a30e2b22c3aed79",
+      "bench_0_off/invocation.json": "18861bab9071e75b1b16eeb2f33975d75198dd9397df03705a0572f175e487c6",
+      "bench_0_off/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "bench_1_on/invocation.json": "bad5df54cb5fc58e88114ceda1ff005a0b001e6a559f3d84031fbcd4c2393dbb",
+      "bench_1_on/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "bench_2_on/invocation.json": "bad5df54cb5fc58e88114ceda1ff005a0b001e6a559f3d84031fbcd4c2393dbb",
+      "bench_2_on/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "bench_3_off/invocation.json": "18861bab9071e75b1b16eeb2f33975d75198dd9397df03705a0572f175e487c6",
+      "bench_3_off/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "serving_l3.json": "bfc9c0c4cbebd6e1067c0cb81937b286582477e7494968857cdd6898edda0424",
+      "l4.json": "858d6f5b4c6ad72f8cb7382339d661930e3d105ecdb8767b9b7de9bcfdd30d1c",
+      "guard_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_459916_20261115132035899_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "4078c9cdff69452ab585c9f2a4cbb63a4b71e50d78b0018066815f1ed572d72a",
+      "guard_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_459917_20261115132035900_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "9d79ef9f5d868388075575236a165e2384f1eaccbb7cead53160c4f192158e93",
+      "guard_on/profile/dp0_pp0_tp0_dcp0_ep0_rank0_476618_20261115132933152_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "c3b3905a098f5a4617315a49268db96d89409befdf9c16b9bc506089f0b271ee",
+      "guard_on/profile/dp0_pp0_tp1_dcp0_ep1_rank1_476619_20261115132933148_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "12387acc0d368cce568b742364b5843424250ba0ed2c47e654dd2d32e0971e42",
+      "workload_pairing.json": "729701f161693c0b673feccd838f48e592eb17a2d45130ba8fafd527608d0661",
+      "bench_0_off/random.json": "2782e0941b3caac4c46daf90ab4204932308b6d87582c444ea09f407b7a77706",
+      "bench_0_off/random_invocation.json": "416a087f545ad1c74a0b8b984c10f96b1f9469e8eb63a9144812d80707aadb5e",
+      "bench_1_on/random.json": "010ee4c9f3afb5d5a24c16cb311917ebc3233b6d09022431901029cd84e27c64",
+      "bench_1_on/random_invocation.json": "b46d2b890ce4b1334167197d47709c4dfaf64759c0fff65cbb9ad5e831b09572",
+      "bench_2_on/random.json": "689978d836a4818235bc6389fbc40ac4c0038f7d133b3feb0cedd921a4008daa",
+      "bench_2_on/random_invocation.json": "308f975292bc24e0a0669459a2541fbd8c388676b650f7e81a2e215304daecce",
+      "bench_3_off/random.json": "83f1ad88c09a8fb00b3f830786b3569a20208a1db29b1876246a74e35a52afa7",
+      "bench_3_off/random_invocation.json": "db61347dc1f32b3a0bc19753847e7aa35f6cb073cc39e2209bae26c8cfe158ce",
+      "bench_0_off/sharegpt.json": "28c3b3ec8736f13c562e251010911d47d60c928d8ea5a238f415983e8a6c7379",
+      "bench_0_off/sharegpt_invocation.json": "9c33929132592e5446c7dd1b0eaeb6e3d814fae0652d03d9c7aa9d3f6b5cc4ef",
+      "bench_1_on/sharegpt.json": "b570eba040fb3a0b417493f6512c23f24046fb262d32e4124098e4bbb8c2ebf7",
+      "bench_1_on/sharegpt_invocation.json": "06ab8f6c20655717d9dbb22216a231c91c751c52992850ca15ba3b0d130606c9",
+      "bench_2_on/sharegpt.json": "af82333ef41902746dd5c200c9fb095a280b935dae36e0ad2cbc69fe7291e702",
+      "bench_2_on/sharegpt_invocation.json": "fad7bf1eb176edc8f6c835ed9ec8e3751889de7468a2de9b9196ccecc640832b",
+      "bench_3_off/sharegpt.json": "efbf61574cc177b13491f70a17228eaba7289f77e42f1c826574e08c3fb99878",
+      "bench_3_off/sharegpt_invocation.json": "6da9166fc00d31ff26bd776e114a0ab213c955d5238836ba0f1cba1cfba8df35",
+      "bench_0_off/long-prefix.json": "03380cc05dc5d90dccc438b7a80c782a5b6e1842919870f2b3aeab8faf2d12dd",
+      "bench_0_off/long-prefix_invocation.json": "e27640762da7768e67ff423b6f3bf2f399fd0919c7e4652c2275228e169aedd0",
+      "bench_1_on/long-prefix.json": "b5c6f1407f02bf8fd9ccec890a1fef400dd9419ee8ac338e69d60f0d7f35e243",
+      "bench_1_on/long-prefix_invocation.json": "321b75757bc59759b2fbebfe3bae19dded9688cb86f16aa09c9d13d7a6571f0d",
+      "bench_2_on/long-prefix.json": "53b81d58dbbbd4ee4aba87c8dad5cdbbb0cf68d1bf3357e620db075f7e53f164",
+      "bench_2_on/long-prefix_invocation.json": "656a0113ff316f5d0be311ac35c796cbde66067a53a4c42fdcb185dca3b08bfe",
+      "bench_3_off/long-prefix.json": "3611fe189e7c6fa42f956d6583599fc373a5e9a5ec3afe2fc8b54701b060842a",
+      "bench_3_off/long-prefix_invocation.json": "104ed71c10883c054fecbbc3e9b70ecea164ff07e9de9e4fe754333aa12f3af1",
+      "summary.json": "a7e90fc56dcfdc4364470ecb651dd9213e958a1496769cd857956af5be0a310c"
+    },
+    "host_commits": {
+      "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+      "vllm-ascend": "e59aaeef26788e9f895aefa568d779ad84cc7842"
+    },
+    "completed_ns": 1794752921908132954
+  },
+  "round2_retest": {
+    "l4_attribution": {
+      "tested": true,
+      "verified": true,
+      "caliber": "32 requests, 366 input tokens total, 16384 output tokens, TP2 FULL graph, op_statistic over the whole bench window, rank0",
+      "call_count_expected": 15330,
+      "call_count_actual": 15324,
+      "fused_kernels": {
+        "_unpack_kernel": {
+          "count": 15324,
+          "total_ms": 106.1,
+          "per_call_us": 6.93
+        },
+        "_rearrange_kernel": {
+          "count": 15324,
+          "total_ms": 101.9,
+          "per_call_us": 6.65
+        }
+      },
+      "replaced": {
+        "ConcatD": {
+          "off_count": 15420,
+          "off_ms": 265.7,
+          "on_count": 30,
+          "on_ms": 0.5,
+          "off_per_call_us": 17.2
+        },
+        "Slice": {
+          "off_count": 117550,
+          "off_ms": 367.9,
+          "on_count": 25557,
+          "on_ms": 74.7,
+          "note": "the qkv/qkvz/ba splits collapse into the kernels"
+        }
+      },
+      "cohort_2048": {
+        "caliber": "128 requests x 2048 in / 256 out @32, op_statistic over the whole bench window, rank0",
+        "slice": {
+          "off_count": 262339,
+          "off_ms": 6507.8,
+          "on_count": 54556,
+          "on_ms": 1444.0
+        },
+        "concatd": {
+          "off_count": 41359,
+          "off_ms": 2052.3,
+          "on_count": 4278,
+          "on_ms": 595.4
+        },
+        "fused_kernels": {
+          "_unpack_kernel_ms": 1322.8,
+          "_rearrange_kernel_ms": 1801.3
+        },
+        "target_group": {
+          "off_ms": 8560.0,
+          "on_ms": 5163.0,
+          "saved_ms": 3397.0,
+          "self_ratio_pct": 39.68,
+          "self_ratio_denominator": "same-window target-group baseline (8560 ms)",
+          "pct_of_all_kernels": 5.05
+        },
+        "note": "this window was affected by device drift: unrelated operators such as Cast (+1928.9 ms) and MatMulV2 (+1298.0 ms) also grew, so only the within-window target group is comparable"
+      },
+      "net_attributable_ms": -350.2,
+      "net_attributable_pct": -2.41,
+      "quotable_caliber": "-39.7% is the 263k-KV cohort target-group self-ratio (8560 -> 5163 ms, denominator = same-window baseline target group). The all-kernel-denominator variants (2.41% / 5.00% / 5.05%) are internal references only and must not be quoted as the operator saving.",
+      "all_kernel_total": {
+        "off_ms": 14518.0,
+        "on_ms": 14198.3,
+        "delta_pct": -2.2
+      },
+      "note": "the attributable saving covers Slice plus ConcatD replaced by the two kernels (633.5 -> 283.3 ms). The all-kernel delta is smaller because other operators drift in the opposite direction. 15324 calls = 30 layers x 511 steps.",
+      "pure_decode": {
+        "caliber": "32 requests, 366 input tokens total, 16384 output tokens",
+        "target_group": {
+          "off_ms": 633.5,
+          "on_ms": 283.3,
+          "saved_ms": 350.2,
+          "self_ratio_pct": 55.28,
+          "self_ratio_denominator": "same-window target-group baseline (633.5 ms)",
+          "pct_of_all_kernels": 2.41
+        }
+      },
+      "cohort_512": {
+        "caliber": "128 requests x 512 in / 256 out @32, op_statistic over the whole bench window, rank0",
+        "slice": {
+          "off_count": 243583,
+          "off_ms": 3336.7,
+          "on_count": 52320,
+          "on_ms": 698.4
+        },
+        "concatd": {
+          "off_count": 33828,
+          "off_ms": 1142.2,
+          "on_count": 1221,
+          "on_ms": 172.1
+        },
+        "fused_kernels": {
+          "_unpack_kernel_ms": 611.1,
+          "_rearrange_kernel_ms": 599.1
+        },
+        "target_group": {
+          "off_ms": 4478.9,
+          "on_ms": 2080.6,
+          "saved_ms": 2398.3,
+          "self_ratio_pct": 53.55,
+          "self_ratio_denominator": "same-window target-group baseline (4478.9 ms)",
+          "pct_of_all_kernels": 5.0
+        },
+        "note": "device drift in this window: Cast +292.5 ms and MatMulV2 -817.4 ms moved in opposite directions, so only the within-window target group is comparable"
+      }
+    },
+    "serving_end_to_end": {
+      "tested": true,
+      "concurrency": 32,
+      "input_output": "128 requests x (512 or 2048) in / 256 out",
+      "cohort_512": {
+        "kv_tokens": 66000,
+        "runs": 8,
+        "design": "two ABBA blocks of 4 runs",
+        "tok_s_pct": 0.46,
+        "per_token_ms_pct": -2.6,
+        "note": "both blocks positive; baseline-run spread 4.18%"
+      },
+      "cohort_2048": {
+        "kv_tokens": 263000,
+        "runs": 12,
+        "design": "three ABBA blocks of 4 runs",
+        "tok_s_pct": -1.27,
+        "per_token_ms_pct": 1.78,
+        "note": "all three blocks negative; -3.17% before dropping one outlier run; baseline-run spread 4.29%"
+      },
+      "conclusion": "both cohorts sit inside their own run spread, so neither a gain nor a loss is claimed. Target-group self-ratio is 53.5% (512) and 39.7% (2048), effectively equal, while the serving results differ in sign; that difference is noise rather than a load effect, so no load-dependent explanation is offered.",
+      "root_cause": "observed: op_statistic sums 14518 ms of kernel time while the same bench wall time is far shorter, and the two serving cohorts (+0.46% / -1.27%) both sit inside their own run spread (4.18% / 4.29%). hypothesis, not yet verified: the 350.2 ms saving only widens the gaps between kernels. no msprof timeline was captured and no kernel-bound counter-test was run, so this stays a hypothesis."
+    }
   }
 }

@@ -221,12 +221,17 @@ Statistics scope: 早期历史评估记录曾参考过部分特定测试流量�
     为 capture 或检测失败 → **读取任何 device tensor 之前返回**，`sample_source` 记
     `skipped_inside_capture` / `skipped_unknown_capture_state`；capture dummy 行绝不写成真实 counts，
     FULL graph replay 不执行 Python。TP=2 时路径支持 `{rank}`，无占位符则自动追加 `.rank<RANK>`。
-- 回滚：**该层已从 `apply-runtime-patches.sh` 的 MANIFEST 移除**，脚本里没有可用的
-  `--rollback w1r-gmm-tuning`。若运行树仍是部署态，二选一：①直接对**已核过的**
-  `host-proposals/W1R-gmm-tuning-config/patch.diff` 执行 `patch -R`（先 `patch -R --dry-run`）；
-  ②按 `OWNERSHIP.md §5` 先把层重新加回 MANIFEST，再用 `apply-runtime-patches.sh --rollback`。
-  当前该层已**从 MANIFEST 移除**（blocker `fixture-unreachable-fullgraph-decode`），
-  重新启用条件与步骤见 `host-proposals/W1R-gmm-tuning-config/OWNERSHIP.md` §5。
+- 回滚：仓内**只剩一条可用路径**——对已核过的
+  `host-proposals/W1R-gmm-tuning-config/patch.diff` 执行反向应用：
+  先 `patch -R --dry-run` 核对能干净命中，确认无 hunk 失败后再 `patch -R` 落地，
+  然后重启并重新捕获图。若该运行树本来就是干净的（未部署该补丁），不做任何操作。
+  **旧步骤作废**：本文档早期版本让人用 `apply-runtime-patches.sh --rollback`
+  或先把层加回 MANIFEST 再回滚，该脚本与 MANIFEST 已整体从本仓移除
+  （见 [GLOSSARY.md](../GLOSSARY.md) 废止术语表与
+  [容器与插件边界规范 §3.5](container-and-plugin-boundary-spec.md)），
+  按旧步骤操作只会找不到脚本；重新启用条件与当前冻结原因见
+  `host-proposals/W1R-gmm-tuning-config/OWNERSHIP.md`（该提案当前已冻结，
+  运行树中不保留该补丁）。
   `gen_patch.py --check` 只对**未打补丁的宿主/镜像 blob** 有意义（部署态见上一条回滚说明）。
 - CPU 门：`tests/test_w1r_gmm_tuning_patch.py`（补丁正/反向、生成器 byte-identical、
   fail-closed、零模块级 import/IO、白名单解析、dump schema 与 invariant）。

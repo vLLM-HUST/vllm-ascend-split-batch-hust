@@ -534,6 +534,42 @@ def test_half_installation_is_rolled_back(monkeypatch, caplog) -> None:
     assert plugin.KEY_LLAMA3 not in tree.registry
 
 
+def test_half_applied_registry_entries_are_restored(monkeypatch, caplog) -> None:
+    """Registry entries written before the failure must be rolled back too.
+
+    ``_apply_overrides`` writes ``op_registry_oot`` while it runs, so an
+    exception thrown after the write used to leave the plugin classes installed
+    (and a created defect-① key behind) even though ``install()`` reported
+    failure and the log promised the stock classes.
+    """
+
+    tree = _HostTree(monkeypatch)
+    tree.call_registration()  # host pass already ran -> the eager pass writes
+    monkeypatch.setenv(ENV, "1")
+    real_apply = plugin._apply_overrides
+
+    def _apply_then_boom(post_registration):
+        real_apply(post_registration)
+        raise RuntimeError("injected failure after the registry write")
+
+    monkeypatch.setattr(plugin, "_apply_overrides", _apply_then_boom)
+    with caplog.at_level(logging.WARNING):
+        assert plugin.load() is False
+
+    assert tree.registry[plugin.KEY_MROPE] is tree.AscendMRotaryEmbedding
+    assert tree.registry[plugin.KEY_YARN] is tree.AscendYaRNRotaryEmbedding
+    assert plugin.KEY_LLAMA3 not in tree.registry
+    assert plugin.stats()["applied"] == {}
+    assert plugin.stats()["wrapped"] == []
+    assert plugin._ORIG == {}
+    assert (
+        tree.modules["vllm_ascend.utils"].register_ascend_customop
+        is tree.register_ascend_customop
+    )
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum("installation failed" in m for m in messages) == 1, messages
+
+
 def test_load_after_registration_applies_eagerly(monkeypatch) -> None:
     """The real worker ordering: registration first, ``load()`` after it.
 

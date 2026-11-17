@@ -60,5 +60,622 @@
     "stress_workload": "sharegpt",
     "concurrency": 32,
     "speedup": null
-  }
+  },
+  "device_retests": [
+    {
+      "run_id": "npu-retest-20261115T041855Z",
+      "scope": "isolated operator, synthetic historical shapes on current runtime; model integration, L4 and service not retested",
+      "environment": {
+        "timestamp": "2026-11-15T04:27:09+00:00",
+        "triton": {
+          "version": "3.2.0",
+          "path": "/usr/local/python3.12.13/lib/python3.12/site-packages/triton",
+          "key_sha256": "73b738272f0aea6d69eccefdb8a7405173f3f99169f46c355ea9b1beeb1be1da"
+        },
+        "cache": {
+          "dir": "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/triton-cache",
+          "fresh": false,
+          "fresh_effective": true,
+          "always_compile": false
+        },
+        "cann": {
+          "ascend_home_path": "/usr/local/Ascend/cann-9.1.0",
+          "info_sha256": "a9b17ef608ebeb70ade09cde1c12a545eb5e8f3e5312f6806ca0d368b0464848",
+          "info_file": "/usr/local/Ascend/cann-9.1.0/aarch64-linux/ascend_toolkit_install.info",
+          "version": "9.1.0"
+        },
+        "torch": {
+          "version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0.post4"
+        },
+        "device": {
+          "ASCEND_RT_VISIBLE_DEVICES": null,
+          "current_device": 0,
+          "npu_name": "Ascend910B2"
+        },
+        "cmdline": {
+          "triton_impl_name": "triton_ascend_impl",
+          "non_compute": false
+        }
+      },
+      "host_source_commit": null,
+      "source_sha256": "38ed816be58857c78593f8efedf563201b86fdfba1b26d13f7daad518fbe6c50",
+      "generic_verifier": {
+        "passed": 14,
+        "total": 14,
+        "limitation": "device transfer may compact CPU views; layout validation is provided by stride-preserving graph cases"
+      },
+      "stride_preserving_check": {
+        "passed": 14,
+        "total": 14,
+        "cases": [
+          {
+            "case": 0,
+            "passed": true,
+            "shape": [
+              [
+                1,
+                1024
+              ],
+              [
+                1,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                1024,
+                1
+              ],
+              [
+                1024,
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.0075879482158017,
+            "baseline": {
+              "median_us": 3.452500142157078,
+              "p90_us": 3.9829999208450317,
+              "p99_us": 4.8340000212192535
+            },
+            "candidate": {
+              "median_us": 3.4265000373125076,
+              "p90_us": 3.7119999527931213,
+              "p99_us": 4.442999884486198
+            }
+          },
+          {
+            "case": 1,
+            "passed": true,
+            "shape": [
+              [
+                1,
+                1024
+              ],
+              [
+                1,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                2
+              ],
+              [
+                2048,
+                2
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 0.9748269919874533,
+            "baseline": {
+              "median_us": 8.383999764919281,
+              "p90_us": 9.596999734640121,
+              "p99_us": 11.349000036716461
+            },
+            "candidate": {
+              "median_us": 8.600500226020813,
+              "p90_us": 9.865999966859818,
+              "p99_us": 10.097000002861023
+            }
+          },
+          {
+            "case": 2,
+            "passed": true,
+            "shape": [
+              [
+                8,
+                1024
+              ],
+              [
+                8,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                1024,
+                1
+              ],
+              [
+                1024,
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.017828380983055,
+            "baseline": {
+              "median_us": 4.738499969244003,
+              "p90_us": 5.172999948263168,
+              "p99_us": 6.015999987721443
+            },
+            "candidate": {
+              "median_us": 4.655499942600727,
+              "p90_us": 5.1169998943805695,
+              "p99_us": 5.778000131249428
+            }
+          },
+          {
+            "case": 3,
+            "passed": true,
+            "shape": [
+              [
+                8,
+                1024
+              ],
+              [
+                8,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                2
+              ],
+              [
+                2048,
+                2
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.1315436120795956,
+            "baseline": {
+              "median_us": 9.273000061511993,
+              "p90_us": 9.314999729394913,
+              "p99_us": 10.543999820947647
+            },
+            "candidate": {
+              "median_us": 8.195000141859055,
+              "p90_us": 8.246000111103058,
+              "p99_us": 9.369000047445297
+            }
+          },
+          {
+            "case": 4,
+            "passed": true,
+            "shape": [
+              [
+                16,
+                1024
+              ],
+              [
+                16,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                1024,
+                1
+              ],
+              [
+                1024,
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.1213649817189948,
+            "baseline": {
+              "median_us": 3.7790000438690186,
+              "p90_us": 3.9179999381303787,
+              "p99_us": 4.941000044345856
+            },
+            "candidate": {
+              "median_us": 3.370000049471855,
+              "p90_us": 3.78899984061718,
+              "p99_us": 4.293999820947647
+            }
+          },
+          {
+            "case": 5,
+            "passed": true,
+            "shape": [
+              [
+                16,
+                1024
+              ],
+              [
+                16,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                2
+              ],
+              [
+                2048,
+                2
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.131528986940104,
+            "baseline": {
+              "median_us": 11.62250004708767,
+              "p90_us": 11.653999984264374,
+              "p99_us": 12.768000364303589
+            },
+            "candidate": {
+              "median_us": 10.271500051021576,
+              "p90_us": 10.322999954223633,
+              "p99_us": 11.455000191926956
+            }
+          },
+          {
+            "case": 6,
+            "passed": true,
+            "shape": [
+              [
+                32,
+                1024
+              ],
+              [
+                32,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                1024,
+                1
+              ],
+              [
+                1024,
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.4599156274475988,
+            "baseline": {
+              "median_us": 4.843999817967415,
+              "p90_us": 4.881000146269798,
+              "p99_us": 5.945000052452087
+            },
+            "candidate": {
+              "median_us": 3.317999839782715,
+              "p90_us": 3.84799987077713,
+              "p99_us": 5.361000075936317
+            }
+          },
+          {
+            "case": 7,
+            "passed": true,
+            "shape": [
+              [
+                32,
+                1024
+              ],
+              [
+                32,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                2
+              ],
+              [
+                2048,
+                2
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.2213706179671424,
+            "baseline": {
+              "median_us": 12.350500002503395,
+              "p90_us": 13.057999312877655,
+              "p99_us": 13.495999574661255
+            },
+            "candidate": {
+              "median_us": 10.11200025677681,
+              "p90_us": 11.152999848127365,
+              "p99_us": 11.313000321388245
+            }
+          },
+          {
+            "case": 8,
+            "passed": true,
+            "shape": [
+              [
+                7,
+                1024
+              ],
+              [
+                7,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                1024,
+                1
+              ],
+              [
+                1024,
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 0.9864945929905176,
+            "baseline": {
+              "median_us": 3.287000022828579,
+              "p90_us": 3.821999952197075,
+              "p99_us": 4.7850001603364944
+            },
+            "candidate": {
+              "median_us": 3.3320000395178795,
+              "p90_us": 3.807000070810318,
+              "p99_us": 4.004000127315521
+            }
+          },
+          {
+            "case": 9,
+            "passed": true,
+            "shape": [
+              [
+                7,
+                1024
+              ],
+              [
+                7,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                2
+              ],
+              [
+                2048,
+                2
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.0035450028101909,
+            "baseline": {
+              "median_us": 8.209499716758728,
+              "p90_us": 9.0829998254776,
+              "p99_us": 9.459000080823898
+            },
+            "candidate": {
+              "median_us": 8.180499821901321,
+              "p90_us": 9.053000062704086,
+              "p99_us": 9.510000050067902
+            }
+          },
+          {
+            "case": 10,
+            "passed": true,
+            "shape": [
+              [
+                97,
+                1024
+              ],
+              [
+                97,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                1024,
+                1
+              ],
+              [
+                1024,
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.6871903533700168,
+            "baseline": {
+              "median_us": 5.959999933838844,
+              "p90_us": 5.976000055670738,
+              "p99_us": 6.018000096082687
+            },
+            "candidate": {
+              "median_us": 3.5325000062584877,
+              "p90_us": 3.767000138759613,
+              "p99_us": 4.484999924898148
+            }
+          },
+          {
+            "case": 11,
+            "passed": true,
+            "shape": [
+              [
+                97,
+                1024
+              ],
+              [
+                97,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                2
+              ],
+              [
+                2048,
+                2
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.1849523171327796,
+            "baseline": {
+              "median_us": 14.040499925613403,
+              "p90_us": 14.917999505996704,
+              "p99_us": 15.21800011396408
+            },
+            "candidate": {
+              "median_us": 11.848999932408333,
+              "p90_us": 12.735000252723694,
+              "p99_us": 13.075999915599823
+            }
+          },
+          {
+            "case": 12,
+            "passed": true,
+            "shape": [
+              [
+                266,
+                1024
+              ],
+              [
+                266,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                1024,
+                1
+              ],
+              [
+                1024,
+                1
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.5351692624010704,
+            "baseline": {
+              "median_us": 6.689500063657761,
+              "p90_us": 7.434999942779541,
+              "p99_us": 7.7959999442100525
+            },
+            "candidate": {
+              "median_us": 4.357500001788139,
+              "p90_us": 5.443000048398972,
+              "p99_us": 5.550000071525574
+            }
+          },
+          {
+            "case": 13,
+            "passed": true,
+            "shape": [
+              [
+                266,
+                1024
+              ],
+              [
+                266,
+                1024
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                2
+              ],
+              [
+                2048,
+                2
+              ]
+            ],
+            "atol": 0.001,
+            "rtol": 0.001,
+            "speedup": 1.169739947691178,
+            "baseline": {
+              "median_us": 16.556499898433685,
+              "p90_us": 17.509999871253967,
+              "p99_us": 17.93300062417984
+            },
+            "candidate": {
+              "median_us": 14.154000580310822,
+              "p90_us": 15.038999915122986,
+              "p99_us": 15.285000205039978
+            }
+          }
+        ]
+      },
+      "measurement": {
+        "warmup": 10,
+        "repetitions_per_graph": 20,
+        "samples": 100,
+        "timing": "NPU event per replay, alternating order"
+      },
+      "limitations": [
+        "single device; frequency not locked",
+        "event timing per graph replay includes replay scheduling gaps",
+        "no memory peak measurement or service conclusion"
+      ],
+      "archive": {
+        "uri": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+        "files": {
+          "ffn_activation-graph.json": "7ade92bc78b9d52ddf4b2984fb8424552b7c4f42750cc251c180f943cfb53e91",
+          "ffn_activation-verify-v2.json": "37702f7b33b06b716338eacf24f8a1588b2e9316d0c753797364d3d19c24053f",
+          "ffn_activation-receipt-v2.json": "4e00449a3f9d4db607a10a3d38a84a17938b1ca51df93409d21c4c5bb7e37428"
+        },
+        "runner_sha256": "a853c9c06d77f29ff52b540e81c03a0da4bdf1ca56f098d1918b8ce5cf7400bd",
+        "verification_command": {
+          "argv": [
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/skills/triton-op-verifier/scripts/verify.py",
+            "--op_name",
+            "ffn_activation",
+            "--verify_dir",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/ffn_activation",
+            "--output",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/ffn_activation/verify_result.json"
+          ],
+          "returncode": 0,
+          "duration_s": 36.10681962966919
+        },
+        "graph_command": [
+          "env",
+          "-u",
+          "PYTHONPATH",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/graph_retest.py",
+          "ffn_activation"
+        ],
+        "graph_result_note": "Runner exit zero requires per-case status inspection; compilation failures are retained, not accepted timings."
+      },
+      "dependency_sha256": {
+        ".openbitfun/skills/triton-op-verifier/scripts/verify.py": "d7145025abdb33ba126328fc26bf0e66480744d59c18adc329d9dfd38ea647d7",
+        ".openbitfun/skills/triton-op-verifier/scripts/eco_limits.py": "11658fcf93c028a6d6b8f4b3aeef1f74855613cec9c6bef4a8423e65e855f1c0"
+      }
+    }
+  ]
 }
