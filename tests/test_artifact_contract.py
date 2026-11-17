@@ -101,6 +101,19 @@ def write_checklist(path: Path, op: str, share: float, sol) -> Path:
     )
 
 
+def write_manifest(root: Path) -> Path:
+    return write_json(
+        root / "collection_manifest.json",
+        {
+            "schema": "vllm-hust/collection/collection-manifest/v1",
+            "produced_at": "2026-11-17T00:00:00Z",
+            "host_commits": {"vllm": "a" * 40, "vllm-ascend": "b" * 40},
+            "collection_shape": {"server_mode": "graph"},
+            "artifacts": ["op_statistic.csv"],
+        },
+    )
+
+
 def build_archive(
     root: Path, computing: float = 250.0, free: float = 700.0, comm: float = 50.0
 ) -> Path:
@@ -148,6 +161,11 @@ class TestClassification:
             ("pipes_rank0.json", "hotspot-pipes"),
             ("pipes_sharegpt.json", "hotspot-pipes"),
             ("op_statistic_rank0.csv", "hotspot-statistic"),
+            ("op_statistic.csv", "hotspot-statistic"),
+            ("kernel_details.csv", "kernel-details"),
+            ("api_statistic.csv", "api-statistic"),
+            ("communication_matrix.json", "communication-matrix"),
+            ("collection_manifest.json", "collection-manifest"),
             ("step_trace_rank1.csv", "step-trace"),
             ("sol_list.json", "sol-plan"),
             ("checklist.json", "sol-checklist"),
@@ -170,6 +188,37 @@ class TestClassification:
         assert classify("server.log") is None
         assert classify("analyse.log") is None
         assert classify("profiler_metadata.json") is None
+
+    def test_raw_profiler_state_is_not_a_contract_artifact(self, tmp_path):
+        """Raw trace and profiler bookkeeping sit beside the artifacts."""
+        raw = tmp_path / "hotspot/profile/ASCEND_PROFILER_OUTPUT"
+        raw.mkdir(parents=True)
+        for name in (
+            "trace_view.json",
+            "ascend_pytorch_profiler_0.db",
+            "analyse.done",
+            "PROF_000001_x",
+            "task_time.csv",
+            "operator_details.csv",
+            "profiler_metadata.json",
+        ):
+            (raw / name).write_text("x")
+        report = inspect(tmp_path)
+        assert report.tolerated == 0
+        assert report.skipped == 7
+
+    def test_artifacts_beside_raw_files_are_still_checked(self, tmp_path):
+        """Excluding the directory would hide these; excluding by name does not."""
+        raw = tmp_path / "hotspot/profile/ASCEND_PROFILER_OUTPUT"
+        raw.mkdir(parents=True)
+        (raw / "trace_view.json").write_text("x")
+        (raw / "op_statistic.csv").write_text(
+            "OP Type,Count,Total Time(us)\nGroupedMatmul,10,20.0\n"
+        )
+        report = inspect(tmp_path)
+        assert report.tolerated == 1
+        assert "hotspot-statistic" in report.kinds_seen
+        assert report.ok, report.findings
 
     def test_every_kind_has_a_note(self):
         for kind in KINDS:
@@ -218,11 +267,12 @@ class TestLegacyInspection:
 class TestStrictInspection:
     def test_strict_requires_schema(self, tmp_path):
         build_archive(tmp_path)
+        write_manifest(tmp_path)
         report = inspect(tmp_path, strict=True)
         assert not report.ok
         assert any(f.problem == "no schema field" for f in report.findings)
 
-    def test_strict_accepts_a_declared_schema(self, tmp_path):
+    def test_strict_requires_a_manifest(self, tmp_path):
         write_pipes(
             tmp_path / "hotspot/pipes_rank0.json",
             "aclnnMatmul_MatMulCommon_MatMulV2",
@@ -235,6 +285,24 @@ class TestStrictInspection:
         body["schema"] = "vllm-hust/collection/hotspot-pipes/v1"
         body["produced_at"] = "2026-11-17T00:00:00Z"
         write_json(tmp_path / "hotspot/pipes_rank0.json", body)
+        report = inspect(tmp_path, strict=True)
+        assert not report.ok
+        assert any("must declare itself" in f.problem for f in report.findings)
+
+    def test_strict_accepts_a_declared_archive(self, tmp_path):
+        write_pipes(
+            tmp_path / "hotspot/pipes_rank0.json",
+            "aclnnMatmul_MatMulCommon_MatMulV2",
+            1,
+            1.0,
+            1.0,
+            100.0,
+        )
+        body = json.loads((tmp_path / "hotspot/pipes_rank0.json").read_text())
+        body["schema"] = "vllm-hust/collection/hotspot-pipes/v1"
+        body["produced_at"] = "2026-11-17T00:00:00Z"
+        write_json(tmp_path / "hotspot/pipes_rank0.json", body)
+        write_manifest(tmp_path)
         report = inspect(tmp_path, strict=True)
         assert report.ok, report.findings
 
@@ -251,9 +319,20 @@ class TestStrictInspection:
         body["schema"] = "vllm-hust/collection/hotspot-summary/v1"
         body["produced_at"] = "2026-11-17T00:00:00Z"
         write_json(path, body)
+        write_manifest(tmp_path)
         report = inspect(tmp_path, strict=True)
         assert not report.ok
         assert any("expected" in f.problem for f in report.findings)
+
+    def test_native_profiler_artifacts_need_no_schema(self, tmp_path):
+        """CSV and profiler-written JSON cannot carry a schema; fields are enough."""
+        path = tmp_path / "hotspot/op_statistic_rank0.csv"
+        path.parent.mkdir(parents=True)
+        path.write_text("OP Type,Count,Total Time(us)\nGroupedMatmul,10,20.0\n")
+        write_manifest(tmp_path)
+        report = inspect(tmp_path, strict=True)
+        assert report.ok, report.findings
+        assert "hotspot-statistic" in report.kinds_seen
 
 
 class TestArchiveViews:

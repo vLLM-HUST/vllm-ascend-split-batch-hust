@@ -196,6 +196,35 @@ for index in range(rounds):
         )
     if index + 1 < rounds:
         time.sleep(sleep_seconds)
+
+# 归档自述：strict 校验要求归档能说清自己是什么形态、由哪个宿主产生。
+manifest = {
+    "schema": "vllm-hust/collection/collection-manifest/v1",
+    "produced_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "host_commits": template.get("host_commits", {}),
+    "collection_shape": template.get("collection_shape", {}),
+    "rounds": rounds,
+    "artifacts": [
+        "op_statistic.csv",
+        "kernel_details.csv",
+        "step_trace_time.csv",
+        "api_statistic.csv",
+        "communication_matrix.json",
+    ],
+}
+(archive_root / "collection_manifest.json").write_text(
+    json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+)
+
+from tools.operator_tools import artifact_contract
+
+for strict in (False, True):
+    report = artifact_contract.inspect(archive_root, strict=strict)
+    mode = "strict" if strict else "legacy"
+    (run_dir / f"contract_{mode}.json").write_text(
+        json.dumps(report.as_dict(), indent=2, ensure_ascii=False) + "\n"
+    )
+    print(f"contract[{mode}]: ok={report.ok} findings={len(report.findings)}", flush=True)
 PY
 
 echo $! > "$RUN_DIR/runner.pid"

@@ -49,15 +49,30 @@ class Kind:
     required: tuple[str, ...] = ()
     item_required: tuple[str, ...] | None = None
     item_field: str | None = None
+    authored: bool = False
     note: str = ""
 
 
 KINDS: tuple[Kind, ...] = (
     Kind(
+        "collection-manifest",
+        re.compile(r"^collection_manifest\.json$"),
+        required=(
+            "schema",
+            "produced_at",
+            "host_commits",
+            "collection_shape",
+            "artifacts",
+        ),
+        authored=True,
+        note="one per archive; the only artifact that declares what a run was",
+    ),
+    Kind(
         "hotspot-summary",
         re.compile(r"^hotspots\.json$"),
         item_required=("op", "count", "total_us", "share_pct"),
         note="per-op time ranking, one object per operator",
+        authored=True,
     ),
     Kind(
         "hotspot-pipes",
@@ -74,12 +89,35 @@ KINDS: tuple[Kind, ...] = (
         ),
         item_field="ops",
         note="per-op pipe composition; median_us is what separates prefill from decode",
+        authored=True,
     ),
     Kind(
         "hotspot-statistic",
-        re.compile(r"^op_statistic_.*\.csv$"),
+        re.compile(r"^op_statistic.*\.csv$"),
         required=("OP Type", "Count", "Total Time(us)"),
         note="msprof operator statistic export",
+    ),
+    Kind(
+        "kernel-details",
+        re.compile(r"^kernel_details\.csv$"),
+        required=(
+            "Name",
+            "Duration(us)",
+            "aicore_time(us)",
+            "aiv_time(us)",
+            "Block Num",
+        ),
+        note="per-kernel rows; the only source of pipe shares",
+    ),
+    Kind(
+        "api-statistic",
+        re.compile(r"^api_statistic\.csv$"),
+        note="host-side API timings",
+    ),
+    Kind(
+        "communication-matrix",
+        re.compile(r"^communication_matrix\.json$"),
+        note="per-peer collective volume; explains where communication time goes",
     ),
     Kind(
         "step-trace",
@@ -98,23 +136,27 @@ KINDS: tuple[Kind, ...] = (
             "not_modelable",
         ),
         note="roofline inputs resolved against a calibration window",
+        authored=True,
     ),
     Kind(
         "sol-checklist",
         re.compile(r"^checklist\.json$"),
         item_required=("op", "share_pct", "measured_us", "calls", "section"),
         note="per-op verdict table; section separates decidable from not",
+        authored=True,
     ),
     Kind(
         "sol-gap-bench",
         re.compile(r"^sol_gap_bench\.json$"),
         required=("device", "peaks"),
         note="L0 micro-bench that fills roofline inputs the profile cannot express",
+        authored=True,
     ),
     Kind(
         "peak-calibration",
         re.compile(r"^(window|\d{2}_[a-z0-9_]+)\.json$"),
         note="measured bandwidth / cube / granularity for one device window",
+        authored=True,
     ),
     Kind(
         "round-invocation",
@@ -147,13 +189,31 @@ KINDS: tuple[Kind, ...] = (
     ),
 )
 
-# Directory names that hold raw profiler output rather than summarised
-# artifacts. Their payload is device trace data, not a contract subject.
-RAW_DIRS = (
-    "ASCEND_PROFILER_OUTPUT",
-    "profiler_output",
-    "mindstudio_profiler_output",
-    "profile",
+# Files that carry raw device trace or profiler state rather than a summarised
+# artifact. They live beside the artifacts inside ASCEND_PROFILER_OUTPUT, so the
+# exclusion is per file name — excluding the directory would hide the artifacts
+# that actually matter.
+RAW_FILE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^trace_view\.json$"),
+    re.compile(r".*\.db$"),
+    re.compile(r".*\.done$"),
+    re.compile(r".*\.complete$"),
+    re.compile(r"^PROF_.*"),
+    re.compile(r".*slice_\d+.*"),
+    re.compile(r".*\.log$"),
+    re.compile(r".*\.log\..*$"),
+    # Profiler run state, not an analysis product.
+    re.compile(r"^profiler_metadata\.json$"),
+    re.compile(r"^profiler_info_\d+\.json$"),
+    re.compile(r"^sample\.json$"),
+    re.compile(r"^info\.json(\..*)?$"),
+    re.compile(r"^start_info(\..*)?$"),
+    re.compile(r"^end_info(\..*)?$"),
+    re.compile(r"^torch\.op_.*"),
+    # Per-element detail tables: megabytes each, no contract to check.
+    re.compile(r"^task_time\.csv$"),
+    re.compile(r"^operator_details\.csv$"),
+    re.compile(r"^communication\.json$"),
 )
 
 
@@ -196,10 +256,18 @@ def classify(name: str) -> Kind | None:
 
 
 def _load(path: Path):
+    """Read an artifact. CSV artifacts are sampled, not slurped.
+
+    ``kernel_details.csv`` reaches several megabytes while only its header
+    describes the contract, so reading one row is enough and keeps the check
+    cheap on a full archive.
+    """
     if path.suffix == ".csv":
         with path.open(newline="") as handle:
             reader = csv.DictReader(handle)
-            return list(reader), list(reader.fieldnames or ())
+            header = list(reader.fieldnames or ())
+            first = next(reader, None)
+            return ([first] if first is not None else []), header
     return json.loads(path.read_text()), None
 
 
@@ -224,7 +292,7 @@ def check_file(path: Path, kind: Kind, strict: bool) -> list[Finding]:
             )
         return findings
 
-    if strict:
+    if strict and kind.authored:
         body = data if isinstance(data, dict) else {}
         if "schema" not in body:
             findings.append(Finding(str(path), kind.name, "error", "no schema field"))
@@ -291,8 +359,8 @@ def check_file(path: Path, kind: Kind, strict: bool) -> list[Finding]:
     return findings
 
 
-def _is_raw(path: Path, root: Path) -> bool:
-    return any(part in RAW_DIRS for part in path.relative_to(root).parts)
+def _is_raw(path: Path) -> bool:
+    return any(pattern.match(path.name) for pattern in RAW_FILE_PATTERNS)
 
 
 def inspect(archive: Path, strict: bool = False) -> Report:
@@ -310,12 +378,22 @@ def inspect(archive: Path, strict: bool = False) -> Report:
         if kind is None:
             report.skipped += 1
             continue
-        if _is_raw(path, archive):
+        if _is_raw(path):
             report.skipped += 1
             continue
         report.tolerated += 1
         report.kinds_seen.add(kind.name)
         report.findings.extend(check_file(path, kind, strict))
+
+    if strict and "collection-manifest" not in report.kinds_seen:
+        report.findings.append(
+            Finding(
+                str(archive),
+                "collection-manifest",
+                "error",
+                "no collection_manifest.json; a strict archive must declare itself",
+            )
+        )
     return report
 
 
