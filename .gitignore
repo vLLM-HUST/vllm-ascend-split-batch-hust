@@ -22,3 +22,4 @@ fusion_result.json
 .openbitfun/skills/triton-op-verifier/scripts/*
 !.openbitfun/skills/triton-op-verifier/scripts/_common_utils.py
 .env
+/.flashgrep-index-engine/

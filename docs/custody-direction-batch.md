@@ -4,7 +4,7 @@
 算子 A/B 与 L0 地板 JSON、L3 捕获、opstat 副本、窗口回执、hazard 源码 vintage、
 host-proposals 提案目录（patches/orig/OWNERSHIP）、撤回套组含配对取证
 (`host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019`)、
-comm-mechanism/trace 验证运行、OPT-truth 探针）已按 custody 政策冻结于：
+通信机制和 OPT-truth 的历史采集）已按 custody 政策冻结于：
 
 - 批次分支: `direction-evidence-20261022` @ commit `02add2a27be84b106dd5e8c589b0a5bc3f928bff`
 - 快照: `archive/dev-hub-20261022/split-batch-direction/snapshot/`（镜像原始相对路径）
