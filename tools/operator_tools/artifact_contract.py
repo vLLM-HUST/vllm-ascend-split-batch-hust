@@ -178,7 +178,7 @@ KINDS: tuple[Kind, ...] = (
     ),
     Kind(
         "round-response",
-        re.compile(r"^(profile_response|responses)\.json$"),
+        re.compile(r"^(profile_response|profile_responses|responses)\.json$"),
         note="server replies kept per round; body is the API payload verbatim",
     ),
     Kind(

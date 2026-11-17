@@ -38,6 +38,12 @@ MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
 WORKLOAD=${WORKLOAD:-"random"}
 SERVER_MODE=${SERVER_MODE:-"eager"}
 PREFIX_CACHING=${PREFIX_CACHING:-0}
+# profile 窗口里的请求形状：请求数与并发度默认都是 1，与改造前完全一致。
+# 要让 prefix caching 真正起作用，profile 窗口里必须有至少两个共享前缀的请求；
+# 单个请求没有可复用的前缀，只剩查找开销。
+PROFILE_REQUESTS=${PROFILE_REQUESTS:-1}
+CONCURRENCY=${CONCURRENCY:-1}
+SHARED_PREFIX_TOKENS=${SHARED_PREFIX_TOKENS:-0}
 HOST_VLLM_COMMIT=${HOST_VLLM_COMMIT:-"f18cf803c5f63625e2c71253ddaf8b0bad0bad1a"}
 HOST_ASCEND_COMMIT=${HOST_ASCEND_COMMIT:-"320eced8c1bba71c0329bf59caa721a2382e7499"}
 
@@ -130,7 +136,10 @@ cat > config.json <<JSON
     "warmup_tokens": ${WARMUP_TOKENS:-16},
     "l3_tokens": ${L3_TOKENS:-128},
     "profile_tokens": ${PROFILE_TOKENS:-16},
-    "warmup_repeats": ${WARMUP_REPEATS:-10}
+    "warmup_repeats": ${WARMUP_REPEATS:-10},
+    "profile_requests": $PROFILE_REQUESTS,
+    "concurrency": $CONCURRENCY,
+    "shared_prefix_tokens": $SHARED_PREFIX_TOKENS
   }
 }
 JSON
