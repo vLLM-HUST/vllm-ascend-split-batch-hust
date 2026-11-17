@@ -25,10 +25,6 @@ if TYPE_CHECKING:
     )
 
 
-class VllmAscendSplitBatchContractProposal:
-    """Metadata-only proposal; this class performs no runtime activation."""
-
-
 _EXPORTS = {
     "DualPadPlan",
     "SplitBatchConfig",
@@ -50,7 +46,6 @@ __all__ = [
     "DualPadPlan",
     "SplitBatchConfig",
     "SplitSlice",
-    "VllmAscendSplitBatchContractProposal",
     "plan_dual_pad",
     "precheck_reason",
 ]

@@ -81,7 +81,7 @@
 | cohort | 一组锁定的实验条件（宿主线、模型、请求形态、图配置、精度）。数字只在同一 cohort 内可比。 | `docs/cohort-and-ownership.md` §2 | 不同 cohort 的数字不能混比 |
 | 负载口径（load caliber） | 某次采集绑定的负载标识，与 cohort 一起构成产物的生产者标记。 | `VLLM_HUST_LOAD_CALIBER_ID`、`VLLM_HUST_COHORT_ID`；`tools/analysis/matmulv2_shape_attribution.py` | — |
 | 跨域外推（禁止） | 把某 cohort 的结论搬到另一 cohort。历史 Qwen2.5 / 0.25 与当前基准互不推导。 | `docs/cohort-and-ownership.md` §3 | — |
-| 工作项代号（`D0`/`D4`/`W1R`/`F2`/`W3F2`） | 历史工作单编号，只作检索标签，单独出现不构成术语。 | 例：`VLLM_HUST_D4_CONV_PACK` 中的 `D4` | 引用时附环境变量、路径或分支 |
+| 工作项代号（`D0`/`D4`/`D5`/`W1R`/`F2`/`W3F2`） | 历史工作单编号，只作检索标签，单独出现不构成术语。 | 例：`VLLM_HUST_D4_CONV_PACK` 中的 `D4` | 引用时附环境变量、路径或分支 |
 
 ### 1.5 算子优化与服务验证
 
@@ -136,6 +136,6 @@
 | Cascade / `cascade-attention` | 已撤除的注意力实现及其入口 | "已撤除实现"，不称能力、不称收益 | `docs/HOST_CONTRACT.md` 的 Cascade 接入边界段 |
 | `apply-runtime-patches.sh`、`runtime_source_patches` | 运行时打补丁链 | 宿主提案（host proposal） | `docs/container-and-plugin-boundary-spec.md` §3.5 |
 | `based/image-baseline` | 旧基线名 | `based/split-batch-baseline` | `AGENTS.md` §1.7 |
-| `gdn-qkv-norm` plugin / bundle | 已撤回注册的入口 | 宿主提案 `host-proposals/GDN-qkv-norm/` | `README.md` 的 GDN QKV norm 段 |
+| `gdn-qkv-norm` plugin / bundle | 已撤回注册的入口 | 注册已撤回、L0 测量保留待外环；路线转宿主提案 `host-proposals/GDN-qkv-norm/` | `README.md` 的 GDN QKV norm 段；`DELIVERY_INDEX.json` 的 `gdn_qkv_norm` 条目 |
 | `Raing5Days/vllm-hust-cascade-kernel` | 早期独立发行的 Cascade kernel 包与其个人账号归属 | 历史专项，仅引用不依赖；org 归属未定 | `docs/cohort-and-ownership.md` §1 归属表 |
 | 历史 Qwen2.5 / 0.25 结论 | 可外推的收益结论 | 历史独立专项，禁止跨域外推 | `docs/cohort-and-ownership.md` §2 |
