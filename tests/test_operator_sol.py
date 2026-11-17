@@ -154,6 +154,17 @@ def test_optimizer_workflow_reference_exists_and_covers_current_flow():
     assert "pending_longrun.py" in body
     assert "sync_mode: none" in body
     assert "serving_sync.validate" in body
+    assert "不加载自定义 `.so`" in body
+    assert "外部独立 wheel" in body
+    assert "output/<arm>/profile" in body
+    assert "空热点表必须先检查 CSV 路径" in body
+
+
+def test_profile_hotspot_scripts_read_actual_profile_directory():
+    for script in (ROOT / "workloads").glob("*hotspot*.sh"):
+        body = script.read_text()
+        assert 'output / "guard_off" / "profile"' not in body, script.name
+        assert 'output / "profile"' in body, script.name
 
 
 def test_active_entrypoints_do_not_reference_removed_optimizer():
