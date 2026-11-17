@@ -6,6 +6,7 @@ import argparse
 import json
 import math
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -31,6 +32,24 @@ from tools.operator_tools.workloads import (  # noqa: E402
     build_bench_serve_cmd,
     select_workloads_for_operator,
 )
+
+#: `config["gate"]` 只能是**裸变量名**（形如 `VLLM_HUST_GATE_FP32`）。
+#: 带赋值（`VLLM_HUST_GATE_FP32=1`）会被当成变量名整串注入环境，没人读它，
+#: 于是 on/off 两臂实际完全相同，最后只能产出"噪声内"的假结论。
+GATE_ENV_NAME = re.compile(r"VLLM_HUST_[A-Z0-9_]+")
+
+
+def gate_env_name(config):
+    """校验并返回 `config["gate"]` 的变量名；配置里没有该键时返回 None。"""
+    if "gate" not in config:
+        return None
+    gate = config["gate"]
+    if not isinstance(gate, str) or not GATE_ENV_NAME.fullmatch(gate):
+        raise ValueError(
+            "config['gate'] 必须是纯变量名（形如 VLLM_HUST_GATE_FP32），"
+            f"不要带 =1；当前取值 {gate!r}"
+        )
+    return gate
 
 
 def save(path, value):
@@ -71,6 +90,12 @@ def completion(config, prompt, tokens):
 
 @contextmanager
 def server(config, output, arm, profile=False):
+    gate = gate_env_name(config)
+    if gate is None:
+        raise ValueError(
+            "config['gate'] 必填: 目标开关的变量名"
+            "（形如 VLLM_HUST_GATE_FP32，不要带 =1）"
+        )
     output.mkdir(parents=True, exist_ok=False)
     port = config["port"]
     with socket.socket() as sock:
@@ -82,7 +107,7 @@ def server(config, output, arm, profile=False):
         if key.startswith("VLLM_HUST_"):
             env.pop(key)
     env.update(config.get("environment", {}))
-    env[config["gate"]] = "1" if arm == "on" else "0"
+    env[gate] = "1" if arm == "on" else "0"
     cmd = list(config["server_command"])
     if profile:
         cmd += config.get("guard_server_args", [])
@@ -98,7 +123,7 @@ def server(config, output, arm, profile=False):
                 }
             ),
         ]
-    save(output / "invocation.json", {"command": cmd, "gate": env[config["gate"]]})
+    save(output / "invocation.json", {"command": cmd, "gate": env[gate]})
     with (output / "server.log").open("w") as log:
         proc = subprocess.Popen(
             cmd,
@@ -284,6 +309,7 @@ def verify_host(config, output):
 
 
 def run(config, output):
+    gate_env_name(config)
     pairing = select_workloads_for_operator(
         config.get("phase", "decode"), config.get("max_active_rows")
     )
@@ -368,6 +394,8 @@ def main():
     parser.add_argument("--model")
     args = parser.parse_args()
     config = json.loads(Path(args.config).read_text())
+    # 入口即校验开关名: 带 `=1` 的写法会被整串当变量名注入, on/off 两臂实际相同。
+    gate_env_name(config)
     for key, expected in (
         ("gate", args.gate),
         ("port", args.port),

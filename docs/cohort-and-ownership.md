@@ -36,7 +36,7 @@
 
 | # | 归属项 | 本仓现状（可核） | 缺口 |
 |---|---|---|---|
-| ① | independent cohort definition | 宿主域 [release.md](release.md) §0.1/§0.3；能力域 [support-matrix.md](support-matrix.md) §5.1 | 缺一页正式 cohort 声明（本文件 §2 即其初版） |
+| ① | independent cohort definition | 宿主域 [release.md](release.md) §0.1/§0.3；能力域 [support-matrix.md](support-matrix.md) 的「环境和证据边界」节 | 缺一页正式 cohort 声明（本文件 §2 即其初版） |
 | ② | kernel-wheel licensing / distribution | 许可齐全（wheel 内含 CANN OSL 2.0 协议文本、METADATA 已订正、根 `LICENSE`/`NOTICE`）；已按 GitHub Release 附件分发（算子仓 `v2026.9.27`，附件 = 本地构建字节） | **算子仓仍在个人账号 `Raing5Days/vllm-hust-cascade-kernel`**，org 归属未定 |
 | ③ | NPU evidence | 0.28 基准：[evidence/host-028-2026-10-11.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/host-028-2026-10-11.md)、[evidence/d4-gate-fp32-cohort.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/d4-gate-fp32-cohort.md)；历史：[evidence/cascade/](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/README.md)（147 件）+ 目标栈验证程序 | **MTP2 域仍未验证**（保持 fail-closed）；历史 cascade 证据只覆盖 0.25 线 + Qwen2.5 |
 | ④ | performance claims | [evidence/cascade/section3-performance.md](https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/docs/evidence/cascade/section3-performance.md) §13.5 | 对外引用必须带 §3 的 cohort 边界 |
@@ -80,7 +80,7 @@
 
 ## 4. 变更本文件的条件
 
-下列任一发生即须同步本文件与其引用处（`AGENTS.md` 硬约束 6、`support-matrix.md` §5.1、README）：
+下列任一发生即须同步本文件与其引用处（`AGENTS.md` 的「证据与结论」节、`support-matrix.md` 的「环境和证据边界」节、README）：
 
 - `host.version_range` 变更（放宽/收窄）；
 - 上游对 cohort 或归属有新裁定；

@@ -12,7 +12,7 @@
 2. 提供 default-off 开关、fallback、冲突不覆盖及关闭态无重型导入的测试。新 bundle 保持 `import_only`。
 3. 对同一实现、callsite、形状和权重完成 L0、L3+compare、light L4；数值失败单独阻断验收，不以吞吐改善抵消。
 4. 发布最终 wheel 后验证发现、关闭、启用、双 rank 真实调用、disable/restart 回原生路径。default-off 冒烟、正确性、性能三项证据齐备才能改 `active`。
-5. 服务收益须另有配对端到端结果；不得从局部算子耗时推算。字段与缺项处理见[交付清单](delivery-inventory.md#性能证据最小字段)。
+5. 服务收益须另有配对端到端结果；不得从局部算子耗时推算。字段与缺项处理见[交付清单](delivery-inventory.md#5-性能证据最小字段与评测阶梯)。
 
 ### GDN 注册接入验证门
 
@@ -22,11 +22,11 @@
 - `PluggableLayer.register_oot` 是层级接口，不能当作 unpack/norm 的窄接口；不得覆盖整个 forward 或分解含 KV/通信副作用的 core 绕行。
 - 新接入必须覆盖匹配/不匹配、跨流、scope、形状与相位守卫，并重新验证 L3+compare 和 graph replay。
 
-### GDN QKV norm tier-2 交付边界
+### GDN QKV norm 宿主提案交付边界
 
 kernel 和可逆 host proposal 保留，公开注册已撤回。结论与重开条件见 `host-proposals/GDN-qkv-norm/registration-closure.json`。没有已证实可达的窄 dispatch，不得把源码哈希检查当作注册成功。
 
-人工审查的 tier-2 路线要求宿主补丁及 `VLLM_HUST_GDN_QKV_NORM=1`、`USE_DEFAULT_FLA_NORM=0`；默认关闭，不自动修改宿主。关闭后重启并重捕获，补丁单独回滚。历史 kernel 数值验收不转写为当前注册接入通过。
+人工审查的宿主提案路线要求宿主补丁及 `VLLM_HUST_GDN_QKV_NORM=1`、`USE_DEFAULT_FLA_NORM=0`；默认关闭，不自动修改宿主。关闭后重启并重捕获，补丁单独回滚。历史 kernel 数值验收不转写为当前注册接入通过。
 
 ## 0. 状态纪律
 
@@ -83,10 +83,10 @@ python -m venv <新的仓外venv>
 - [ ] 按 [HOST_CONTRACT.md](HOST_CONTRACT.md) 核对当前组件实际消费的 seam。
 - [ ] `vllm.general_plugins` 加载顺序、冲突处理及关闭态零修改。
 - [ ] rope-fix 与 AOT guard：运行 `host_tree` 漂移测试，缺源码树即失败；宿主已修复时不得继续覆盖。
-- [ ] tier-2 patch：基线/补丁/产物 SHA256、依赖顺序、完整回滚；漂移拒绝，不模糊套补丁。
+- [ ] 宿主提案补丁：基线/补丁/产物 SHA256、依赖顺序、完整回滚；漂移拒绝，不模糊套补丁。
 - [ ] 实际设备数值、dispatch、graph 与性能，缺一项即保留缺口。
 
-`tools/seam_diff.py --selftest` 及两棵源码树对拍仅证明静态面，不证明生产图与设备行为。输入投影权重合并与卷积权重预打包的暂存树重放见[交付清单](delivery-inventory.md#运行树补丁)，不得直接修改只读宿主树。
+`tools/seam_diff.py --selftest` 及两棵源码树对拍仅证明静态面，不证明生产图与设备行为。输入投影权重合并与卷积权重预打包已由宿主 Fork 源码承载（宿主分支与提交清单见[交付清单](delivery-inventory.md)），不得在插件仓对只读宿主树做暂存树重放或就地修改。
 
 ## 5. 发布检查表
 

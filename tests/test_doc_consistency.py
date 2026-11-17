@@ -64,7 +64,7 @@ MEASURED = re.compile(
     re.IGNORECASE,
 )
 
-#: `AGENTS.md` §3.2 明令禁止的隐晦暗语。
+#: `AGENTS.md` 的「禁止使用隐晦暗语」条列出的暗语。
 BANNED_WORDS = ("载波", "领地", "点钉", "husk", "档2 载体", "短跑", "活守卫")
 
 #: "N 个插件 / N 个 bundle" 的数量陈述；组 1 是数字，键是实际数量来源。
@@ -219,7 +219,7 @@ def test_prose_surface_has_no_measured_metric_pairs():
 
 
 def test_prose_surface_has_no_retired_slang():
-    """对外规范行文不得出现 `AGENTS.md` §3.2 禁用的隐晦暗语。"""
+    """对外规范行文不得出现 `AGENTS.md`「禁止使用隐晦暗语」条列出的暗语。"""
     violations = []
     for name in PROSE_SURFACE:
         if name in BANNED_WORD_SOURCES:

@@ -1,6 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 vLLM-HUST contributors.
 
+"""RMSNormGated triton kernel (row-masked, width-exact).
+
+Precondition on the caller: ``BLOCK_N == N``.  The column offsets are
+``tl.arange(0, BLOCK_N)`` and both the data tiles and the weight tile are loaded
+with the row mask only, so a padded column block reads past the row and stores
+past ``out``.  ``gdn_norm_gate.gdn_norm_gate_fused`` refuses such a call.
+"""
+
 from __future__ import annotations
 
 import triton

@@ -38,8 +38,19 @@ MLP 的 `gate_up`（2I·2B = 54 KiB/token）与 `npu_swiglu` 的输出（I·2B =
 **为什么不做成默认开**：它改变执行粒度（多若干次 kernel launch）。虽然实测无代价，
 但属"改动数值路径之外的行为"，按仓库纪律保持 default-off，由使用者显式开启。
 
-**为什么不改宿主**：`AGENTS.md` 硬性约束禁改 `vllm-hust/`；本载体用
-`vllm.general_plugins` 入口包装 `Qwen2MLP.forward`，宿主可随时被替换而不影响本文件。
+**真实依赖**（本文件直接包装宿主方法，宿主一改就会失效）：
+
+- 被包装的宿主方法：`vllm.model_executor.models.qwen2.Qwen2MLP.forward`，必须存在且
+  可调用；已经带本插件标记（`_vllm_hust_mlp_chunk_wrapped`）时直接判定已安装。
+- 依赖的返回值形状：`self.gate_up_proj(x)` 与 `self.down_proj(s)` 都必须返回
+  `(output, bias)` 二元组（代码里按 `g, _ = ...` / `o, _ = ...` 解包，只用第 0 项）；
+  分块结果按行写回 `torch.empty_like(x)`。
+- 允许的激活类名：`self.act_fn.__class__.__name__` 必须命中 `_ACT_WHITELIST`
+  （`SiluAndMul` / `AscendSiluAndMul`），否则 `chunked_mlp_forward` 返回 `None`，
+  该次调用回退宿主 `forward`。
+- 默认关闭条件：`VLLM_HUST_MLP_CHUNKS` 未设或 `< 2` 时 `install()` 立即返回 `False`
+  且不 import 宿主模块；本批 token 数低于 `VLLM_HUST_MLP_CHUNK_MIN_TOKENS`
+  （未设时 256）时该批仍走宿主实现。
 
 **合规**：不改任何冻结 CLI 参数/环境变量/`cudagraph_mode`/`splitting_ops`/`gmu`/
 `max_model_len`/`max_num_batched_tokens` ⇒ 表附-8 的"生效值一致"不受影响。

@@ -15,6 +15,8 @@
 
 [算子基准规范](operator-benchmark-standard.md) 定义形状合同、验证阶梯和证据交接。先通过对应数值检查再接受计时结论，不能把 CPU 测试当设备正确性证明。
 
+阶梯工具 `tools/bench-ladder.sh` 的子命令与全部环境变量一览写在脚本头部注释里（`bash tools/bench-ladder.sh --help`）。它引用的外仓脚本不在本仓，需用 `LADDER_SCRIPTS` 指定目录；缺失时脚本会明确报错，不会静默跳过。
+
 ## 服务与最终交付
 
 按 [外环规范](outer-loop-test-plan.md) 核对当前入口、默认关闭与逐卡归因，再按 [负载说明](../workloads/README.md) 配置服务采集。采集器输出原始结果与诊断摘要，不覆盖算子证据。

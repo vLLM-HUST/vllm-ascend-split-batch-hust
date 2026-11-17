@@ -1,13 +1,18 @@
 # Design note: decode FIA de-mask (drop the redundant 2048² int8 causal template)
 
-- 状态：**新能力，`import_only`**（未进 manifest `active`；三项证据见
-  `../../docs/progress.md` 与
-  该实验的探针报告（仓外归档））
-- 开关：`VLLM_HUST_FIA_DEMASK=1`（默认 0，不 patch、不注入、日志零输出）
-- 诊断：`VLLM_HUST_FIA_DEMASK_TRACE=1`（observe-only：只记录、不改调用；
-  用于 OFF 腿取"mask 证据"，同样默认关）
-- 落点：`src/vllm_ascend_split_batch/fia_demask_plugin.py`
-- 入口：`vllm.general_plugins` → `vllm_ascend_split_batch.fia_demask_plugin:load`
+> 本文件是**未实施的设计稿**：正文按设计时态描述方案，不是仓库现状描述。
+> 本仓内没有对应实现模块、没有入口注册、没有生效的环境开关。
+
+- 状态：**未实施设计稿**（仓库内无实现、无入口、无开关）
+  - `src/vllm_ascend_split_batch/fia_demask_plugin.py` 从未创建，全仓无此文件；
+  - `pyproject.toml` 的 `vllm.general_plugins` 里没有对应条目，`vllm_hust.extension_bundles`
+    里也没有 `org.vllm-hust.fia-demask`；
+  - 全仓检索 `fia_demask` 只命中本文件与 [docs/upstream/fia-decode-demask.md](../upstream/fia-decode-demask.md)；
+  - 因此本能力当前没有任何可执行面，也不能写成 `import_only`（那是已有描述符对象的状态）。
+- 开关（设计占位，未接线）：`VLLM_HUST_FIA_DEMASK=1`。设置它不产生任何行为。
+- 诊断（设计占位，未接线）：`VLLM_HUST_FIA_DEMASK_TRACE=1`（observe-only：只记录、不改调用）。
+- 计划落点：`src/vllm_ascend_split_batch/fia_demask_plugin.py`（计划路径，尚未创建）。
+- 计划入口：`vllm.general_plugins` → `vllm_ascend_split_batch.fia_demask_plugin:load`（未登记）。
 
 ## 1. 宿主读码结论（vllm-ascend-hust main @ `74f0c0a27`）
 
@@ -129,7 +134,7 @@ chunked-prefill、mixed 批与 spec-decode（`Q_S>1`）——正是算子文档�
 fp32 dense 参考的 `rel_L2` 两臂相同（0.00237 = bf16 底噪）；本插件另做
 e2e greedy 逐 token 对拍（见证据文件）。
 
-### 2.3 default-off 与守卫
+### 2.3 default-off 与守卫（设计要求，未实施）
 
 - `load()`：`VLLM_HUST_FIA_DEMASK != "1"` 且 `VLLM_HUST_FIA_DEMASK_TRACE != "1"`
   时**立即返回**——不 import torch/torch_npu、不 patch、不打日志；
@@ -171,7 +176,7 @@ e2e greedy 逐 token 对拍（见证据文件）。
   目录内**恰好一份** manifest（文件名白名单 `vllm-hust-extension-v0.2.json` 等）；
 - 同一 distribution 可注册多个 bundle（各自模块目录独立）。
 
-落地形态：
+落地形态（计划，均未落地）：
 
 - 新模块目录 `src/vllm_ascend_split_batch/fia_demask/`（`__init__.py` +
   `vllm-hust-extension-v0.2.json`，bundle_id `org.vllm-hust.fia-demask`，

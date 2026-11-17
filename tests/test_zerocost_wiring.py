@@ -48,7 +48,10 @@ import types
 
 import pytest
 
-from vllm_ascend_split_batch import zerocost_wiring as carrier
+from vllm_ascend_split_batch import zerocost_fi_out as fi_out
+from vllm_ascend_split_batch import zerocost_skip_cos_sin as skip_cos_sin
+from vllm_ascend_split_batch import zerocost_state as state
+from vllm_ascend_split_batch import zerocost_wiring as wiring
 
 
 @pytest.fixture
@@ -152,16 +155,16 @@ def _synthetic_module(name: str = "zc_synthetic_host", source: str = SYNTHETIC_H
     )
     module = types.ModuleType(name)
     module.__dict__["__file__"] = filename
-    module.__dict__[carrier.IDENTITY_HELPER] = carrier._identity_helper
+    module.__dict__[state.IDENTITY_HELPER] = fi_out._identity_helper
     exec(compile(source, filename, "exec"), module.__dict__)
     return module
 
 
 @pytest.fixture(autouse=True)
 def _clean_stats():
-    carrier._reset_for_tests()
+    state._reset_for_tests()
     yield
-    carrier._reset_for_tests()
+    state._reset_for_tests()
 
 
 # --------------------------------------------------------------- default-off
@@ -203,12 +206,12 @@ def test_default_off_imports_nothing_and_returns_false():
 
 
 def test_enable_tokens_are_exact(monkeypatch):
-    monkeypatch.setenv(carrier.ENV_FI_OUT, "1")
-    monkeypatch.setenv(carrier.ENV_SKIP_COS_SIN, "1")
-    assert carrier.is_fi_out_enabled() and carrier.is_skip_cos_sin_enabled()
+    monkeypatch.setenv(state.ENV_FI_OUT, "1")
+    monkeypatch.setenv(state.ENV_SKIP_COS_SIN, "1")
+    assert state.is_fi_out_enabled() and state.is_skip_cos_sin_enabled()
     for value in ("0", "true", "yes", " 1", ""):
-        monkeypatch.setenv(carrier.ENV_FI_OUT, value)
-        assert not carrier.is_fi_out_enabled(), value
+        monkeypatch.setenv(state.ENV_FI_OUT, value)
+        assert not state.is_fi_out_enabled(), value
 
 
 # ------------------------------------------------------- identity predicate
@@ -217,7 +220,7 @@ def test_enable_tokens_are_exact(monkeypatch):
 def test_identity_copy_predicate(torch):
     output = torch.zeros(4, 2, 3)
     other = torch.ones(4, 2, 3)
-    ident = carrier._identity_copy
+    ident = fi_out._identity_copy
     # identical object / identical region
     assert ident(output, output, 4)
     assert ident(output[:4], output, 4)
@@ -233,16 +236,124 @@ def test_identity_copy_predicate(torch):
     assert not ident(other, output, None)
 
 
+# ------------------------------------------------- rollback bookkeeping (①)
+#
+# ``install_fi_out`` needs the real host tree, so the adaptor patch -- the piece
+# that carries a rollback record -- is driven directly.  The record must name the
+# descriptor that was there *before* the ``setattr`` (recording it afterwards
+# stores the wrapper as "the original"), and uninstall must write a class-owned
+# descriptor back while deleting an override that only shadowed a base class.
+
+
+def _owned_adaptor():
+    """Adaptor whose FIA entry is its own class attribute."""
+
+    class Adaptor:
+        @classmethod
+        def npu_fused_infer_attention_score(cls, query, key, value, attn_metadata):
+            return ("host-owned", query, key, value, attn_metadata)
+
+    return Adaptor
+
+
+def _inherited_adaptor():
+    """Adaptor that inherits the FIA entry from a base class."""
+
+    class Base:
+        @classmethod
+        def npu_fused_infer_attention_score(cls, query, key, value, attn_metadata):
+            return ("host-inherited", query, key, value, attn_metadata)
+
+    class Adaptor(Base):
+        pass
+
+    return Adaptor
+
+
+def test_adaptor_patch_records_and_restores_a_class_owned_descriptor():
+    adaptor = _owned_adaptor()
+    original = adaptor.__dict__[state.FIA_SYMBOL]
+    fi_out._patch_adaptor(adaptor)
+
+    assert adaptor.__dict__[state.FIA_SYMBOL] is not original
+    # the rollback record must be the pre-patch descriptor, not the wrapper
+    key = f"method:{adaptor.__name__}.{state.FIA_SYMBOL}"
+    assert state._orig[key][2] is original
+    # without the private kwarg the wrapper delegates to the host call
+    assert adaptor.npu_fused_infer_attention_score("q", "k", "v", "m") == (
+        "host-owned",
+        "q",
+        "k",
+        "v",
+        "m",
+    )
+
+    wiring._uninstall_locked()
+    assert adaptor.__dict__[state.FIA_SYMBOL] is original
+    assert adaptor.npu_fused_infer_attention_score("q", "k", "v", "m") == (
+        "host-owned",
+        "q",
+        "k",
+        "v",
+        "m",
+    )
+
+
+def test_adaptor_patch_on_an_inherited_entry_is_deleted_on_rollback():
+    adaptor = _inherited_adaptor()
+    assert state.FIA_SYMBOL not in adaptor.__dict__
+
+    fi_out._patch_adaptor(adaptor)
+    assert state.FIA_SYMBOL in adaptor.__dict__
+    # inherited attribute -> nothing to write back
+    key = f"method:{adaptor.__name__}.{state.FIA_SYMBOL}"
+    assert state._orig[key][2] is None
+
+    wiring._uninstall_locked()
+    assert state.FIA_SYMBOL not in adaptor.__dict__, "class override not removed"
+    assert adaptor.npu_fused_infer_attention_score("q", "k", "v", "m") == (
+        "host-inherited",
+        "q",
+        "k",
+        "v",
+        "m",
+    )
+
+
+def test_adaptor_patch_is_idempotent():
+    adaptor = _owned_adaptor()
+    original = adaptor.__dict__[state.FIA_SYMBOL]
+    fi_out._patch_adaptor(adaptor)
+    first = adaptor.__dict__[state.FIA_SYMBOL]
+    fi_out._patch_adaptor(adaptor)
+
+    assert adaptor.__dict__[state.FIA_SYMBOL] is first, "wrapped twice"
+    key = f"method:{adaptor.__name__}.{state.FIA_SYMBOL}"
+    assert state._orig[key][2] is original, "record overwritten by the wrapper"
+
+    wiring._uninstall_locked()
+    assert adaptor.__dict__[state.FIA_SYMBOL] is original
+
+
+def test_adaptor_patch_refuses_a_missing_seam():
+    class Adaptor:
+        pass
+
+    with pytest.raises(RuntimeError):
+        fi_out._patch_adaptor(Adaptor)
+    assert f"method:Adaptor.{state.FIA_SYMBOL}" not in state._orig
+
+
 # ------------------------------------------------------- the AST rewrite
 
 
 def test_inject_fi_out_rewrites_the_destination(torch):
     module = _synthetic_module()
-    carrier._rewrite_method(
+    state._rewrite_method(
         module,
         module.FakeImpl,
         "forward_fused_infer_attention",
-        carrier._transform_fia_method,
+        fi_out._transform_fia_method,
     )
     impl = module.FakeImpl()
     output = torch.zeros(2, 2, 2)
@@ -257,37 +368,35 @@ def test_inject_fi_out_rewrites_the_destination(torch):
 
 def test_guard_skips_only_identity_copies(torch):
     module = _synthetic_module()
-    carrier._rewrite_method(
-        module, module.FakeImpl, "forward", carrier._guard_tail_copy
-    )
+    state._rewrite_method(module, module.FakeImpl, "forward", fi_out._guard_tail_copy)
     impl = module.FakeImpl()
     output = torch.zeros(3, 2, 2)
 
     # attn_output IS output -> the statement cannot change a byte: skipped
     impl.forward(output, output, 3)
-    assert carrier.stats()["selfcopy_identity"] == 1
-    assert carrier.stats()["selfcopy_copied"] == 0
+    assert state.stats()["selfcopy_identity"] == 1
+    assert state.stats()["selfcopy_copied"] == 0
 
     # a distinct producer -> the copy still happens and really lands
     producer = torch.arange(12, dtype=torch.float32).reshape(3, 2, 2)
     target = torch.zeros(3, 2, 2)
     impl.forward(producer, target, 3)
-    assert carrier.stats()["selfcopy_copied"] == 1
+    assert state.stats()["selfcopy_copied"] == 1
     assert torch.equal(target, producer)
 
 
 def test_rewrite_refuses_ambiguous_anchors():
     module = _synthetic_module("zc_synthetic_ambiguous", AMBIGUOUS_HOST)
     with pytest.raises(RuntimeError):
-        carrier._rewrite_method(
-            module, module.Ambiguous, "forward", carrier._guard_tail_copy
+        state._rewrite_method(
+            module, module.Ambiguous, "forward", fi_out._guard_tail_copy
         )
     with pytest.raises(RuntimeError):
-        carrier._rewrite_method(
+        state._rewrite_method(
             module,
             module.Ambiguous,
             "forward_fused_infer_attention",
-            carrier._transform_fia_method,
+            fi_out._transform_fia_method,
         )
 
 
@@ -309,8 +418,8 @@ def test_host_func_traverses_stacked_plugin_wrappers():
     twice = plugin.make_forward_wrapper(once)
     assert once.__code__.co_filename != host.__file__
     assert twice.__code__.co_filename != host.__file__
-    assert carrier._host_func(once, host.__file__) is host_fn
-    assert carrier._host_func(twice, host.__file__) is host_fn
+    assert state._host_func(once, host.__file__) is host_fn
+    assert state._host_func(twice, host.__file__) is host_fn
 
 
 def test_host_func_traverses_three_wrapper_layers():
@@ -320,7 +429,7 @@ def test_host_func_traverses_three_wrapper_layers():
     func = host_fn
     for _ in range(3):
         func = plugin.make_forward_wrapper(func)
-    assert carrier._host_func(func, host.__file__) is host_fn
+    assert state._host_func(func, host.__file__) is host_fn
 
 
 def test_rewrite_through_stacked_wrappers_engages_fi_out(torch):
@@ -336,11 +445,11 @@ def test_rewrite_through_stacked_wrappers_engages_fi_out(torch):
     host.FakeImpl.forward_fused_infer_attention = plugin.make_forward_wrapper(
         plugin.make_forward_wrapper(host_fn)
     )
-    carrier._rewrite_method(
+    state._rewrite_method(
         host,
         host.FakeImpl,
         "forward_fused_infer_attention",
-        carrier._transform_fia_method,
+        fi_out._transform_fia_method,
     )
     impl = host.FakeImpl()
     output = torch.zeros(2, 2, 2)
@@ -350,8 +459,8 @@ def test_rewrite_through_stacked_wrappers_engages_fi_out(torch):
     assert host.DeviceOperator.calls, "FIA stand-in was never called"
     assert "_zc_fi_out" in host.DeviceOperator.calls[-1], "destination not injected"
     # the .out stand-in wrote into the caller's region -> the copy is identity
-    assert carrier.stats()["selfcopy_identity"] == 1
-    assert carrier.stats()["selfcopy_copied"] == 0
+    assert state.stats()["selfcopy_identity"] == 1
+    assert state.stats()["selfcopy_copied"] == 0
 
 
 def test_host_func_refuses_an_ambiguous_wrapper_chain():
@@ -363,7 +472,7 @@ def test_host_func_refuses_an_ambiguous_wrapper_chain():
         host._decoy_host_helper,
     )
     with pytest.raises(RuntimeError):
-        carrier._host_func(func, host.__file__)
+        state._host_func(func, host.__file__)
 
 
 def test_host_func_refuses_a_broken_chain():
@@ -372,26 +481,24 @@ def test_host_func_refuses_a_broken_chain():
     plugin = _synthetic_module("zc_plugin_broken", STACKED_WRAPPER_PLUGIN)
     func = plugin.make_forward_wrapper(lambda *args, **kwargs: None)
     with pytest.raises(RuntimeError):
-        carrier._host_func(func, host.__file__)
+        state._host_func(func, host.__file__)
 
 
 def test_rewrite_source_is_the_host_body_plus_the_guard():
     """The ported body must be the host source with exactly the guard added."""
     module = _synthetic_module("zc_synthetic_host_b")
-    carrier._rewrite_method(
-        module, module.FakeImpl, "forward", carrier._guard_tail_copy
-    )
+    state._rewrite_method(module, module.FakeImpl, "forward", fi_out._guard_tail_copy)
     try:
-        ported = carrier.rewritten_sources()["FakeImpl.forward"]
+        ported = state.rewritten_sources()["FakeImpl.forward"]
     finally:
-        carrier._rewritten.clear()
-    assert ported.count(carrier.IDENTITY_HELPER) == 1
+        state._rewritten.clear()
+    assert ported.count(state.IDENTITY_HELPER) == 1
     original_fn = ast.parse(textwrap.dedent(SYNTHETIC_HOST)).body[1].body[0]
     ported_fn = ast.parse(ported).body[0]
     tail = ported_fn.body[-2]
     assert isinstance(tail, ast.If)
     assert ast.unparse(tail.test) == (
-        f"not {carrier.IDENTITY_HELPER}(attn_output, output, num_tokens)"
+        f"not {state.IDENTITY_HELPER}(attn_output, output, num_tokens)"
     )
     assert len(tail.body) == 1
     assert ast.unparse(tail.body[0]) == "output[:num_tokens] = attn_output[:num_tokens]"
@@ -449,18 +556,18 @@ def test_attention_anchors_still_present():
     path = os.path.join(root, "attention", "attention_v1.py")
     if not os.path.exists(path):
         pytest.fail(f"host source not present: {path}", pytrace=False)
-    forward = _fn_source(path, carrier.ATTENTION_CLASS, carrier.METHOD_FORWARD)
+    forward = _fn_source(path, state.ATTENTION_CLASS, state.METHOD_FORWARD)
     assert _count_tail_copies(forward) == 1, "anchor drifted → re-audit HOST_CONTRACT"
-    fia = _fn_source(path, carrier.ATTENTION_CLASS, carrier.METHOD_FIA)
+    fia = _fn_source(path, state.ATTENTION_CLASS, state.METHOD_FIA)
     assert _count_tail_copies(fia) == 1, "anchor drifted → re-audit HOST_CONTRACT"
     adaptor_calls = [
         node
         for node in ast.walk(fia)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and node.func.attr == carrier.FIA_SYMBOL
+        and node.func.attr == state.FIA_SYMBOL
         and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == carrier.ADAPTOR_ATTR
+        and node.func.value.id == state.ADAPTOR_ATTR
     ]
     assert len(adaptor_calls) == 1, "anchor drifted → re-audit HOST_CONTRACT"
 
@@ -475,12 +582,12 @@ def test_rope_anchors_still_present():
     with open(path, encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
     names = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
-    assert carrier.ROTARY_UPDATE in names
-    assert carrier.ROTARY_READ in names
+    assert state.ROTARY_UPDATE in names
+    assert state.ROTARY_READ in names
     body = next(
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == carrier.ROTARY_UPDATE
+        if isinstance(node, ast.FunctionDef) and node.name == state.ROTARY_UPDATE
     )
     flat = ast.unparse(body)
     assert "_cos[:, :num_tokens] =" in flat, "anchor drifted → re-audit HOST_CONTRACT"
@@ -499,11 +606,11 @@ def test_rope_readers_are_the_known_pair():
             root, "patch", "worker", "patch_minimax_m2.py"
         ),
     }
-    assert set(carrier.ROPE_READER_MODULES) == set(expected)
+    assert set(skip_cos_sin.ROPE_READER_MODULES) == set(expected)
     for module_name, path in expected.items():
         assert os.path.exists(path), f"{module_name} moved away"
         with open(path, encoding="utf-8") as handle:
-            assert carrier.ROTARY_READ in handle.read()
+            assert state.ROTARY_READ in handle.read()
 
 
 # ------------------------------------------------- phase snapshots (2026-09-13)
@@ -536,18 +643,18 @@ def _read_json(path) -> dict:
 
 def test_snapshot_file_name_shape_and_env_gate(torch, tmp_path, monkeypatch):
     base = str(tmp_path / "zc.json")
-    monkeypatch.delenv(carrier.ENV_STATS_FILE, raising=False)
-    assert carrier.snapshot() is None, "unset env must not write anything"
+    monkeypatch.delenv(state.ENV_STATS_FILE, raising=False)
+    assert state.snapshot() is None, "unset env must not write anything"
     assert list(tmp_path.iterdir()) == []
 
-    monkeypatch.setenv(carrier.ENV_STATS_FILE, base)
-    carrier._stats["fi_out_calls"] = 7
-    carrier._tally_tokens(torch.zeros(2048, 4, 8))
-    carrier._tally_tokens(torch.zeros(2048, 4, 8))
-    carrier._tally_tokens(torch.zeros(128, 4, 8))
+    monkeypatch.setenv(state.ENV_STATS_FILE, base)
+    state._stats["fi_out_calls"] = 7
+    state._tally_tokens(torch.zeros(2048, 4, 8))
+    state._tally_tokens(torch.zeros(2048, 4, 8))
+    state._tally_tokens(torch.zeros(128, 4, 8))
 
-    first = carrier.snapshot()
-    second = carrier.snapshot()
+    first = state.snapshot()
+    second = state.snapshot()
     assert first == f"{base}.snap1.json" and os.path.exists(first)
     assert second == f"{base}.snap2.json" and os.path.exists(second)
     assert not os.path.exists(f"{base}.tmp"), "atomic write left a temp file"
@@ -574,18 +681,18 @@ def test_state_histogram_tallies_by_state_and_survives_odd_input():
     class _Metadata:
         attn_state = _State()
 
-    carrier._tally_state(_Metadata())
-    carrier._tally_state(_Metadata())
-    carrier._tally_state(object())  # no attn_state at all
-    assert carrier.state_histogram() == {"DecodeOnly": 2, "none": 1}
+    state._tally_state(_Metadata())
+    state._tally_state(_Metadata())
+    state._tally_state(object())  # no attn_state at all
+    assert state.state_histogram() == {"DecodeOnly": 2, "none": 1}
 
 
 def test_exit_dump_carries_the_same_payload(torch, tmp_path, monkeypatch):
     """The exit dump and the snapshots must be comparable by subtraction."""
     base = str(tmp_path / "zc_exit.json")
-    monkeypatch.setenv(carrier.ENV_STATS_FILE, base)
-    carrier._tally_tokens(torch.zeros(64, 4, 8))
-    carrier._dump_stats_on_exit()
+    monkeypatch.setenv(state.ENV_STATS_FILE, base)
+    state._tally_tokens(torch.zeros(64, 4, 8))
+    state._dump_stats_on_exit()
     payload = _read_json(base)
     assert payload["fi_out_tokens"] == {"64": 1}
     assert "stats" in payload and "installed" in payload
@@ -598,11 +705,11 @@ def test_exit_dump_carries_the_same_payload(torch, tmp_path, monkeypatch):
 
 def test_token_histogram_ignores_non_tensors(torch):
     """A diagnostics hook must never break the host call it measures."""
-    carrier._tally_tokens(object())  # no .shape
-    carrier._tally_tokens(None)
-    assert carrier.token_histogram() == {}
-    carrier._tally_tokens(torch.zeros(3, 2))
-    assert carrier.token_histogram() == {"3": 1}
+    state._tally_tokens(object())  # no .shape
+    state._tally_tokens(None)
+    assert state.token_histogram() == {}
+    state._tally_tokens(torch.zeros(3, 2))
+    assert state.token_histogram() == {"3": 1}
 
 
 def test_snapshot_hook_installed_only_with_env_and_restored(tmp_path, monkeypatch):
@@ -614,24 +721,24 @@ def test_snapshot_hook_installed_only_with_env_and_restored(tmp_path, monkeypatc
     pristine = _signal.getsignal(_signal.SIGUSR1)
 
     # env unset -> the hook must not touch the process
-    monkeypatch.delenv(carrier.ENV_STATS_FILE, raising=False)
-    carrier._install_stats_snapshot()
+    monkeypatch.delenv(state.ENV_STATS_FILE, raising=False)
+    state._install_stats_snapshot()
     assert _signal.getsignal(_signal.SIGUSR1) is pristine
-    assert carrier._prev_snapshot_handler is carrier._UNSET
+    assert state._prev_snapshot_handler is state._UNSET
 
-    monkeypatch.setenv(carrier.ENV_STATS_FILE, str(tmp_path / "zc_sig.json"))
-    carrier._install_stats_snapshot()
-    assert _signal.getsignal(_signal.SIGUSR1) is carrier._snapshot_handler
+    monkeypatch.setenv(state.ENV_STATS_FILE, str(tmp_path / "zc_sig.json"))
+    state._install_stats_snapshot()
+    assert _signal.getsignal(_signal.SIGUSR1) is state._snapshot_handler
 
     # the hook really writes the phase file
-    carrier._stats["fi_out_calls"] = 3
+    state._stats["fi_out_calls"] = 3
     _signal.raise_signal(_signal.SIGUSR1)
     written = tmp_path / "zc_sig.json.snap1.json"
     assert written.exists(), "SIGUSR1 did not produce a snapshot"
     assert _read_json(written)["stats"]["fi_out_calls"] == 3
 
-    carrier._restore_stats_snapshot()
+    state._restore_stats_snapshot()
     assert _signal.getsignal(_signal.SIGUSR1) is pristine
     # idempotent + no-op once restored
-    carrier._restore_stats_snapshot()
+    state._restore_stats_snapshot()
     assert _signal.getsignal(_signal.SIGUSR1) is pristine

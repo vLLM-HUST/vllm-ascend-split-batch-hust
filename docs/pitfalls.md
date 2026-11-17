@@ -3,7 +3,7 @@
 ## 工作区与宿主
 
 - 不要以 `/vllm-workspace` 为 CWD 运行 Python 或 vLLM 命令；该目录可能遮蔽已安装的 `vllm` 包。
-- 宿主源码目录只读。运行树补丁仅能从本仓 manifest 和锁定的 patch 原件进行检查或在独立暂存树 replay；不得从个人目录补齐缺失文件或直接修改宿主树。
+- 宿主源码目录只读。宿主侧改动只走宿主 Fork 仓库的 `based/split-batch-baseline`（见 [容器与插件边界规范](container-and-plugin-boundary-spec.md) §3.2、§3.6）；运行时打补丁链条已废除，不得从个人目录补齐缺失文件、不得用本地源码或 `PYTHONPATH` 遮蔽已安装的宿主包，也不得直接修改宿主树。
 - `host.version_range` 只是兼容声明，不等于窗口内每个 build 已验证。升级宿主前核对实际 seam、签名、调用点和依赖；版本或哈希漂移时 fail closed。
 - `import_only` bundle 不可被管理器激活。root planner 仅生成规划描述，不代表宿主执行、双流调度或 graph replay 已接通。
 

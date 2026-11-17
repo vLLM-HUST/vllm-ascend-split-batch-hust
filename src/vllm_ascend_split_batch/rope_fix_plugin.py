@@ -65,7 +65,11 @@ bit-identical to stock vllm/vllm-ascend.
 Fail-open contract: a missing/renamed host seam, an unexpected registry entry or
 any internal error only produces ONE warning and leaves the stock rope classes in
 place -- nothing is ever raised into the plugin loader or into a worker, and a
-half-installed state is rolled back so the observable state matches the log.
+half-installed state is rolled back so the observable state matches the log: the
+rebound ``register_ascend_customop`` references are unwrapped *and* the
+``op_registry_oot`` entries an eager override pass already wrote are restored
+(:func:`_restore_registry_overrides`, shared with :func:`uninstall` and called
+without re-taking ``_lock``).
 
 Drift guard: ``tests/test_rope_fix_drift.py`` asserts, source-level, that the
 three *defects are still present* upstream (so that an upstream fix fails the
@@ -618,6 +622,36 @@ def _unwrap_registration(wrapper) -> None:
     _STATE["wrapped"] = []
 
 
+def _restore_registry_overrides() -> list[str]:
+    """Put the pre-install ``op_registry_oot`` entries back; return the keys.
+
+    Called by :func:`uninstall` and by :func:`install`'s failure branch, so it
+    must **not** take ``_lock``: both callers already hold it and the lock is not
+    re-entrant (calling :func:`uninstall` from inside ``install`` would deadlock).
+
+    Only entries that still point at *our* override class are touched -- a
+    compatibility build's class or an upstream rework that replaced the entry in
+    the meantime stays exactly as it is.  An entry created through
+    ``CustomOp.register_oot`` (defect ①) has no recorded original and is deleted.
+    """
+    try:
+        from vllm.model_executor.custom_op import op_registry_oot
+    except Exception:  # noqa: BLE001 -- registry may not be importable here
+        logger.exception("RoPE fix could not restore the op_registry_oot entries")
+        return []
+    restored = []
+    for key, cls in _OVERRIDE_CLASSES.items():
+        if op_registry_oot.get(key) is not cls:
+            continue
+        if key in _ORIG:
+            op_registry_oot[key] = _ORIG[key]
+        else:
+            del op_registry_oot[key]
+        restored.append(key)
+    _ORIG.clear()
+    return restored
+
+
 # ---------------------------------------------------------------- install/load
 
 
@@ -669,6 +703,12 @@ def install() -> bool:
             )
             if wrapper is not None:
                 _unwrap_registration(wrapper)
+            # The eager override pass may already have written registry entries
+            # before the failure: put them back too, otherwise the process keeps
+            # a half installation the log claims it avoided.  ``uninstall()`` is
+            # deliberately not used -- we hold ``_lock`` and it is not re-entrant.
+            for key in _restore_registry_overrides():
+                _STATE["applied"].pop(key, None)
             return False
         _installed = True
         logger.warning(
@@ -689,19 +729,7 @@ def uninstall() -> None:
         wrapper = _STATE["wrapper"]
         if wrapper is not None:
             _unwrap_registration(wrapper)
-        try:
-            from vllm.model_executor.custom_op import op_registry_oot
-
-            for key, cls in _OVERRIDE_CLASSES.items():
-                if op_registry_oot.get(key) is not cls:
-                    continue
-                if key in _ORIG:
-                    op_registry_oot[key] = _ORIG[key]
-                else:
-                    del op_registry_oot[key]
-        except Exception:  # noqa: BLE001 -- registry may not be importable here
-            logger.exception("RoPE fix uninstall could not restore the registry")
-        _ORIG.clear()
+        _restore_registry_overrides()
         _STATE["wrapper"] = None
         _STATE["wrapped"] = []
         _STATE["applied"].clear()

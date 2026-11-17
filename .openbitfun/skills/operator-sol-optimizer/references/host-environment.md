@@ -9,7 +9,7 @@
 | 项目 | 位置或值 |
 |---|---|
 | 服务解释器 | `/root/venvs/split-batch-runtime/bin/python` |
-| CPU 检查环境 | `/root/venvs/split-batch-cpu`，使用前确认依赖 |
+| CPU 检查环境 | `/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/mod-acceptance-venv/bin/python`，无宿主，含 pytest/ruff/pre-commit |
 | vLLM HUST 源码 | `/root/host-trees/vllm-hust` |
 | Ascend HUST 源码 | `/root/host-trees/vllm-ascend` |
 | vLLM 提交 | `f18cf803c5f63625e2c71253ddaf8b0bad0bad1a` |
