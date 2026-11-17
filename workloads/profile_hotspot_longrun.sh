@@ -41,16 +41,21 @@ PREFIX_CACHING=${PREFIX_CACHING:-0}
 HOST_VLLM_COMMIT=${HOST_VLLM_COMMIT:-"f18cf803c5f63625e2c71253ddaf8b0bad0bad1a"}
 HOST_ASCEND_COMMIT=${HOST_ASCEND_COMMIT:-"320eced8c1bba71c0329bf59caa721a2382e7499"}
 
+# guard 服务参数由「图模式」与「prefix caching」两个开关共同决定，直接拼出来，
+# 不要事后 sed 字符串——单元素列表里没有逗号，替换会静默失效。
 case "$SERVER_MODE" in
-  eager) GUARD_ARGS='["--enforce-eager", "--no-enable-prefix-caching"]' ;;
-  graph) GUARD_ARGS='["--no-enable-prefix-caching"]' ;;
+  eager) GUARD_ARGS='["--enforce-eager"]' ;;
+  graph) GUARD_ARGS='[]' ;;
   *)
     echo "SERVER_MODE must be eager or graph, got: $SERVER_MODE" >&2
     exit 1
     ;;
 esac
-if [[ "$PREFIX_CACHING" == "1" ]]; then
-  GUARD_ARGS=$(printf '%s' "$GUARD_ARGS" | sed 's/, "--no-enable-prefix-caching"//')
+if [[ "$PREFIX_CACHING" != "1" ]]; then
+  case "$SERVER_MODE" in
+    eager) GUARD_ARGS='["--enforce-eager", "--no-enable-prefix-caching"]' ;;
+    graph) GUARD_ARGS='["--no-enable-prefix-caching"]' ;;
+  esac
 fi
 
 if [[ ! -x "$PY" || ! -x "$RUNTIME_PY" ]]; then
