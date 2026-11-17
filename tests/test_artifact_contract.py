@@ -13,7 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from tools.operator_tools.artifact_contract import KINDS, classify, inspect
+from tools.operator_tools.artifact_contract import (
+    KINDS,
+    check_manifest_shape,
+    classify,
+    inspect,
+)
 from tools.operator_tools.artifact_view import (
     NOISE_FLOOR_PCT,
     Archive,
@@ -537,3 +542,69 @@ class TestKernelWaitView:
         rows = Archive(tmp_path).kernel_wait()
         assert rows is not None
         assert rows[0]["wait_over_duration"] == 0.0
+
+
+class TestManifestShape:
+    """A manifest must not claim a shape the server was never given."""
+
+    def _manifest(self, tmp_path: Path, shape: dict) -> Path:
+        return write_json(
+            tmp_path / "collection_manifest.json",
+            {
+                "schema": "vllm-hust/collection/collection-manifest/v1",
+                "produced_at": "2026-11-17T00:00:00Z",
+                "host_commits": {},
+                "collection_shape": shape,
+                "artifacts": [],
+            },
+        )
+
+    def test_matching_flags_pass(self, tmp_path):
+        self._manifest(
+            tmp_path,
+            {"prefix_caching": 1, "prefix_caching_flag": "--enable-prefix-caching"},
+        )
+        assert check_manifest_shape(tmp_path) == []
+
+    def test_switched_off_and_declared_off_passes(self, tmp_path):
+        self._manifest(
+            tmp_path,
+            {"prefix_caching": 0, "prefix_caching_flag": "--no-enable-prefix-caching"},
+        )
+        assert check_manifest_shape(tmp_path) == []
+
+    def test_claiming_the_cache_without_the_flag_fails(self, tmp_path):
+        self._manifest(
+            tmp_path,
+            {"prefix_caching": 1, "prefix_caching_flag": "--no-enable-prefix-caching"},
+        )
+        findings = check_manifest_shape(tmp_path)
+        assert len(findings) == 1
+        assert "prefix_caching" in findings[0].problem
+
+    def test_omitting_the_flag_fails(self, tmp_path):
+        self._manifest(tmp_path, {"prefix_caching": 1})
+        findings = check_manifest_shape(tmp_path)
+        assert len(findings) == 1
+        assert "flag" in findings[0].problem
+
+    def test_shape_without_prefix_caching_is_not_policed(self, tmp_path):
+        self._manifest(tmp_path, {"server_mode": "graph"})
+        assert check_manifest_shape(tmp_path) == []
+
+    def test_missing_manifest_is_not_an_error_here(self, tmp_path):
+        assert check_manifest_shape(tmp_path) == []
+
+    def test_unreadable_manifest_reports_rather_than_raises(self, tmp_path):
+        (tmp_path / "collection_manifest.json").write_text("{not json")
+        findings = check_manifest_shape(tmp_path)
+        assert len(findings) == 1
+        assert findings[0].level == "error"
+
+    def test_strict_inspect_surfaces_the_mismatch(self, tmp_path):
+        self._manifest(
+            tmp_path,
+            {"prefix_caching": 1, "prefix_caching_flag": "--no-enable-prefix-caching"},
+        )
+        report = inspect(tmp_path, strict=True)
+        assert not report.ok

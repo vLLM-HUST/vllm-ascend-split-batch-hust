@@ -47,21 +47,32 @@ SHARED_PREFIX_TOKENS=${SHARED_PREFIX_TOKENS:-0}
 HOST_VLLM_COMMIT=${HOST_VLLM_COMMIT:-"f18cf803c5f63625e2c71253ddaf8b0bad0bad1a"}
 HOST_ASCEND_COMMIT=${HOST_ASCEND_COMMIT:-"320eced8c1bba71c0329bf59caa721a2382e7499"}
 
-# guard 服务参数由「图模式」与「prefix caching」两个开关共同决定，直接拼出来，
-# 不要事后 sed 字符串——单元素列表里没有逗号，替换会静默失效。
+# guard 服务参数由「图模式」与「prefix caching」两个开关共同决定，两个轴都显式写出来。
+# 两点教训：
+#   1. 不要事后 sed 字符串——单元素列表里没有逗号，替换会静默失效；
+#   2. 不能靠「去掉 --no-enable-prefix-caching」来打开缓存，vLLM 不会因此开启，
+#      必须显式传 --enable-prefix-caching，否则 manifest 写着命中、实际命中率恒为 0。
+if [[ "$PREFIX_CACHING" == "1" ]]; then
+  CACHE_ARG="--enable-prefix-caching"
+else
+  CACHE_ARG="--no-enable-prefix-caching"
+fi
 case "$SERVER_MODE" in
-  eager) GUARD_ARGS='["--enforce-eager"]' ;;
-  graph) GUARD_ARGS='[]' ;;
+  eager) GUARD_ARGS="[\"--enforce-eager\", \"$CACHE_ARG\"]" ;;
+  graph) GUARD_ARGS="[\"$CACHE_ARG\"]" ;;
   *)
     echo "SERVER_MODE must be eager or graph, got: $SERVER_MODE" >&2
     exit 1
     ;;
 esac
-if [[ "$PREFIX_CACHING" != "1" ]]; then
-  case "$SERVER_MODE" in
-    eager) GUARD_ARGS='["--enforce-eager", "--no-enable-prefix-caching"]' ;;
-    graph) GUARD_ARGS='["--no-enable-prefix-caching"]' ;;
-  esac
+# 自检：参数串与开关必须同向，防止再次出现「manifest 说开了、服务没开」。
+if [[ "$PREFIX_CACHING" == "1" && "$GUARD_ARGS" != *"--enable-prefix-caching"* ]]; then
+  echo "internal error: PREFIX_CACHING=1 but guard args lack --enable-prefix-caching" >&2
+  exit 1
+fi
+if [[ "$PREFIX_CACHING" != "1" && "$GUARD_ARGS" != *"--no-enable-prefix-caching"* ]]; then
+  echo "internal error: PREFIX_CACHING=0 but guard args lack --no-enable-prefix-caching" >&2
+  exit 1
 fi
 
 if [[ ! -x "$PY" || ! -x "$RUNTIME_PY" ]]; then
@@ -131,6 +142,7 @@ cat > config.json <<JSON
   "collection_shape": {
     "server_mode": "$SERVER_MODE",
     "prefix_caching": $PREFIX_CACHING,
+    "prefix_caching_flag": "$CACHE_ARG",
     "workload": "$WORKLOAD",
     "max_model_len": $MAX_MODEL_LEN,
     "warmup_tokens": ${WARMUP_TOKENS:-16},

@@ -394,7 +394,59 @@ def inspect(archive: Path, strict: bool = False) -> Report:
                 "no collection_manifest.json; a strict archive must declare itself",
             )
         )
+    if strict:
+        report.findings.extend(check_manifest_shape(archive))
     return report
+
+
+CACHE_FLAGS = {
+    True: "--enable-prefix-caching",
+    False: "--no-enable-prefix-caching",
+}
+
+
+def check_manifest_shape(archive: Path) -> list[Finding]:
+    """Cross-check a manifest against the flags the server was actually given.
+
+    A run once declared prefix caching in its manifest while the server had been
+    started without the flag, so the archive said one thing and measured
+    another. The manifest now records the flag itself, and the two have to agree.
+    """
+    path = archive / "collection_manifest.json"
+    if not path.is_file():
+        return []
+    try:
+        manifest = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return [
+            Finding(str(path), "collection-manifest", "error", f"unreadable: {exc}")
+        ]
+    shape = manifest.get("collection_shape") or {}
+    if "prefix_caching" not in shape:
+        return []
+    wanted = bool(shape.get("prefix_caching"))
+    declared = shape.get("prefix_caching_flag")
+    if declared is None:
+        return [
+            Finding(
+                str(path),
+                "collection-manifest",
+                "error",
+                "collection_shape declares prefix_caching but not the flag used; "
+                "an archive cannot say a cache was on without saying how it was on",
+            )
+        ]
+    if declared != CACHE_FLAGS[wanted]:
+        return [
+            Finding(
+                str(path),
+                "collection-manifest",
+                "error",
+                f"prefix_caching={shape.get('prefix_caching')!r} but the run used "
+                f"{declared!r}",
+            )
+        ]
+    return []
 
 
 def main(argv: list[str] | None = None) -> int:
