@@ -11,4 +11,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Bundle marker module for org.vllm-hust.zerocost-wiring."""
+"""Bundle marker module for org.vllm-hust.zerocost-wiring.
+
+This package only exists so the extension manager can discover the bundle
+manifest (``vllm-hust-extension-v0.2.json``).  It is not an implementation
+entry: the runtime entry point is ``zerocost_wiring:load``
+(``vllm_ascend_split_batch.zerocost_wiring``), and importing this package
+enables no capability -- both wiring features stay off until their own env vars
+are set.
+"""

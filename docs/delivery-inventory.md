@@ -14,7 +14,7 @@
 | 名称 | 可发现 | 可激活 | 真实调用 | 算子收益 | 服务收益 | 独立子目录与报告 |
 |---|---|---|---|---|---|---|
 | `rope-fix` | 是，general plugin + bundle | import_only | 无正式启用路径 | 未证明；不主张性能收益 | 未证明 | - |
-| `zerocost-wiring` | 是，general plugin + bundle | active，双开关默认关闭 | 依赖运行时门控 | A/B inconclusive | 未证明 | - |
+| `zerocost-wiring` | 是，general plugin + bundle | active，双开关默认关闭 | 依赖运行时门控 | A/B inconclusive | 未证明 | [激活记录](evidence/zerocost-activation-20260913/) |
 | `gate-fp32` | 是，general plugin + bundle | active，默认关闭 | 受支持权重加载/执行路径 | 局部 40×`Cast` 1823 → 33 µs（eager 口径）、整网 `Cast` 每卡 −640 可核；只适用于原形状与权重 | 当前服务配对为 `within_noise`，不主张收益 | [ops/gate_fp32](../ops/gate_fp32/REPORT.md) |
 | `gdn-merge-inproj` | 是，general plugin + bundle | import_only，fail-closed | 插件侧缺少安全消费 seam；不合并权重 | 插件自身无收益；实际权重合并由宿主层承载 | 当前服务配对为 `within_noise`，不主张收益 | [ops/gdn_merge_inproj](../ops/gdn_merge_inproj/REPORT.md) |
 | `split-batch-full-graph` planner | 是，bundle | import_only，不可激活 | 仅纯规划函数；没有宿主执行面 | 不适用 | 未证明 | - |
@@ -30,7 +30,7 @@
 | 开关 | 归宿 | 依据 |
 |---|---|---|
 | `VLLM_HUST_D4_CONV_PACK` | 归宿主 Fork，插件侧锚点表删除 | 宿主已有正式实现并登记：[ops/gdn_conv_pack](../ops/gdn_conv_pack/REPORT.md)、`DELIVERY_INDEX.json` 条目 `layer: host_fork`（宿主 commit `deb5ffe`，分支 `work/issue20-w3f2-host`，基于旧基线；迁入新基线 `based/split-batch-baseline` 由 issue #32 承接） |
-| `VLLM_HUST_GDN_UNPACK_VIEWS` | 删除 | [host-proposals/ConcatD-zero-copy-unpack](../host-proposals/ConcatD-zero-copy-unpack/OWNERSHIP.md) 已定性为早期探索、其收益与连续性已被宿主卷积权重预打包方案覆盖；且其变换表依赖卷积预打包锚点注入的行，无法独立成立 |
+| `VLLM_HUST_GDN_UNPACK_VIEWS` | 删除 | 早期探索已定性为被宿主卷积权重预打包方案覆盖；其变换表依赖卷积预打包锚点注入的行，无法独立成立 |
 | `VLLM_HUST_MOE_INIT_TRITON` | 删除 | 仓内无已归档的 L0 门通过记录（`tools/bench_moe_init_triton_only.py` 的 10% 门从未回填结果），收益未证明；其唯一仓内消费点是本模块注入 token_dispatcher 的分支。若重启，须按宿主提案流程下沉 |
 | `VLLM_HUST_NZ_SKIP_GATE` | 删除 | 全仓无评测证据、无交付登记，仅为 `aclnnMatmulWeightNz` EZ1001（n=1/k=1）的应急豁免；宿主如有同类需要，按宿主提案流程处理 |
 | `VLLM_HUST_DBO_ENABLE` | 删除 | [docs/comm-overlap-dbo-feasibility.md](comm-overlap-dbo-feasibility.md) 已结题"不可行"（2026-10-22）：起服拦截于 microbatching 后端配置校验断言，且 DBO 钩子消费者仅存在于 DeepEP 系内核，TP allReduce 路径无可行切入点 |
@@ -44,8 +44,8 @@
 - **GDN 投影解包 / 混合 qkv 重排融合 (`gdn_split_fusion`)**：把投影分支的 split + reshape + chunk + 2×contiguous，以及 `rearrange_mixed_qkv` 的 split + 3×reshape + cat，各合成单 kernel；单仓库、单开关，prefill 全形状正收益。微基准 M=8 省 6.36 µs/层·step；图内归因两档负载目标组自比分别省 53.5%（66k KV）与 **39.7%（263k KV，对外引用口径）**，同窗口全 kernel 分母为 5.00% / 5.05%，不作对外数字；端到端 8/8 一致；服务端 8 / 12 轮的差异均落在同配置组间极差内，不主张收益。见 [ops/gdn_split_fusion](../ops/gdn_split_fusion/REPORT.md)。
 - **GDN Part 3 Output Norm 与 Rearrange 融合 (`gdn_output_norm_fusion`)**：在 GDN 输出端将 RMSNormGated 与 einops rearrange 融合为单步 Triton 算子，直接写入连续 2D 张量直通投影层。见 [ops/gdn_output_norm_fusion](../ops/gdn_output_norm_fusion/REPORT.md)。宿主分支 `work/gdn-output-norm-fusion`。
 
-探索与负性能留存算子索引：
-- **GDN QKV 单 pass 解包 (`gdn_qkv_unpack`)**：专属报告与证据结构见 [ops/gdn_qkv_unpack](../ops/gdn_qkv_unpack/REPORT.md)。910B2 实测因 Triton 启动发射开销慢于原生链，按规范留存负性能事实，保持未激活。
+探索、负性能留存与待外环算子索引：
+- **GDN QKV 解包与 L2Norm 融合 (`gdn_qkv_norm`)**：专属报告与证据结构见 [ops/gdn_qkv_norm](../ops/gdn_qkv_norm/REPORT.md)。单算子微基准与数值护栏已有测量；注册已撤回、当前无公开接入（`gate_env=unexposed`），调用归因与服务结论待外环，不得据单算子结果主张收益。
 - **MoE 双门合并 (`moe_gate_merge`)**：专属报告与证据结构见 [ops/moe_gate_merge](../ops/moe_gate_merge/REPORT.md)。虽然纯 MatMul 有微弱加速，但非对齐切片搬运带来额外开销，流水线跑输原生分离方案，按规范留存负性能事实，不予集成。
 - **MoE Gating 与 Token Routing 融合 (`moe_gating_routing`)**：专属报告与证据结构见 [ops/moe_gating_routing](../ops/moe_gating_routing/REPORT.md)。宿主底层深度集成 CANN 专用硬件指令（`npu_moe_gating_top_k` 与 `npu_moe_init_routing_v2`），纯软件级分箱与散布搬运跑输专用硬件指令，按规范留存负性能事实，不予集成。
 

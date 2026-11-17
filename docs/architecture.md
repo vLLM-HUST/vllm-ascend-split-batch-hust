@@ -53,14 +53,14 @@ split-executor 提案，不得通过翻转 manifest 状态绕过。
 - 不支持的输入优先在执行前回原生路径；有状态算子不得在部分修改状态后无恢复地重试。
 - 现有 monkeypatch 面以 `HOST_CONTRACT.md` 为准；宿主升级须核对参数与调用约定，
   不以符号存在替代兼容性验证。
-- GDN opaque core 内部子图不可见时，不注册不可达的外部融合；tier-2 接缝独立交付。
+- GDN opaque core 内部子图不可见时，不注册不可达的外部融合；宿主提案接缝独立交付。
 
 ## 5. 算子实现与证据
 
 - Python / Triton 算子实现在本仓；Triton lazy import，关闭时不引入设备实现。
 - CCE / Ascend C / CATLASS 等编译型实现独立交付，不在本仓增加 C/C++ 构建。
   独立实现不得反向依赖插件壳或 vLLM 内部对象。
-- `op_selector.py` 是 CPU 可测的选择骨架，尚未接线真实算子路径；不能将其存在
-  当作 Backend 已集成。接口见 `design/operator-dispatch.md`。
+- `experiments/op_selector.py` 是 CPU 可测的选择骨架，不在发布包内，尚未接线真实
+  算子路径；不能将其存在当作 Backend 已集成。接口见 `design/operator-dispatch.md`。
 - 正确性与性能声明必须绑定形状事实、权重标签、宿主版本及评测环境；不同组件和历史环境的验收不能互相继承。
 - `tests/test_plugin_registration.py` 覆盖当前安装包的入口面及已撤除模块隔离；该回归不替代 NPU dispatch、数值、graph replay 或服务性能验证。

@@ -53,12 +53,14 @@ SERVING_CONFIG=/path/to/collection_config.json \
   "VLLM_HUST_GATE_FP32=1" 8350 qwen35-gate-fp32 /path/to/new_run
 ```
 
+注意仓内同一条开关在三处出处有两种写法，不要串用：`DELIVERY_INDEX.json` 的 `gate_env`、`serving_loop plan --gate-env` 与 `evaluate_outer_loop.sh` 的入参都写 `变量名=1` 的赋值形式；采集配置 JSON 的 `gate` 写裸变量名（不带 `=1`）。
+
 真实采集由 `tools/operator_tools/serving_collect.py` 执行。配置 JSON 必须包含：
 
 - `python`：已安装匹配宿主 Fork 的隔离 Python 绝对路径。
 - `host_commits`：以 `vllm`、`vllm-ascend` 为键的完整提交；采集前在服务解释器内核验安装来源，不匹配即停止。
 - `server_command`：完整起服参数数组，必须显式绑定本地地址、端口、模型别名、并行规模和随机种子。
-- `gate`、`port`、`model_alias`：与 shell 参数一致的目标开关名、端口和模型别名。
+- `gate`、`port`、`model_alias`：与 shell 参数一致的目标开关名、端口和模型别名。`gate` 只填**裸变量名**（形如 `VLLM_HUST_GATE_FP32`），不要带 `=1`；采集器按 OFF/ON 两臂分别注入 `0`/`1`，写成带赋值的整串会被当成一个没人读的变量名，两臂实际同配置，最终只会得到"噪声内"的假结论。入口对该字段做格式校验，不合格直接拒绝采集。
 - `model_path`、`sharegpt_path`：本地 tokenizer 和真实对话数据集路径。
 - `world_size`、`attention_layers`、`kernel`：用于逐卡验证调用次数的并行规模、目标层数和内核名称子串。
 - `environment`：显式运行环境；CANN 的 Python 依赖路径需写入此项，不能借此注入宿主源码替换。

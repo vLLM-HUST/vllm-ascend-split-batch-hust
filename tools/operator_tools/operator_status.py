@@ -1,4 +1,22 @@
-"""Derive operator progress from artifacts and optional filesystem events."""
+"""Derive operator progress from artifacts and optional filesystem events.
+
+Read-side only: this tool never writes collection artifacts itself (the single
+exception is `--sync-evidence`, which delegates to `serving_sync`).
+
+Two outer-loop runner layouts are supported on the read side:
+
+1. `serving_e2e_auto.py` (current runner): plan key `items` (or `operators`),
+  checkpoint/progress written as `e2e-progress.json` with an `{"items": {...}}`
+  map keyed by item id, and `completion.json` carrying an overall `status`.
+2. `serving_longrun.py` (superseded, still referenced by tests): plan key
+  `operators` and a `progress.json` list of per-operator records.
+
+Progress is therefore read from `e2e-progress.json` first and only then from
+`progress.json`; a record is treated as finished when the current runner set a
+`finished_ts` (or reached a terminal `status`), or when the legacy runner set
+`finished`. Process liveness accepts either runner name, so a live current-runner
+job is no longer reported as "process dead".
+"""
 
 from __future__ import annotations
 
@@ -9,6 +27,12 @@ import os
 import struct
 import time
 from pathlib import Path
+
+#: Command lines of the outer-loop runners whose progress this tool can read.
+RUNNER_SCRIPTS = ("serving_e2e_auto.py", "serving_longrun.py")
+
+#: Terminal per-item statuses of the current runner (nothing more will be written).
+TERMINAL_ITEM_STATUS = frozenset({"done", "failed", "skipped"})
 
 
 def read_json(path):
@@ -25,9 +49,42 @@ def process_alive(owner, run):
         return False
     try:
         data = (Path("/proc") / str(owner["pid"]) / "cmdline").read_bytes()
-        return b"serving_longrun.py" in data and str(run).encode() in data
+        return (
+            any(name.encode() in data for name in RUNNER_SCRIPTS)
+            and str(run).encode() in data
+        )
     except OSError:
         return False
+
+
+def plan_entries(plan):
+    """Plan items of either layout: current runner `items`, legacy `operators`."""
+    if not isinstance(plan, dict):
+        return None
+    entries = plan.get("items")
+    if not isinstance(entries, list):
+        entries = plan.get("operators")
+    return entries if isinstance(entries, list) else None
+
+
+def read_progress(run):
+    """Per-operator progress records, normalized to the legacy list layout."""
+    state = read_json(run / "e2e-progress.json")
+    if isinstance(state, dict) and isinstance(state.get("items"), dict):
+        return [
+            {
+                "id": item_id,
+                "status": record.get("status"),
+                "reason": record.get("error") or record.get("reason"),
+                "finished": record.get("finished_ts")
+                or record.get("status") in TERMINAL_ITEM_STATUS,
+                "stage": record.get("current_stage") or record.get("last_stage"),
+            }
+            for item_id, record in state["items"].items()
+            if isinstance(record, dict)
+        ]
+    progress = read_json(run / "progress.json") or []
+    return progress if isinstance(progress, list) else None
 
 
 def operator_state(directory, entry, progress):
@@ -50,7 +107,7 @@ def operator_state(directory, entry, progress):
             else "incomplete_evidence"
         )
     elif progress.get("finished"):
-        result["status"] = progress["status"]
+        result["status"] = progress.get("status") or "unknown"
     elif directory.exists():
         result["status"] = "running"
     stages = (
@@ -82,15 +139,19 @@ def operator_state(directory, entry, progress):
 
 def collect(run):
     plan = read_json(run / "plan.json")
-    if not plan or "operators" not in plan:
+    entries = plan_entries(plan)
+    if entries is None or not entries:
         raise ValueError(f"Missing or invalid plan: {run}")
-    progress = read_json(run / "progress.json") or []
-    if not isinstance(progress, list):
+    progress = read_progress(run)
+    if progress is None:
         raise ValueError(f"Invalid progress: {run}")
-    previous = {entry["id"]: entry for entry in progress}
+    previous = {
+        entry["id"]: entry
+        for entry in progress
+        if isinstance(entry, dict) and "id" in entry
+    }
     operators = [
-        operator_state(run / e["id"], e, previous.get(e["id"], {}))
-        for e in plan["operators"]
+        operator_state(run / e["id"], e, previous.get(e["id"], {})) for e in entries
     ]
     completion = read_json(run / "completion.json")
     alive = process_alive(read_json(run / "owner.json"), run)

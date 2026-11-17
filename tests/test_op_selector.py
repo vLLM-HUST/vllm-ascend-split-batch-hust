@@ -26,11 +26,21 @@ Coverage contract:
 - concurrency: coarse-grained registration from many threads loses nothing.
 """
 
+import importlib.util
+import sys
 import threading
+from pathlib import Path
 
 import pytest
 
-from vllm_ascend_split_batch import op_selector as os_mod
+# The selector skeleton lives outside the shipped package; load it by path so the
+# contract stays executable without making `experiments/` an importable package.
+_IMPL = Path(__file__).resolve().parents[1] / "experiments" / "op_selector.py"
+_SPEC = importlib.util.spec_from_file_location("op_selector", _IMPL)
+os_mod = importlib.util.module_from_spec(_SPEC)
+# dataclass resolution reads sys.modules[cls.__module__], so register before exec.
+sys.modules["op_selector"] = os_mod
+_SPEC.loader.exec_module(os_mod)
 
 OP = "demo_op"
 PER_OP_ENV = "VLLM_ASCEND_OP_SELECT_DEMO_OP"

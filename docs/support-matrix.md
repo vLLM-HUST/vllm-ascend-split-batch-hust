@@ -7,7 +7,7 @@
 - 根 bundle `org.vllm-hust.split-batch-full-graph` 只含 `planner`，状态为 `import_only`，没有宿主执行面，**不可激活**。
 - Cascade 实现、注册入口及执行路径均已撤除，不属于当前发布面。
 - 当前包的 6 个 `vllm.general_plugins` 与 5 个 `vllm_hust.extension_bundles` 以 `pyproject.toml` 和对应 manifest 为准；源码、补丁、工具、提案不计作插件。
-- `active`/可发现不等于每个请求真实调用；真实调用与性能结论须分别满足[证据字段合同](delivery-inventory.md#性能证据最小字段)。
+- `active`/可发现不等于每个请求真实调用；真实调用与性能结论须分别满足[证据字段合同](delivery-inventory.md#5-性能证据最小字段与评测阶梯)。
 
 ## Planner 边界
 

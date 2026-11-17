@@ -154,6 +154,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 - 仓库内**严禁**再引入任何类似 `apply-runtime-patches.sh`、`patch_*.py` 等试图在容器运行树上就地修改 Python/C++ 文件的自动化脚本。
 - 如发现新的必须改动宿主代码的场景，统一按《宿主提案（Host Proposal）》标准在宿主 Fork 分支实现并提交 PR，严禁在插件仓私开补丁打入逻辑。
 - **执行记录（2026-11-01，issue #33 方案 A）**：随包发布的 meta-path 源码变换模块 `runtime_source_patches.py` 与 `runtime_source_patches_pth.py`（内存中改写宿主源码文本，效果等同运行时打补丁）已整体删除，其挂载的 5 个 env 开关归宿见[交付清单 §2.1](delivery-inventory.md)。一般插件入口不得在加载期安装任何源码变换钩子，该边界由 `tests/test_runtime_patch_manifest_guard.py` 机械守卫。
+- **进程内方法属性替换与源码变换的分界**：判据不是「是否改内存」，而是**是否污染 import 链路**。meta-path 源码变换在每次 import 时改写源文本，影响所有后续导入方，属上面被禁的一类。`src/vllm_ascend_split_batch/zerocost_wiring.py` 属于另一类：只对已导入宿主类的单个方法属性做 AST 重写后 `setattr`，不改磁盘源码、不挂钩 import 机制，因此不受本条禁令约束。该例外同时受三个条件约束，缺一即回到被禁一类：两个 env 均关闭时加载期不安装任何钩子、提供 `uninstall()` 恢复原属性、不改变数值结果。约束由 `tests/test_zerocost_wiring_boundary.py` 机械守卫。
 
 ### 3.6 宿主 Fork 分支与 PR 协同铁律（严禁在 main 上切分支或提 PR）
 由于社区 `main` 分支走在非常靠前的上游（已领先本地镜像 260+ commits），底层 API、CANN 驱动要求及模型架构均与当前 910B2 镜像运行时严重脱节。因此确立以下分支管理与 PR 铁律：
@@ -169,7 +170,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 
 ### 3.7 插件仓如何体现宿主 Fork 的收益与证据追溯
 宿主侧下沉的算子变更（如卷积权重加载期预打包与 in_proj 权重合并），其价值与收益直接体现在本插件仓中，统一履约规范如下：
-1. **独立三件套目录跟踪**：在插件仓的 `ops/` 目录下为宿主算子建立同等规格的独立子目录（如 `ops/gdn_conv_pack/`），包含完整的 `README.md`、`REPORT.md` 与 `evidence.json`；
+1. **独立目录跟踪**：在插件仓的 `ops/` 目录下为宿主算子建立同等规格的独立子目录（如 `ops/gdn_conv_pack/`），齐备 `README.md`、`REPORT.md`、`bench_l0.py`、`evidence.json` 四个必备文件，并由 `tools/operator_tools/custody.py` 生成 `checksum.sha256` 指纹；
 2. **总索引明确标记层级**：在根目录 `DELIVERY_INDEX.json` 中标记 `"layer": "host_fork"`，明确其属于宿主层原生优化；
 3. **明确记录机理与消除开销**：在报告中必须列清该优化为何必须下沉至宿主、消除了宿主内部多少次冗余计算/拷贝（如卷积权重预打包单步消除 30 层 GDN 的 308 us 转置开销，全模型净省 9.25 ms），并记录基线与优化后的 L0 实测数字；
 4. **绑定宿主分支与 Commit 证据指纹**：在 `evidence.json` 中完整绑定宿主远端仓库、Base 分支（`based/split-batch-baseline`）、开发分支及具体 Commit Hash，实现代码到证据的闭环双向追溯。
@@ -178,17 +179,21 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 
 ## 4. 证据文档规范与数据流转契约 (Evidence & Delivery Spec)
 
-### 4.1 仓内算子模块化三件套规范
-每个受控算子在 [ops/](ops/) 目录下建立独立子目录，包含且仅包含三个标准化文件：
+### 4.1 仓内算子模块化目录规范
+每个受控算子在 [ops/](ops/) 目录下建立独立子目录，包含四个必备文件，外加一枚由 `tools/operator_tools/custody.py` 生成的 `checksum.sha256` 目录指纹：
 
 1. **`README.md`**：技术原理与边界说明
    - 登记 entry point、开关环境变量、优化机制、理论预期与适用边界。
 2. **`REPORT.md`**：正式验收报告（Markdown 呈现）
    - 包含硬件拓扑、环境版本、张量形状事实；
    - 记录 L0 纯算子耗时对比、L3 数值等价判定、L4 链路命中次数及 Serving 端到端加速指标。
-3. **`evidence.json`**：结构化机器可读凭据
+3. **`bench_l0.py`**：单算子微基准脚本
+   - 提供可独立复现的测量入口；没有独立微基准时按占位脚本交付，退出码 3 表示「无测量」，不得留空或伪造脚本。
+4. **`evidence.json`**：结构化机器可读凭据
    - 符合 `operator-benchmark-evidence/v1` Schema 规范；
    - 记录可用于自动化审计与看板消费的指标字段及哈希指纹。
+
+必备文件由 `tests/test_doc_consistency.py` 逐个目录断言。目录内任何文件改动后必须用 `tools/operator_tools/custody.py` 重新生成 `checksum.sha256`，指纹与内容不符由 `tests/test_ops_delivery_policy.py` 拦下。
 
 ### 4.2 根目录索引 `DELIVERY_INDEX.json` 单一事实源
 - 根目录 [DELIVERY_INDEX.json](DELIVERY_INDEX.json) 是全仓算子交付的权威事实清单；
@@ -196,18 +201,20 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 - 新增或调整算子状态时，必须同步更新该索引并通过测试校验。
 
 ### 4.3 四级评测阶梯数据流转
-数据采集必须按阶梯递进，前置阶梯未通过绝不推进到后置阶梯：
+四级阶梯是**证据组织层级，不是串行测试清单**；判据以 [算子优化评测标准 §2](operator-benchmark-standard.md) 为准，本处只复述边界：
 
 ```text
  ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
  │ L0 纯算子微基准  │ ───►  │ L3 数值正确性    │ ───►  │ L4 调用链路归因 │ ───►  │ 服务端到端实测  │
- │ 测量核函数单步耗时 │       │ 严格等价/误差门禁│       │ 验证全链路真实命中│       │ 最终 TTFT/TPOT │
+ │ 测量核函数单步耗时 │       │ 严格等价/误差门禁│       │ 验证全链路真实命中│       │ 配对测量，按需选测│
  └─────────────────┘       └─────────────────┘       └─────────────────┘       └─────────────────┘
 ```
 
-- **L0 失败（如耗时更长）**：标记为负收益，保持 default-off，如实记录；
-- **L3 失败（数值不一致）**：一票否决，直接熔断，绝对禁止进入生产评测；
-- **L4 失败（未命中或未全部消除）**：检查调度与图模式，判定是否因计算图捕获限制导致。
+- **顺序固定**：L0 → L3 的先后不可交换，数值正确性必须先检查，通过后才接受任何计时结论；
+- **L3 失败（数值不一致）**：一票否决，立即关闭能力并保持 default-off，绝对禁止进入生产评测；
+- **L0 失败（如耗时更长）**：标记为负收益，保持 default-off，如实记录，失败记录不得删除；
+- **L4 与服务端到端 A/B 按需选测**：选择依据是关键路径占比、风险、交互冲突或需要独立收益归因；没有单项 A/B 不等于组合交付缺项，也不能写成单项收益；
+- **纳入组合的候选**必须保留数值校验与逐卡调用归因；L4 未命中或未全部消除时，检查调度与图模式，判定是否因计算图捕获限制导致，且不得主张服务收益。
 
 ---
 
@@ -217,7 +224,9 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 
 | 测试模块 | 守卫目标与断言 |
 |---|---|
-| **`tests/test_benchmark_standard.py`** | 验证各算子目录三件套完整性，校验 `evidence.json` 结构合规 |
+| **`tests/test_doc_consistency.py`** | 逐个算子目录断言必备文件齐备（`README.md`、`REPORT.md`、`bench_l0.py`、`evidence.json`），并校验文档数量陈述、术语表结构与锚点、行文度量关键词与禁语 |
+| **`tests/test_ops_delivery_policy.py`** | 校验 `ops/**` 与 `DELIVERY_INDEX.json` 的 `checksum.sha256` 覆盖完整且未被改写，`bench_l0.py` 无测量时以退出码 3 显式声明 |
+| **`tests/test_benchmark_standard.py`** | 只读 `docs/operator-benchmark-standard.md` 的文本与其中的证据 JSON 示例（schema `operator-benchmark-evidence/v1` 字段齐全），不遍历 `ops/`；另外校验 MOD 证据与组合策略字段 |
 | **`tests/test_json_hygiene.py`** | 验证根目录不存在随意散落的调试 dump，验证 `DELIVERY_INDEX.json` 覆盖全部目录 |
 | **`tests/test_extension_config_boundary.py`** | 验证生命周期与元数据发现阶段绝对不导入重型实现模块 |
 | **`tests/test_provenance_hashes.py`** | 验证历史溯源归档提交的哈希未被篡改，保证开源合规 |

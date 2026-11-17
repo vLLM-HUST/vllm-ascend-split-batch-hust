@@ -11,7 +11,7 @@
 | 术语 | 定义与判据 | 锚点 | 易混项 |
 |---|---|---|---|
 | 宿主（host） | 服务解释器实际加载的 vLLM core 与 vllm-ascend；须核验安装来源和提交。本仓对它只读，只经官方公开面接入。 | `docs/HOST_CONTRACT.md`；`tools/operator_tools/host_runtime.py` | 社区安装包、只读参考源码不等于 HUST 服务运行时 |
-| 上游（upstream） | vLLM / vllm-ascend 社区及其 `main` 线。本仓只跟随 release 做版本同步，不向其提 PR。 | `AGENTS.md` §1.7；`docs/agent-guide.md` §1.6 | 宿主 Fork |
+| 上游（upstream） | vLLM / vllm-ascend 社区及其 `main` 线。本仓只跟随 release 做版本同步，不向其提 PR。 | `docs/agent-guide.md` 的「不做上游 PR」条；`docs/architecture.md` §1 | 宿主 Fork |
 | 宿主 Fork（host fork） | 被允许承载宿主侧改动的两个仓：`vLLM-HUST/vllm-ascend-hust` 与 `vLLM-HUST/vllm-hust`。 | `DELIVERY_INDEX.json` 的 `baseline.host_forks` | 上游社区仓库 |
 | 基线分支（baseline branch） | 两个宿主 Fork 上定死的 `based/split-batch-baseline`；特性分支与 PR 的 Base 都必须是它。 | `DELIVERY_INDEX.json` 的 `baseline_branch`、`pr_target_branch` | `main`、`based/image-baseline` 不是当前基线 |
 | 镜像锚点（image anchor） | 基线分支内容所对齐的容器镜像源码 commit，用来判断宿主代码是否漂移。 | `DELIVERY_INDEX.json` 的 `baseline_commit` | 镜像源码 commit，不是基线分支头 |
@@ -29,10 +29,11 @@
 | general plugin（插件入口） | `vllm.general_plugins` 下的一条注册，由该模块的 `load()` 决定做什么。 | `pyproject.toml` 的 `[project.entry-points."vllm.general_plugins"]` | extension bundle |
 | extension bundle（扩展包） | `vllm_hust.extension_bundles` 下的一条注册，对应一个带 manifest 的描述符目录。 | `pyproject.toml` 的 `extension_bundles`；`src/**/vllm-hust-extension-v0.2.json` | general plugin |
 | 插件载体（plugin carrier） | 承载某个能力的可发现单元（入口或 bundle）。"有载体"只等于可发现，不等于被调用。 | `DELIVERY_INDEX.json` 的 `layer: plugin_carrier` | 载体状态快照，见 §2 |
+| `active` | 描述符状态：允许显式激活，管理器可启用该载体。不等于目标模型/形状一定调用，也不改变 default-off；真实命中另需 callsite 证据。 | manifest 的 `implementation[].status`；`docs/release.md` 的「状态纪律」段 | `import_only`；`active` 不等于已调用 |
 | `import_only` | 描述符状态：可被发现与检查，但管理器不得激活，也没有执行面。 | manifest 的 `implementation[].status`；`tests/test_manifest.py` | 未启用是门控状态 |
 | activation environment | enable 时真正注入的环境变量键值，不是说明文本；根 bundle 为空。 | manifest 的 `activation.environment` | 说明文本不是注入值 |
 | 门控（env gate） | 用具体环境变量决定能力是否加载；未设置时不导入实现。 | 各插件的 `VLLM_HUST_*`；`docs/support-matrix.md` | MoE gate 权重、SiLU 门控分支，见 §2 |
-| default-off | 未显式取启用值时，行为与原生严格一致：零导入、零副作用、零日志。 | `AGENTS.md` §1.2 | — |
+| default-off | 未显式取启用值时，行为与原生严格一致：零导入、零副作用、零日志。 | `AGENTS.md` 的 default-off 约束条 | — |
 | fail-open | 接缝缺失/改名/内部异常时告警一次并保留宿主原实现（插件侧包装用）。 | `docs/HOST_CONTRACT.md` 各组件的默认语义段 | fail-closed |
 | fail-closed | 条件不满足时拒绝执行并保持关闭（规划预检与状态判定用）。不允许"形式上成功、实际退化为原生"。 | `src/vllm_ascend_split_batch/planner.py` 的 `precheck_reason` | fail-open |
 | `host.version_range` | manifest 中对宿主版本的有界声明；范围之外管理器报 `incompatible`。 | manifest 的 `host.version_range`；`docs/release.md` §0.1 | — |
@@ -54,7 +55,7 @@
 | GDN（Gated Delta Net） | Qwen3.5 hybrid 中的线性注意力层类型。 | `ops/gdn_*/`；宿主仓内 `$VLLM_ASCEND_REPO/vllm_ascend/ops/gdn.py` | — |
 | MoE（Mixture of Experts） | 稀疏专家前向层；路由网络与 shared expert 是两类不同对象。 | `ops/moe_*/` | — |
 | speculative decode / MTP | 投机解码及其 k+1 验证行形态。本仓一律 fail-closed，只能写成边界，不得写成支持。 | `planner.precheck_reason`；`README.md` 的 Speculative decoding boundary | 当前不支持 |
-| `op_selector` | 算子实现选择骨架：按形状与场景挑候选，解析不到就回宿主实现。当前是接口与选择骨架，未接线真实算子路径。 | `src/vllm_ascend_split_batch/op_selector.py`；`docs/design/operator-dispatch.md` | 选择骨架不等于已集成算子 |
+| `op_selector` | 算子实现选择骨架：按形状与场景挑候选，解析不到就回宿主实现。当前是接口与选择骨架，未接线真实算子路径，实现不在发布包内。 | `experiments/op_selector.py`；`docs/design/operator-dispatch.md` | 选择骨架不等于已集成算子 |
 
 ### 1.4 算子交付与评测
 
@@ -67,17 +68,22 @@
 | 同工况参考效率（η_ref） | 完成同工况必要工作的独立参考时间与被测时间之比；设备忙碌度和相对基线速率不是此指标。 | `docs/mod-acceptance-standard.md` | 单算子 MFU、设备忙碌度、基线加速比 |
 | 算子（operator） | 在明确 callsite 上进行的等价替换或融合优化，以 `ops/<operator>/` 为一个交付单元。 | `ops/`；`DELIVERY_INDEX.json` 的 `operators[]` | — |
 | callsite | 算子被真实调用处的宿主位置（文件、方法、调用点）。可达性只认 callsite 证据。 | `ops/<operator>/evidence.json` 的 `callsite` | 宿主接缝，见 §2 |
-| 算子交付目录 | 一个算子的交付文件集合：`README.md`、`REPORT.md`、`evidence.json` 为必备，`bench_l0.py` 为微基准脚本，另有 `checksum.sha256` 指纹。 | `ops/README.md`；`tests/test_ops_delivery_policy.py` | — |
+| 算子交付目录 | 一个算子的交付文件集合：必备四个文件 `README.md`、`REPORT.md`、`bench_l0.py`、`evidence.json`，加一枚由 `tools/operator_tools/custody.py` 生成的 `checksum.sha256` 指纹。 | `ops/README.md`；`tests/test_ops_delivery_policy.py` | — |
 | layer | 算子的归属层：`host_fork`（宿主侧）、`plugin_carrier`（插件侧）、`rejected_exploration`（已否定的探索）。 | `DELIVERY_INDEX.json` 的 `layer` | `unclassified` 仅作占位，不能合入 |
 | status / serving_status | 索引中的交付状态与服务结论标签。`historical_only` 表示已有历史测量但不能作为当前实现结论，`unexposed` 表示当前没有公开接入。 | `DELIVERY_INDEX.json` | 标签按字段原值记录 |
 | 形状事实（shape facts） | 张量维度、批量、输入输出规模、执行相位、专家分布等可复核的执行条件。 | `ops/<operator>/evidence.json` 的 `shape_facts`；`docs/operator-benchmark-standard.md` §1 | — |
 | 权重标签 | 模型名 + 精度格式的组合，是可比性事实的另一半。 | `ops/<operator>/evidence.json` 的 `environment.model` / `dtype` | 模型族名不能替代模型名与精度格式 |
 | 单变量上下文 | 两次对比除被测项外全部固定：种子、采样、图模式、并发、负载。 | `docs/operator-benchmark-standard.md` §1.2 | — |
+| 服务指标写法 | 对外统一写「首字耗时 (FTL)」「单字耗时 (POTL)」「生成速度 (GenRate)」。行业措辞 `TTFT`、`TPOT`、输出速率是同义写法，MOD 冻结协议与组织政策沿用后者；同一份文档内混排时须在同段声明对应关系，只留一套主写法。度量数字只落结构化 `evidence.json`，行文与标题不得「关键词加数字」同段。 | `docs/operator-benchmark-standard.md` 的服务收益段；`docs/mod-acceptance-standard.md` | 三项指标分别达标，不得互相抵消 |
 | 数值护栏 | 按容差与原生实现比对；失败后关闭能力，不接受性能结论。 | `ops/<operator>/evidence.json` 的 `l3_numerical_guard` | — |
-| 一票否决 | 数值不一致时立即关闭能力并保持 default-off，不再谈性能。 | `AGENTS.md` §2.1；`docs/operator-benchmark-standard.md` §2 | — |
+| 一票否决 | 数值不一致时立即关闭能力并保持 default-off，不再谈性能。 | `AGENTS.md` 的「数值失败一票否决」条；`docs/operator-benchmark-standard.md` §2 | — |
 | all-kernel 分母 | 模型整体算子耗时，用来判断单算子净省时能否被服务观测到。 | `tools/operator_tools/serving_loop.py` 的 `parse-l4` | 不等于服务墙钟时间 |
-| within noise | 组间差异落在组内波动之内。 | `DELIVERY_INDEX.json` 的 `serving_status` | 不构成收益 |
+| `within_noise` | 服务结论标签：同条件配对测量的组间差异落在组内波动之内（散文里也写作 "within noise"）。不构成收益。 | `DELIVERY_INDEX.json` 的 `serving_status` | 不构成收益 |
 | 负结果 | 优化后更慢或无效的结论。必须保留并入索引，不得删除。 | `DELIVERY_INDEX.json` 的 `status` | 不能用待复测掩盖已有负结果 |
+| `pending_outer_loop` | 无结论标签：外环还没跑完，服务侧没有可主张的结论。写它时证据里不得出现 `tested: true`，也不得同时给出服务收益。 | `DELIVERY_INDEX.json` 的 `serving_status`、`l4_attribution`；`tests/test_delivery_status_consistency.py` | L4 未完成时只能挂无结论标签 |
+| `integrated_plugin_measured` | 归属加测量标签（索引 `status`）：能力由插件层承载、已公开接入且已有当前测量；收益结论仍只看 `serving_status`。 | `DELIVERY_INDEX.json` 的 `status` | 与 `layer: plugin_carrier` 配套，不与 `host_fork` 混用 |
+| `integrated_host_fork_measured` | 归属加测量标签（索引 `status`）：能力已下沉到宿主 Fork 源码承载，插件侧只留交付目录与证据。 | `DELIVERY_INDEX.json` 的 `status` | 与 `layer: host_fork` 配套；不得把宿主实现归因给插件 |
+| `superseded_by_host_fork` | 取代标签：该路线已被宿主 Fork 的等能力实现取代，不再是候选。必须写明被谁取代。 | `DELIVERY_INDEX.json` 的 `serving_status`、`superseded_by_host_fork`；`tests/test_delivery_status_consistency.py` | 取代不等于该项已测过 |
 | cohort | 一组锁定的实验条件（宿主线、模型、请求形态、图配置、精度）。数字只在同一 cohort 内可比。 | `docs/cohort-and-ownership.md` §2 | 不同 cohort 的数字不能混比 |
 | 负载口径（load caliber） | 某次采集绑定的负载标识，与 cohort 一起构成产物的生产者标记。 | `VLLM_HUST_LOAD_CALIBER_ID`、`VLLM_HUST_COHORT_ID`；`tools/analysis/matmulv2_shape_attribution.py` | — |
 | 跨域外推（禁止） | 把某 cohort 的结论搬到另一 cohort。历史 Qwen2.5 / 0.25 与当前基准互不推导。 | `docs/cohort-and-ownership.md` §3 | — |
@@ -135,7 +141,8 @@
 |---|---|---|---|
 | Cascade / `cascade-attention` | 已撤除的注意力实现及其入口 | "已撤除实现"，不称能力、不称收益 | `docs/HOST_CONTRACT.md` 的 Cascade 接入边界段 |
 | `apply-runtime-patches.sh`、`runtime_source_patches` | 运行时打补丁链 | 宿主提案（host proposal） | `docs/container-and-plugin-boundary-spec.md` §3.5 |
-| `based/image-baseline` | 旧基线名 | `based/split-batch-baseline` | `AGENTS.md` §1.7 |
+| `based/image-baseline` | 旧基线名 | `based/split-batch-baseline` | `AGENTS.md` 的「宿主改动走宿主 Fork 基线分支」条 |
+| `tier-2` | 需要改宿主私有代码才能落地的宿主侧补丁（早期分层编号叫法） | 宿主提案（host proposal） | `docs/container-and-plugin-boundary-spec.md` §3.5。注意 `host-proposals/W1R-gmm-tuning-config/patch.diff` 与 `gen_patch.py` 里的 `tier-2 host proposal` 是补丁标记字符串，由 `tests/test_w1r_gmm_tuning_patch.py` 逐字锁定，不随行文改名 |
 | `gdn-qkv-norm` plugin / bundle | 已撤回注册的入口 | 注册已撤回、L0 测量保留待外环；路线转宿主提案 `host-proposals/GDN-qkv-norm/` | `README.md` 的 GDN QKV norm 段；`DELIVERY_INDEX.json` 的 `gdn_qkv_norm` 条目 |
 | `Raing5Days/vllm-hust-cascade-kernel` | 早期独立发行的 Cascade kernel 包与其个人账号归属 | 历史专项，仅引用不依赖；org 归属未定 | `docs/cohort-and-ownership.md` §1 归属表 |
 | 历史 Qwen2.5 / 0.25 结论 | 可外推的收益结论 | 历史独立专项，禁止跨域外推 | `docs/cohort-and-ownership.md` §2 |

@@ -45,9 +45,13 @@ guard context only for the unguarded branch, so a future host fix makes this
 carrier a no-op rather than a conflict.
 
 Enablement: **default-on, opt out with** ``VLLM_HUST_AOT_CACHE_GUARD=0``.
-This deviates from the repo's default-off convention on purpose: a default-off
-carrier would require the forbidden env var to make the frozen config boot.
-With the opt-out set, behavior is bit-identical to stock (the wrapper is not
+
+**This plugin is an explicit exception to the repository's default-off contract:
+it is ON when the variable is unset, and ``=0`` turns it off.**  The exception
+is deliberate and stays: a default-off carrier would need the forbidden
+``VLLM_DISABLE_COMPILE_CACHE=1`` for the frozen acceptance configuration to boot
+at all (see the A1-contract paragraph above), so here the boot fix has to be the
+default.  With ``=0`` the behavior is bit-identical to stock (the wrapper is not
 installed at all, so ``AscendCompiler.compile`` is the host function).
 
 Fail-open: any import/attribute/predicate failure leaves the host untouched and
@@ -91,7 +95,7 @@ def _record(status: str, detail: str = "") -> None:
         pass
 
 
-def _npugraph_ex_enabled_else_none(ci) -> bool | None:
+def _npugraph_ex_enabled_else_none() -> bool | None:
     """Return the host's branch predicate, or None when it cannot be read."""
     try:
         from vllm_ascend.ascend_config import get_ascend_config
@@ -129,7 +133,7 @@ def install() -> bool:
             return True
 
         def compile_with_aot_cache_guard(self, *args, **kwargs):
-            npugraph = _npugraph_ex_enabled_else_none(ci)
+            npugraph = _npugraph_ex_enabled_else_none()
             if npugraph:  # host guards this branch itself (npugraph_ex_compile)
                 return orig(self, *args, **kwargs)
             # npugraph False, or predicate unreadable: entering the guard is

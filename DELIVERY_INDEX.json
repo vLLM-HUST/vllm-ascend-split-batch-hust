@@ -25,6 +25,12 @@
     "device": "2x910B2 TP2",
     "target_model": "Qwen3.5-35B-A3B"
   },
+  "_field_notes": {
+    "status": "推进阶段标签：记录该算子属哪一层、走到哪一步（例如 integrated_host_fork_measured / l0_measured_pending_outer_loop / default_off_negative_speedup）。它不是服务结论；服务端有没有收益只看 serving_status。",
+    "serving_status": "唯一的服务结论标签：只能由同一算子 ops/<operator>/evidence.json 的 serving_end_to_end 与 l4_attribution 支撑。pending_outer_loop / negative_or_pending 表示当前还没有服务结论；L3 失败时禁止任何收益类标签。",
+    "l3_numerical_guard": "当前实现的数值护栏方向：passed 或 failed，必须与同一算子 evidence.json 的 l3_numerical_guard.passed 同向；failed 一票否决，不接受任何服务收益结论。",
+    "gate_env": "门控变量的赋值写法，形如 VLLM_HUST_GATE_FP32=1（变量名=启用值）；尚未在 src/ 里接线的算子写 unexposed。"
+  },
   "operators": [
     {
       "id": "gdn_conv_pack",

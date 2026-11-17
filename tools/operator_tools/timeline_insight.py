@@ -9,10 +9,20 @@ Solves the high token cost and flat-table blindness of raw profiler CSVs by:
    HBM memory-bound ratios (`aiv_mte2_ratio`).
 3. Rendering a self-contained MindStudio-style SVG swimlane figure for human or
    multimodal-LLM batch review.
+
+Usage::
+
+    python -m tools.operator_tools.timeline_insight \
+        --csv <ASCEND_PROFILER_OUTPUT>/kernel_details.csv \
+        --top-k 8 --md insight.md --svg insight.svg
+
+Without `--md` / `--svg` the Markdown digest is printed to stdout. Module import
+stays side-effect free, so path-based test loading keeps working.
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 import html
 import os
@@ -389,3 +399,38 @@ def render_timeline_swimlane_svg(
     with open(output_svg_path, "w", encoding="utf-8") as f:
         f.write("\n".join(svg_lines) + "\n")
     return output_svg_path
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI: one `kernel_details.csv` in, Markdown digest and/or swimlane SVG out."""
+    parser = argparse.ArgumentParser(
+        description="Compress kernel_details.csv into Top-K fusable chains and "
+        "render a swimlane SVG."
+    )
+    parser.add_argument("--csv", required=True, help="kernel_details.csv path")
+    parser.add_argument("--top-k", type=int, default=8, help="cards to keep")
+    parser.add_argument("--svg", help="write the swimlane SVG to this path")
+    parser.add_argument("--md", help="write the Markdown digest to this path")
+    args = parser.parse_args(argv)
+    if not os.path.isfile(args.csv):
+        parser.error(f"kernel_details.csv not found: {args.csv}")
+    if args.top_k < 1:
+        parser.error("--top-k must be positive")
+
+    summary = compress_kernel_timeline(args.csv, top_k=args.top_k)
+    markdown = format_insight_markdown(summary)
+    if args.md:
+        parent = os.path.dirname(os.path.abspath(args.md))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(args.md, "w", encoding="utf-8") as f:
+            f.write(markdown + "\n")
+    else:
+        print(markdown)
+    if args.svg:
+        render_timeline_swimlane_svg(summary, args.svg)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
