@@ -2,6 +2,17 @@
 
 本目录收录插件交付规范、架构契约、支持边界与发布检查。根目录 README 保留仓库状态、安装与证据入口；当前状态以明确的权威清单为准，历史原件只用于溯源。
 
+## 按任务的最短路径(改第一个算子)
+
+只改一个算子时按这个顺序读,不用通读全目录:
+
+1. [ops/README.md](../ops/README.md) — 一个算子目录里必须放哪几个文件、目录指纹怎么来;
+2. [ops/gdn_norm_gate/README.md](../ops/gdn_norm_gate/README.md) 配同目录 `evidence.json` — 照着现成交付目录填结构;
+3. [operator-benchmark-standard.md](operator-benchmark-standard.md) — 四级阶梯、形状事实合同、报告模板与交付合规门禁;
+4. [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) — 带卡怎么跑、结果怎么回填;
+5. [delivery-inventory.md](delivery-inventory.md) 的「性能证据最小字段与评测阶梯」节与 [../DELIVERY_INDEX.json](../DELIVERY_INDEX.json) — 结论标签怎么写、状态怎么登记;
+6. [agent-guide.md](agent-guide.md) — 编码与测试纪律,改完按 [../AGENTS.md](../AGENTS.md) 的「提交前检查」节跑验证命令。
+
 ## 阅读顺序(新人 15 分钟路径)
 
 | 顺序 | 文档 | 回答的问题 |
@@ -19,6 +30,7 @@
 | 11 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
 | 12 | [算子优化 Skill](../.openbitfun/skills/operator-sol-optimizer/SKILL.md) | SOL 计算、单点优化与证据交接 |
 | 13 | [delivery-inventory.md](delivery-inventory.md) | 当前各算子状态、收益证据边界 |
+| 14 | [hotspot-profile-method.md](hotspot-profile-method.md) | 整网 profile 怎么采、怎么判读，哪些结论不能从里面得出 |
 
 ## 单一事实源分工
 
@@ -27,8 +39,10 @@
 | 主题 | 权威位置 |
 |---|---|
 | 术语唯一写法、定义判据、代码锚点、同名异义与废止词 | [../GLOSSARY.md](../GLOSSARY.md) |
+| 参考性执行流程 | [../workflow.md](../workflow.md) |
 | 使用方法、env 开关、验证证据 | [../README.md](../README.md) |
 | **容器运行时分层、宿主Fork边界与证据隔离规范** | [container-and-plugin-boundary-spec.md](container-and-plugin-boundary-spec.md) |
+| 一个算子目录放什么（必备文件、证据契约、目录指纹） | [ops/README.md](../ops/README.md)（原件）+ [delivery-inventory.md](delivery-inventory.md) §5 的字段合同 |
 | 能力激活边界 × 代码位置 | [support-matrix.md](support-matrix.md) |
 | 组件、补丁、工具与收益状态 | [delivery-inventory.md](delivery-inventory.md) |
 | MOD 最终验收、冻结协议与四项目标 | [mod-acceptance-standard.md](mod-acceptance-standard.md) |
@@ -36,16 +50,17 @@
 | MOD 验收 Agent 流程 | [mod-acceptance skill](../.openbitfun/skills/mod-acceptance/SKILL.md) |
 | 算子测试标准、形状合同与验收报告 | [operator-benchmark-standard.md](operator-benchmark-standard.md) |
 | 各阶段测试执行手册（进入条件、执行命令、回填顺序、决策树） | [execution-workflow.md](execution-workflow.md) |
+| **热点 profile 采集口径、pipe 判读与结论边界** | [hotspot-profile-method.md](hotspot-profile-method.md) |
 | **NPU 带卡环境实测与评测指南** | [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) |
-| **cohort 边界（我们能声称什么）× 四项归属** | [cohort-and-ownership.md](cohort-and-ownership.md)（约束入口 [../AGENTS.md](../AGENTS.md) 硬约束 9） |
-| 宿主提案补丁（tier-2，未提交上游） | [`host-proposals/README.md`](../host-proposals/README.md)（章程）+ `host-proposals/<id>/`（`proposal_meta.json` = env 语法/哈希/版本精确锁定/上游状态）；`docs/upstream/` 只是路径消歧 stub |
+| **cohort 边界（我们能声称什么）× 四项归属** | [cohort-and-ownership.md](cohort-and-ownership.md)（约束入口：[../AGENTS.md](../AGENTS.md) 的「证据与结论」节） |
+| 宿主提案补丁（host proposal，未提交上游） | [`host-proposals/README.md`](../host-proposals/README.md)（章程）+ `host-proposals/<id>/`（`proposal_meta.json` = env 语法/哈希/版本精确锁定/上游状态）；`docs/upstream/` 只是路径消歧 stub |
 | 宿主 seam 与 monkeypatch 面清单 | [HOST_CONTRACT.md](HOST_CONTRACT.md) |
 | 历史实现溯源（索引 + 逐条核对结论） | [PROVENANCE.md](PROVENANCE.md) / [provenance-verification.md](provenance-verification.md) / [../provenance/](../provenance/)(只读) |
 | 历史证据与原始度量保管规范 | [EVIDENCE.md](EVIDENCE.md) |
 | 算子优化与证据交接 | [算子优化 Skill](../.openbitfun/skills/operator-sol-optimizer/SKILL.md) |
-| 算子交付形态：编译型实现独立交付；**Triton/纯 Python 算子实现由本仓承载** | [architecture.md](architecture.md) §2/§5 + 本仓 `src/vllm_ascend_split_batch/` |
-| 算子调度(选择)接口 | [design/operator-dispatch.md](design/operator-dispatch.md)(骨架,未接线) |
-| 常用验证命令与本地门禁清单 | [agent-guide.md](agent-guide.md) §7 |
+| 算子交付形态：编译型实现独立交付；**Triton/纯 Python 算子实现由本仓承载** | [architecture.md](architecture.md) §5 + 本仓 `src/vllm_ascend_split_batch/` |
+| 算子调度(选择)接口 | [design/operator-dispatch.md](design/operator-dispatch.md)(骨架,未接线,实现暂存 `experiments/`) |
 | 架构语义、编程规范、发布、踩坑、进度 | 本目录 |
+| 设计稿与历史记录（只读，不是仓库现状） | [design/fia-decode-demask.md](design/fia-decode-demask.md)（未实施设计稿：仓库内无实现、无入口、无开关）、[design/rope-variant-defects.md](design/rope-variant-defects.md)（宿主 fork 三个缺陷的读码结论）、[custody-direction-batch.md](custody-direction-batch.md)（方向分支证据批次的 custody 登记）、[official-docs-escalation.md](official-docs-escalation.md)（算子级规格升查链） |
 
 改行为必须同步改对应权威文档;本目录只放指针,不复制内容。

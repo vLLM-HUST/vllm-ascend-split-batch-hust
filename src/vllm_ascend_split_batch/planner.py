@@ -82,8 +82,28 @@ def plan_dual_pad(
     padding_saved_threshold: int = 0,
     force_split: bool = False,
 ) -> tuple[DualPadPlan | None, str]:
+    """Split a batch into two graph-capture slices (single-token decode only).
+
+    Contract: **one token per request**, i.e. ``num_requests == total_tokens``.
+    The plan carries one index for both axes --
+    ``SplitSlice(0, main_tokens, 0, main_tokens, main_tokens)`` uses the same
+    number as request stop and as token stop -- which is only meaningful when
+    the request index and the token index are the same unit.  A request with
+    several tokens would need two independent split points.  Inputs that break
+    the relation are refused with ``ValueError`` instead of producing a plan
+    whose second slice is wrong on one of the two axes.
+
+    Returns ``(plan, "split")`` on success, or ``(None, reason)`` when no split
+    is worth it; see the reason strings at each return.
+    """
     if num_requests <= 0 or total_tokens <= 0 or not main_capture_sizes:
         return None, "no_capture_sizes"
+    if num_requests != total_tokens:
+        raise ValueError(
+            "plan_dual_pad supports single-token decode only: every request must "
+            f"contribute exactly one token (num_requests={num_requests}, "
+            f"total_tokens={total_tokens})"
+        )
     main_sizes = tuple(sorted(set(main_capture_sizes)))
     parallel_sizes = tuple(sorted(set(parallel_capture_sizes or main_sizes)))
     if any(size <= 0 for size in (*main_sizes, *parallel_sizes)):

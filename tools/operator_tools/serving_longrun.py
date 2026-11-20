@@ -1,4 +1,8 @@
-"""Serial serving collection without automatic delivery evidence promotion."""
+"""Serial serving collection without automatic delivery evidence promotion.
+
+Superseded by `serving_e2e_auto.py` (resumable, multi-gate, evidence sync); kept
+only because `operator_status` and the CPU test suite still load it.
+"""
 
 from __future__ import annotations
 

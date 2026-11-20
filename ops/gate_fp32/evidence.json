@@ -24,7 +24,8 @@
     "conclusion": "eliminates 40x Cast[256,2048] ops per decode step",
     "baseline_median_us": 1823.11,
     "optimized_median_us": 33.19,
-    "speedup": 54.93
+    "speedup": 54.93,
+    "measurement": "torch.npu.Event, iters=1000, eager per-call issuance; the same 40-layer chain measured inside NPUGraph packed replay gives 125.09 -> 3.11 us (40.2x), local replication 2026-11-14 on host baseline e59aaeef2. The two calibers differ by ~15x in absolute value while the ratio stays close, so the caliber must be stated whenever this number is quoted."
   },
   "l3_numerical_guard": {
     "passed": true,
@@ -200,37 +201,6 @@
       }
     }
   },
-  "device_retests": [
-    {
-      "run_id": "npu-retest-20261115T041855Z",
-      "returncode": 0,
-      "result": {
-        "passed": 40,
-        "shape": [
-          256,
-          2048
-        ],
-        "seed": 42,
-        "device": "Ascend910B2",
-        "torch": "2.10.0+cpu",
-        "torch_npu": "2.10.0.post4",
-        "source_sha256": "df5d094fb933642621e277dcde3d15a1d26e6f3c00548129b2a86f2cbd02f89d",
-        "scope": "isolated weight cache equality only; no runtime integration or performance acceptance"
-      },
-      "command": [
-        "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
-        "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/gate_cache_check.py"
-      ],
-      "archive": {
-        "uri": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
-        "files": {
-          "gate_fp32-cache-check.json": "cf4fc5c1a638ee4f199aa3c2a5739efcf60ed6bde7d7c30718a761eec8864e99",
-          "gate_fp32-cache-check.log": "53212685868787a5af9cd4cdb79d474270b229600bf6176fec5c81f4f29c33cb"
-        }
-      },
-      "timing": "not measured; candidate only returns cached references, no device kernel"
-    }
-  ],
   "serving_sync": {
     "archive": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-e2e-resumable/gate_fp32",
     "files": {
@@ -291,5 +261,86 @@
     },
     "completed_ns": 1794748349336923103
   },
-  "status": "integrated_plugin_measured"
+  "status": "integrated_plugin_measured",
+  "device_retests": [
+    {
+      "run_id": "npu-retest-20261115T041855Z",
+      "returncode": 0,
+      "result": {
+        "passed": 40,
+        "shape": [
+          256,
+          2048
+        ],
+        "seed": 42,
+        "device": "Ascend910B2",
+        "torch": "2.10.0+cpu",
+        "torch_npu": "2.10.0.post4",
+        "source_sha256": "df5d094fb933642621e277dcde3d15a1d26e6f3c00548129b2a86f2cbd02f89d",
+        "scope": "isolated weight cache equality only; no runtime integration or performance acceptance"
+      },
+      "command": [
+        "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+        "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/gate_cache_check.py"
+      ],
+      "archive": {
+        "uri": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+        "files": {
+          "gate_fp32-cache-check.json": "cf4fc5c1a638ee4f199aa3c2a5739efcf60ed6bde7d7c30718a761eec8864e99",
+          "gate_fp32-cache-check.log": "53212685868787a5af9cd4cdb79d474270b229600bf6176fec5c81f4f29c33cb"
+        }
+      },
+      "timing": "not measured; candidate only returns cached references, no device kernel"
+    }
+  ],
+  "round2_retest": {
+    "serving_end_to_end": {
+      "tested": true,
+      "status": "within_noise",
+      "primary_workload": "random",
+      "stress_workload": "sharegpt",
+      "concurrency": 16,
+      "num_prompts": 128,
+      "num_runs_off": 2,
+      "num_runs_on": 2,
+      "speedup": 0.9984,
+      "gen_rate_off": 593.09,
+      "gen_rate_on": 592.11,
+      "gen_rate_delta_pct": -0.16,
+      "intra_group_spread_pct": {
+        "off": 1.23,
+        "on": 2.68
+      },
+      "stress_result": {
+        "status": "verified_faster",
+        "speedup": 1.0168,
+        "gen_rate_off": 325.35,
+        "gen_rate_on": 330.81,
+        "gen_rate_delta_pct": 1.68,
+        "mean_step_delta_pct": -2.52,
+        "intra_group_spread_pct": {
+          "off": 1.21,
+          "on": 1.07
+        },
+        "role": "auxiliary_not_used_for_verdict",
+        "quotable_with": "the primary random workload is -0.16% (within_noise) and the gate stays default-off"
+      },
+      "cross_phase_result": {
+        "workload": "long-prefix",
+        "input_output": "2048 in / 128 out",
+        "status": "within_noise",
+        "speedup": 1.0123,
+        "gen_rate_off": 371.41,
+        "gen_rate_on": 376.0,
+        "gen_rate_delta_pct": 1.23,
+        "mean_step_delta_pct": -1.84,
+        "intra_group_spread_pct": {
+          "off": 0.03,
+          "on": 0.7
+        },
+        "note": "Hoisting a weight copy could cost more at large T, so this arm exists to catch a prefill regression. Direction is positive and every round completed 128 of 128 requests; no regression appeared."
+      },
+      "conclusion": "The controlled decode workload lands inside run-to-run spread, so no gain is claimed. The conversation and large-T arms both move in the positive direction and neither regresses, but the primary workload governs the verdict, so the status stays within noise and the gate stays off."
+    }
+  }
 }

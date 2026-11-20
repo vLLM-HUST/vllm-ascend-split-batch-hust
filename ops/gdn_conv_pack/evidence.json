@@ -275,5 +275,33 @@
     },
     "completed_ns": 1794743817331101880
   },
-  "status": "integrated_host_fork_measured"
+  "status": "integrated_host_fork_measured",
+  "round2_retest": {
+    "serving_end_to_end": {
+      "tested": true,
+      "status": "completed_on_par_with_baseline",
+      "concurrency": 8,
+      "num_runs": 1,
+      "intra_group_spread_pct": null,
+      "caliber_note": "single run, no repeated rounds and no spread statistics; the three service metrics disagree in direction, and the step-time median improves while the step-time mean worsens, so this is recorded as parity, not as a gain",
+      "speedup": 1.0,
+      "details": {
+        "model": "Qwen3.5-35B-A3B",
+        "tp": 2,
+        "num_prompts": 32,
+        "baseline_median_step_ms": 265.45,
+        "optimized_median_step_ms": 263.48,
+        "median_step_diff_ms": -1.97,
+        "baseline_mean_step_ms": 264.05,
+        "optimized_mean_step_ms": 264.59,
+        "mean_step_diff_ms": 0.54,
+        "baseline_mean_first_token_ms": 957.82,
+        "optimized_mean_first_token_ms": 984.16,
+        "mean_first_token_delta_pct": 2.75,
+        "baseline_gen_rate": 29.6,
+        "optimized_gen_rate": 29.52,
+        "direction_note": "median step time improves while mean step time worsens (opposite signs), first-token latency moves the wrong way and generation rate moves slightly the wrong way, so the three metrics disagree and one round cannot separate effect from tail noise"
+      }
+    }
+  }
 }

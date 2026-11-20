@@ -215,9 +215,9 @@ def test_extension_version_matches_distribution_version() -> None:
     """Every bundle manifest must carry the distribution's version.
 
     The root bundle is not the only one shipped in the wheel: the standalone
-    ``org.vllm-hust.fia-demask`` and ``org.vllm-hust.rope-fix`` manifests are
-    discovered separately, and a stale ``extension_version`` there would survive
-    a release bump unnoticed.
+    ``org.vllm-hust.rope-fix``, ``org.vllm-hust.gate-fp32`` and
+    ``org.vllm-hust.gdn-merge-inproj`` manifests are discovered separately, and
+    a stale ``extension_version`` there would survive a release bump unnoticed.
     """
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
     version = pyproject["project"]["version"]

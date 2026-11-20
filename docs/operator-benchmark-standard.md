@@ -210,11 +210,11 @@ shape/stride、执行相位、图模式、随机种子、调用点和回退条�
 
 消费者先核对文件、指纹、执行环境与验证范围，再将结果写入 `ops/<operator>/evidence.json`。局部验证通过只证明对应输入与容差，不自动完成模型数值护栏、调用归因、公开接入或 MOD 验收。失败和未执行必须保留，不能只交一份成功摘要。更新证据后再写索引结论，最后生成目录指纹。
 
-L0 计时与 `bench_l0.py` 执行状态由 `tools/operator_tools/l0_trace_record.py` 机械入账：计时 receipt 或执行输出原样追加进 `ops/<operator>/evidence.json` 的 `l0_traces` 并自动刷新目录指纹，结论标签不由该工具改动；度量数字禁止手抄进 evidence。
-
 当前单项服务结论要求数值护栏明确通过、逐卡调用或消除冗余操作的判据通过、单项服务确已测量；调用计数不一致时必须明确核验并记录原因。单项服务标签只表示该项已有测量，不承担组合候选资格判断；没有单项测量时保留无结论标签，不伪造通过或噪声内结果。组合计划与结果放在 MOD 证据的独立组合记录中，不能回填成各算子的服务收益；组合诊断通过仍不能升级 MOD qualification。历史服务结果使用 `serving_end_to_end.applicability=historical` 和 `historical_only`，不得复用为当前结论。未公开接入的算子使用 `gate_env=unexposed`，不标记已集成。
 
 没有独立测量入口的 `bench_l0.py` 必须在导入设备依赖前退出，退出码为三，表示无测量；保留可导入的实现函数不等于提供测量入口。
+
+L0 计时与 `bench_l0.py` 执行状态由 `tools/operator_tools/l0_trace_record.py` 机械入账：计时 receipt 或执行输出原样追加进 `ops/<operator>/evidence.json` 的 `l0_traces` 并自动刷新目录指纹，结论标签不由该工具改动；度量数字禁止手抄进 evidence。
 
 统一离线清单为 `tests/offline-checks.args`。本地、pre-commit 和 Text invariants 执行同一命令 `pytest @tests/offline-checks.args`；CPU 全套另执行 `pytest -q -m "not host_tree"`。
 

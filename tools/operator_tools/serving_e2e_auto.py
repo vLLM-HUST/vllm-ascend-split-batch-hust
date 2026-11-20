@@ -40,7 +40,7 @@ if str(ROOT) not in sys.path:
 from tools.operator_tools import (  # noqa: E402
     custody,
     serving_attribution,
-    serving_sync,
+    serving_sync,  # noqa: E402
 )
 from tools.operator_tools import serving_collect as collector  # noqa: E402
 from tools.operator_tools.serving_loop import (  # noqa: E402
@@ -125,8 +125,8 @@ def write_status_file(status_path: Path, state: dict[str, Any]) -> None:
         sync_state = rec.get("evidence_sync", "-")
         extra = f" | error={rec['error']}" if rec.get("error") else ""
         lines.append(
-            f"  {item_id}: {rec.get('status', '?')}"
-            f" | stage={stage} | sync={sync_state}{extra}"
+            f"  {item_id}: {rec.get('status', '?')} | "
+            f"stage={stage} | sync={sync_state}{extra}"
         )
     with suppress(OSError):
         status_path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,8 +169,8 @@ def validate_plan(plan: dict[str, Any]) -> None:
             }
             if has_single == has_multi:
                 raise ValueError(
-                    f"Item {item_id!r}: config needs either 'gate'"
-                    " or 'gates'={'off','on'}"
+                    f"Item {item_id!r}: config needs either 'gate' or "
+                    "'gates'={'off','on'}"
                 )
 
 
@@ -830,8 +830,8 @@ def main() -> None:
         state = read_json(checkpoint_path)
         if state.get("items") and not args.resume:
             parser.error(
-                f"Checkpoint already exists at {checkpoint_path};"
-                " pass --resume to continue"
+                f"Checkpoint already exists at {checkpoint_path}; "
+                "pass --resume to continue"
             )
     else:
         state = {"items": {}}

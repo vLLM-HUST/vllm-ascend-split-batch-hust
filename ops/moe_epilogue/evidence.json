@@ -58,51 +58,158 @@
   },
   "l3_numerical_guard": {
     "passed": true,
-    "metric": "exact_token_match",
-    "detail": "8 fixed greedy prompts (max_tokens=64), 8/8 identical outputs between VLLM_HUST_MOE_EPILOGUE unset and =1",
-    "rerun": {
-      "date": "2026-11-01",
-      "implementation": "host-fork source change (ace3d3842) overlaid on the container tree via PYTHONPATH",
-      "result": "8/8 identical",
-      "artifacts": "records/l3host-off.json, records/l3host-on.json"
-    },
-    "rerun_on_baseline": {
-      "date": "2026-11-02",
-      "baseline": "based/split-batch-baseline @ 8039119f (also carries PR #63: in_proj load-time merge + conv-weight pack)",
-      "implementation": "baseline checkout loaded via PYTHONPATH, no overlay patching",
-      "result": "8/8 identical",
-      "artifacts": "opt-qwen35b records/retest-off.json, records/retest-on.json"
-    },
-    "probe_script": "records/l3_fixed_batch.py + baseline/serve-n1-host.sh"
+    "matched": 8,
+    "total": 8,
+    "match_summary": "8/8",
+    "mismatched_indices": []
   },
   "l4_attribution": {
-    "caliber": "collected on the retired runtime-source-patch form; not re-measured after the host-fork rewrite",
-    "call_count_expected": 2560,
-    "call_count_actual": 2470,
-    "note": "40 layers x 64 decode steps; residual gap comes from the last layer and partially filled decode buckets. Residual 617 Mul calls belong to attn_output_gate in the 10 full-attention layers.",
-    "all_kernel_ms_before": 515.2,
-    "all_kernel_ms_after": 502.1,
-    "family_ms_before": 22.36,
-    "family_ms_after": 2.67,
-    "family_delta_ms": -13.1,
-    "decode_delta_pct": -2.54,
-    "computing_delta_pct": -1.18,
-    "computing_denominator_ms": 1108.9
+    "passed": true,
+    "expected_per_rank_on": 640,
+    "profiles": {
+      "off": [
+        {
+          "path": "/root/vllm-workspace/benchmark-archives/pending-longrun-20261116T091816Z/moe_epilogue/guard_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_50570_20261116092711241_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+          "target_kernel": "_gate_mul_kernel",
+          "matched_op_types": [],
+          "call_count_expected": null,
+          "call_count_actual": 0,
+          "hit_verified": false,
+          "target_total_ms": 0.0,
+          "target_avg_us": null,
+          "all_kernel_total_ms": 183.212,
+          "target_share_pct": 0.0
+        },
+        {
+          "path": "/root/vllm-workspace/benchmark-archives/pending-longrun-20261116T091816Z/moe_epilogue/guard_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_50571_20261116092711244_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+          "target_kernel": "_gate_mul_kernel",
+          "matched_op_types": [],
+          "call_count_expected": null,
+          "call_count_actual": 0,
+          "hit_verified": false,
+          "target_total_ms": 0.0,
+          "target_avg_us": null,
+          "all_kernel_total_ms": 183.984,
+          "target_share_pct": 0.0
+        }
+      ],
+      "on": [
+        {
+          "path": "/root/vllm-workspace/benchmark-archives/pending-longrun-20261116T091816Z/moe_epilogue/guard_on/profile/dp0_pp0_tp0_dcp0_ep0_rank0_68199_20261116093638821_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+          "target_kernel": "_gate_mul_kernel",
+          "matched_op_types": [
+            "_gate_mul_kernel"
+          ],
+          "call_count_expected": null,
+          "call_count_actual": 640,
+          "hit_verified": true,
+          "target_total_ms": 0.866,
+          "target_avg_us": 1.35,
+          "all_kernel_total_ms": 183.279,
+          "target_share_pct": 0.4726
+        },
+        {
+          "path": "/root/vllm-workspace/benchmark-archives/pending-longrun-20261116T091816Z/moe_epilogue/guard_on/profile/dp0_pp0_tp1_dcp0_ep1_rank1_68200_20261116093638820_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+          "target_kernel": "_gate_mul_kernel",
+          "matched_op_types": [
+            "_gate_mul_kernel"
+          ],
+          "call_count_expected": null,
+          "call_count_actual": 640,
+          "hit_verified": true,
+          "target_total_ms": 0.868,
+          "target_avg_us": 1.36,
+          "all_kernel_total_ms": 183.146,
+          "target_share_pct": 0.4737
+        }
+      ]
+    },
+    "call_count_expected": 1280,
+    "call_count_actual": 1280,
+    "status": "completed",
+    "verified": true
   },
   "serving_end_to_end": {
     "tested": true,
-    "repeat_measurement": false,
-    "concurrency": 32,
-    "input_output": "2048/256",
-    "design": "ABBA balanced, 2 blocks x 4 runs = 8 runs (prior run)",
-    "speedup": 0.9871,
-    "per_token_time_delta_pct": 0.88,
-    "conclusion": "within noise; no repeated measurement performed on the host-fork form",
-    "rationale": "L4 puts the operator at 1.55% -> 1.31% of all-kernel time, a 37.0 ms saving inside 14500 ms (0.26%). Same-config run spread in this cohort measures 2.04%, so an 8-run ABBA design cannot resolve a 0.26% effect; the signal is about 8x smaller than the noise.",
-    "prior_run": "gen-rate -1.29%, per-token time +0.88% over 8 runs; a second 256/512 @1 cohort gave per-token -0.58% against a 2.04% same-config spread",
-    "applicability": "historical"
+    "diagnostic_only": false,
+    "status": "within_noise",
+    "workload": "random",
+    "num_runs_off": 2,
+    "num_runs_on": 2,
+    "speedup": 1.0007,
+    "gen_rate_off": 603.87,
+    "gen_rate_on": 604.3,
+    "gen_rate_delta_pct": 0.07,
+    "intra_group_spread_pct": {
+      "off": 1.81,
+      "on": 1.07
+    },
+    "mean_step_off_ms": 46.46,
+    "mean_step_on_ms": 46.62,
+    "mean_step_delta_pct": 0.35,
+    "applicability": "current",
+    "scope": "operator serving A/B; not MOD acceptance",
+    "workloads": {
+      "random": {
+        "tested": true,
+        "diagnostic_only": true,
+        "status": "within_noise",
+        "workload": "random",
+        "num_runs_off": 2,
+        "num_runs_on": 2,
+        "speedup": 1.0007,
+        "gen_rate_off": 603.87,
+        "gen_rate_on": 604.3,
+        "gen_rate_delta_pct": 0.07,
+        "intra_group_spread_pct": {
+          "off": 1.81,
+          "on": 1.07
+        },
+        "mean_step_off_ms": 46.46,
+        "mean_step_on_ms": 46.62,
+        "mean_step_delta_pct": 0.35
+      },
+      "sharegpt": {
+        "tested": true,
+        "diagnostic_only": true,
+        "status": "verified_faster",
+        "workload": "sharegpt",
+        "num_runs_off": 2,
+        "num_runs_on": 2,
+        "speedup": 1.0275,
+        "gen_rate_off": 399.24,
+        "gen_rate_on": 410.22,
+        "gen_rate_delta_pct": 2.75,
+        "intra_group_spread_pct": {
+          "off": 0.19,
+          "on": 1.15
+        },
+        "mean_step_off_ms": 76.96,
+        "mean_step_on_ms": 74.39,
+        "mean_step_delta_pct": -3.34
+      },
+      "long-prefix": {
+        "tested": true,
+        "diagnostic_only": true,
+        "status": "within_noise",
+        "workload": "long-prefix",
+        "num_runs_off": 2,
+        "num_runs_on": 2,
+        "speedup": 0.9929,
+        "gen_rate_off": 54.03,
+        "gen_rate_on": 53.65,
+        "gen_rate_delta_pct": -0.71,
+        "intra_group_spread_pct": {
+          "off": 3.61,
+          "on": 0.73
+        },
+        "mean_step_off_ms": 15.73,
+        "mean_step_on_ms": 15.82,
+        "mean_step_delta_pct": 0.58
+      }
+    }
   },
-  "status": "default_off_host_fork_measured",
+  "status": "integrated_host_fork_measured",
   "default_enabled": false,
   "evidence_fingerprint": {
     "benchmark_script": "ops/moe_epilogue/bench_l0.py",
@@ -717,5 +824,804 @@
         "returncode": 0
       }
     }
-  ]
+  ],
+  "serving_history": [
+    {
+      "index": {
+        "id": "moe_epilogue",
+        "display_name": "MoE Shared-Expert Epilogue Multiply Fusion",
+        "layer": "host_fork",
+        "directory": "ops/moe_epilogue",
+        "readme": "ops/moe_epilogue/README.md",
+        "report": "ops/moe_epilogue/REPORT.md",
+        "evidence": "ops/moe_epilogue/evidence.json",
+        "status": "default_off_host_fork_measured",
+        "default_enabled": false,
+        "gate_env": "VLLM_HUST_MOE_EPILOGUE=1",
+        "l3_numerical_guard": "passed",
+        "serving_status": "historical_only"
+      },
+      "evidence": {
+        "$schema": "operator-benchmark-evidence/v1",
+        "operator_name": "moe_epilogue",
+        "callsite": "vllm_ascend.ops.fused_moe.shared_experts:AscendSharedExperts.part2",
+        "environment": {
+          "device": "Ascend910B2",
+          "cann_version": "9.1.0",
+          "vllm_version": "0.28.1.post1.dev143+gf18cf803c",
+          "vllm_ascend_version": "0.25.1rc2.dev125+hust",
+          "model": "Qwen3.5-35B-A3B",
+          "dtype": "bf16"
+        },
+        "shape_facts": {
+          "phase": "decode",
+          "batch_size": 8,
+          "prompt_tokens": 2048,
+          "decode_tokens": 256,
+          "gate_shape": "T x 1",
+          "shared_out_shape": "T x 2048",
+          "moe_layers": 40,
+          "cudagraph_mode": "FULL",
+          "capture_sizes": "1,2,4,8,16,32"
+        },
+        "l0_microbenchmark": {
+          "status": "completed",
+          "conclusion": "fused mul-only kernel beats the single aten broadcast multiply for M in 1..32 and stays bitwise identical; gain shrinks as M grows because the kernel scales with rows while the native launch overhead is amortised",
+          "speedup": 2.72,
+          "native_median_us": 3.64,
+          "optimized_median_us": 1.34,
+          "measurement": "NPU graph, 50 repetitions packed per replay, D=2048, bf16, single 910B2",
+          "raw_measurements": {
+            "M1": {
+              "native_us": 1.17,
+              "candidate_us": 1.0,
+              "saved_pct": 14.2,
+              "bitwise_equal": true
+            },
+            "M8": {
+              "native_us": 3.64,
+              "candidate_us": 1.34,
+              "saved_pct": 63.1,
+              "bitwise_equal": true
+            },
+            "M16": {
+              "native_us": 3.68,
+              "candidate_us": 1.71,
+              "saved_pct": 53.4,
+              "bitwise_equal": true
+            },
+            "M32": {
+              "native_us": 3.73,
+              "candidate_us": 2.43,
+              "saved_pct": 34.7,
+              "bitwise_equal": true
+            }
+          },
+          "note": "native baseline is the single aten broadcast multiply gate * out; the host sigmoid is excluded because it stays on the stock path"
+        },
+        "l3_numerical_guard": {
+          "passed": true,
+          "metric": "exact_token_match",
+          "detail": "8 fixed greedy prompts (max_tokens=64), 8/8 identical outputs between VLLM_HUST_MOE_EPILOGUE unset and =1",
+          "rerun": {
+            "date": "2026-11-01",
+            "implementation": "host-fork source change (ace3d3842) overlaid on the container tree via PYTHONPATH",
+            "result": "8/8 identical",
+            "artifacts": "records/l3host-off.json, records/l3host-on.json"
+          },
+          "rerun_on_baseline": {
+            "date": "2026-11-02",
+            "baseline": "based/split-batch-baseline @ 8039119f (also carries PR #63: in_proj load-time merge + conv-weight pack)",
+            "implementation": "baseline checkout loaded via PYTHONPATH, no overlay patching",
+            "result": "8/8 identical",
+            "artifacts": "opt-qwen35b records/retest-off.json, records/retest-on.json"
+          },
+          "probe_script": "records/l3_fixed_batch.py + baseline/serve-n1-host.sh"
+        },
+        "l4_attribution": {
+          "caliber": "collected on the retired runtime-source-patch form; not re-measured after the host-fork rewrite",
+          "call_count_expected": 2560,
+          "call_count_actual": 2470,
+          "note": "40 layers x 64 decode steps; residual gap comes from the last layer and partially filled decode buckets. Residual 617 Mul calls belong to attn_output_gate in the 10 full-attention layers.",
+          "all_kernel_ms_before": 515.2,
+          "all_kernel_ms_after": 502.1,
+          "family_ms_before": 22.36,
+          "family_ms_after": 2.67,
+          "family_delta_ms": -13.1,
+          "decode_delta_pct": -2.54,
+          "computing_delta_pct": -1.18,
+          "computing_denominator_ms": 1108.9
+        },
+        "serving_end_to_end": {
+          "tested": true,
+          "repeat_measurement": false,
+          "concurrency": 32,
+          "input_output": "2048/256",
+          "design": "ABBA balanced, 2 blocks x 4 runs = 8 runs (prior run)",
+          "speedup": 0.9871,
+          "per_token_time_delta_pct": 0.88,
+          "conclusion": "within noise; no repeated measurement performed on the host-fork form",
+          "rationale": "L4 puts the operator at 1.55% -> 1.31% of all-kernel time, a 37.0 ms saving inside 14500 ms (0.26%). Same-config run spread in this cohort measures 2.04%, so an 8-run ABBA design cannot resolve a 0.26% effect; the signal is about 8x smaller than the noise.",
+          "prior_run": "gen-rate -1.29%, per-token time +0.88% over 8 runs; a second 256/512 @1 cohort gave per-token -0.58% against a 2.04% same-config spread",
+          "applicability": "historical"
+        },
+        "status": "default_off_host_fork_measured",
+        "default_enabled": false,
+        "evidence_fingerprint": {
+          "benchmark_script": "ops/moe_epilogue/bench_l0.py",
+          "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
+          "host_fork_base_branch": "based/split-batch-baseline",
+          "host_fork_base_commit": "ad82d77cb",
+          "host_fork_dev_branch": "work/moe-shared-expert-epilogue",
+          "host_commit": "ace3d38423123c101ca2cdca8aeaaf21a7a40c5c",
+          "host_merge_commit": "8039119f",
+          "baseline_state": "merged into based/split-batch-baseline via PR #66",
+          "pending": "image rebuild only; L3 has been re-run on the merged baseline and stays 8/8 identical"
+        },
+        "device_retests": [
+          {
+            "run_id": "npu-retest-20261115T041855Z",
+            "scope": "isolated operator, synthetic historical shapes on current runtime; model integration, L4 and service not retested",
+            "environment": {
+              "timestamp": "2026-11-15T04:25:17+00:00",
+              "triton": {
+                "version": "3.2.0",
+                "path": "/usr/local/python3.12.13/lib/python3.12/site-packages/triton",
+                "key_sha256": "73b738272f0aea6d69eccefdb8a7405173f3f99169f46c355ea9b1beeb1be1da"
+              },
+              "cache": {
+                "dir": "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/triton-cache",
+                "fresh": false,
+                "fresh_effective": true,
+                "always_compile": false
+              },
+              "cann": {
+                "ascend_home_path": "/usr/local/Ascend/cann-9.1.0",
+                "info_sha256": "a9b17ef608ebeb70ade09cde1c12a545eb5e8f3e5312f6806ca0d368b0464848",
+                "info_file": "/usr/local/Ascend/cann-9.1.0/aarch64-linux/ascend_toolkit_install.info",
+                "version": "9.1.0"
+              },
+              "torch": {
+                "version": "2.10.0+cpu",
+                "torch_npu_version": "2.10.0.post4"
+              },
+              "device": {
+                "ASCEND_RT_VISIBLE_DEVICES": null,
+                "current_device": 0,
+                "npu_name": "Ascend910B2"
+              },
+              "cmdline": {
+                "triton_impl_name": "triton_ascend_impl",
+                "non_compute": false
+              }
+            },
+            "host_source_commit": "e59aaeef26788e9f895aefa568d779ad84cc7842",
+            "source_sha256": "c172f2cba49b9b9164a44a453a67db9110d34e421c9be0d71b238ef1d5a8183b",
+            "generic_verifier": {
+              "passed": 6,
+              "total": 6,
+              "limitation": "device transfer may compact CPU views; layout validation is provided by stride-preserving graph cases"
+            },
+            "stride_preserving_check": {
+              "passed": 6,
+              "total": 6,
+              "cases": [
+                {
+                  "case": 0,
+                  "passed": true,
+                  "shape": [
+                    [
+                      1,
+                      1
+                    ],
+                    [
+                      1,
+                      2048
+                    ]
+                  ],
+                  "stride": [
+                    [
+                      1,
+                      1
+                    ],
+                    [
+                      2048,
+                      1
+                    ]
+                  ],
+                  "atol": 0,
+                  "rtol": 0,
+                  "speedup": 0.9866596618808174,
+                  "baseline": {
+                    "median_us": 3.73500008136034,
+                    "p90_us": 4.187000170350075,
+                    "p99_us": 5.747999995946884
+                  },
+                  "candidate": {
+                    "median_us": 3.785499930381775,
+                    "p90_us": 4.202000051736832,
+                    "p99_us": 4.87699992954731
+                  }
+                },
+                {
+                  "case": 1,
+                  "passed": true,
+                  "shape": [
+                    [
+                      8,
+                      1
+                    ],
+                    [
+                      8,
+                      2048
+                    ]
+                  ],
+                  "stride": [
+                    [
+                      1,
+                      1
+                    ],
+                    [
+                      2048,
+                      1
+                    ]
+                  ],
+                  "atol": 0,
+                  "rtol": 0,
+                  "speedup": 1.1862429892313235,
+                  "baseline": {
+                    "median_us": 4.4235000386834145,
+                    "p90_us": 4.944000020623207,
+                    "p99_us": 5.169999971985817
+                  },
+                  "candidate": {
+                    "median_us": 3.7289999425411224,
+                    "p90_us": 4.249000176787376,
+                    "p99_us": 5.383000150322914
+                  }
+                },
+                {
+                  "case": 2,
+                  "passed": true,
+                  "shape": [
+                    [
+                      16,
+                      1
+                    ],
+                    [
+                      16,
+                      2048
+                    ]
+                  ],
+                  "stride": [
+                    [
+                      1,
+                      1
+                    ],
+                    [
+                      2048,
+                      1
+                    ]
+                  ],
+                  "atol": 0,
+                  "rtol": 0,
+                  "speedup": 1.0879773207185854,
+                  "baseline": {
+                    "median_us": 4.031500034034252,
+                    "p90_us": 4.961999878287315,
+                    "p99_us": 5.218999832868576
+                  },
+                  "candidate": {
+                    "median_us": 3.705500066280365,
+                    "p90_us": 4.033999890089035,
+                    "p99_us": 5.29399998486042
+                  }
+                },
+                {
+                  "case": 3,
+                  "passed": true,
+                  "shape": [
+                    [
+                      32,
+                      1
+                    ],
+                    [
+                      32,
+                      2048
+                    ]
+                  ],
+                  "stride": [
+                    [
+                      1,
+                      1
+                    ],
+                    [
+                      2048,
+                      1
+                    ]
+                  ],
+                  "atol": 0,
+                  "rtol": 0,
+                  "speedup": 1.097679403487137,
+                  "baseline": {
+                    "median_us": 4.067999869585037,
+                    "p90_us": 5.000000074505806,
+                    "p99_us": 5.218999832868576
+                  },
+                  "candidate": {
+                    "median_us": 3.7060000002384186,
+                    "p90_us": 4.427000135183334,
+                    "p99_us": 5.262999981641769
+                  }
+                },
+                {
+                  "case": 4,
+                  "passed": true,
+                  "shape": [
+                    [
+                      33,
+                      1
+                    ],
+                    [
+                      33,
+                      2048
+                    ]
+                  ],
+                  "stride": [
+                    [
+                      1,
+                      1
+                    ],
+                    [
+                      2048,
+                      1
+                    ]
+                  ],
+                  "atol": 0,
+                  "rtol": 0,
+                  "speedup": 1.0115820453671154,
+                  "baseline": {
+                    "median_us": 4.104999825358391,
+                    "p90_us": 5.062000080943108,
+                    "p99_us": 5.316000059247017
+                  },
+                  "candidate": {
+                    "median_us": 4.057999886572361,
+                    "p90_us": 5.161000043153763,
+                    "p99_us": 5.3199999034404755
+                  }
+                },
+                {
+                  "case": 5,
+                  "passed": true,
+                  "shape": [
+                    [
+                      97,
+                      1
+                    ],
+                    [
+                      97,
+                      2048
+                    ]
+                  ],
+                  "stride": [
+                    [
+                      1,
+                      1
+                    ],
+                    [
+                      2048,
+                      1
+                    ]
+                  ],
+                  "atol": 0,
+                  "rtol": 0,
+                  "speedup": 1.002982083760745,
+                  "baseline": {
+                    "median_us": 5.044999904930592,
+                    "p90_us": 5.931000038981438,
+                    "p99_us": 6.241999939084053
+                  },
+                  "candidate": {
+                    "median_us": 5.030000023543835,
+                    "p90_us": 6.049000099301338,
+                    "p99_us": 6.266999989748001
+                  }
+                }
+              ]
+            },
+            "measurement": {
+              "warmup": 10,
+              "repetitions_per_graph": 20,
+              "samples": 100,
+              "timing": "NPU event per replay, alternating order"
+            },
+            "limitations": [
+              "single device; frequency not locked",
+              "event timing per graph replay includes replay scheduling gaps",
+              "no memory peak measurement or service conclusion"
+            ],
+            "archive": {
+              "uri": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+              "files": {
+                "moe_epilogue-graph.json": "29c18dc1daf1447acd002788aaa53f0ea2a9b965fb0cda39bab0ee0b4c564356",
+                "moe_epilogue-verify-v2.json": "fe22948193b0d4527807015b7117d8cd90f8acbdf1cf8aa5fed3e98195e66b41",
+                "moe_epilogue-receipt-v2.json": "9f041117f2f8518ae0f5c2fdcfa6055b75dc31030930cd1abeb24a956705195f"
+              },
+              "runner_sha256": "a853c9c06d77f29ff52b540e81c03a0da4bdf1ca56f098d1918b8ce5cf7400bd",
+              "verification_command": {
+                "argv": [
+                  "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+                  "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/skills/triton-op-verifier/scripts/verify.py",
+                  "--op_name",
+                  "moe_epilogue",
+                  "--verify_dir",
+                  "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/moe_epilogue",
+                  "--output",
+                  "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/moe_epilogue/verify_result.json"
+                ],
+                "returncode": 0,
+                "duration_s": 45.45357275009155
+              },
+              "graph_command": [
+                "env",
+                "-u",
+                "PYTHONPATH",
+                "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+                "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/graph_retest.py",
+                "moe_epilogue"
+              ],
+              "graph_result_note": "Runner exit zero requires per-case status inspection; compilation failures are retained, not accepted timings."
+            },
+            "dependency_sha256": {
+              ".openbitfun/skills/triton-op-verifier/scripts/verify.py": "d7145025abdb33ba126328fc26bf0e66480744d59c18adc329d9dfd38ea647d7",
+              ".openbitfun/skills/triton-op-verifier/scripts/eco_limits.py": "11658fcf93c028a6d6b8f4b3aeef1f74855613cec9c6bef4a8423e65e855f1c0"
+            },
+            "profiler": {
+              "warmup": 10,
+              "repeats": 100,
+              "passed_cases": 6,
+              "total_cases": 6,
+              "per_shape_results": [
+                {
+                  "case_idx": 1,
+                  "input_desc": [
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        1,
+                        1
+                      ],
+                      "dtype": "torch.bfloat16"
+                    },
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        1,
+                        2048
+                      ],
+                      "dtype": "torch.bfloat16"
+                    }
+                  ],
+                  "status": "pass",
+                  "framework": {
+                    "avg_duration_ms": 0.0015,
+                    "peak_memory_mb": 0.01,
+                    "operators": {
+                      "aclnnMul_MulAiCore_Mul": {
+                        "avg_us": 1.5476,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "implementation": {
+                    "avg_duration_ms": 0.0015,
+                    "peak_memory_mb": 0.01,
+                    "operators": {
+                      "_gate_mul_kernel": {
+                        "avg_us": 1.49,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "speedup_vs_torch": 1.0,
+                  "error_type": null,
+                  "error_msg": null
+                },
+                {
+                  "case_idx": 2,
+                  "input_desc": [
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        8,
+                        1
+                      ],
+                      "dtype": "torch.bfloat16"
+                    },
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        8,
+                        2048
+                      ],
+                      "dtype": "torch.bfloat16"
+                    }
+                  ],
+                  "status": "pass",
+                  "framework": {
+                    "avg_duration_ms": 0.0037,
+                    "peak_memory_mb": 0.1,
+                    "operators": {
+                      "aclnnMul_MulAiCore_Mul": {
+                        "avg_us": 3.7283,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "implementation": {
+                    "avg_duration_ms": 0.0015,
+                    "peak_memory_mb": 0.06,
+                    "operators": {
+                      "_gate_mul_kernel": {
+                        "avg_us": 1.542,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "speedup_vs_torch": 2.4667,
+                  "error_type": null,
+                  "error_msg": null
+                },
+                {
+                  "case_idx": 3,
+                  "input_desc": [
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        16,
+                        1
+                      ],
+                      "dtype": "torch.bfloat16"
+                    },
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        16,
+                        2048
+                      ],
+                      "dtype": "torch.bfloat16"
+                    }
+                  ],
+                  "status": "pass",
+                  "framework": {
+                    "avg_duration_ms": 0.0038,
+                    "peak_memory_mb": 0.19,
+                    "operators": {
+                      "aclnnMul_MulAiCore_Mul": {
+                        "avg_us": 3.7633,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "implementation": {
+                    "avg_duration_ms": 0.0018,
+                    "peak_memory_mb": 0.13,
+                    "operators": {
+                      "_gate_mul_kernel": {
+                        "avg_us": 1.8345,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "speedup_vs_torch": 2.1111,
+                  "error_type": null,
+                  "error_msg": null
+                },
+                {
+                  "case_idx": 4,
+                  "input_desc": [
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        32,
+                        1
+                      ],
+                      "dtype": "torch.bfloat16"
+                    },
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        32,
+                        2048
+                      ],
+                      "dtype": "torch.bfloat16"
+                    }
+                  ],
+                  "status": "pass",
+                  "framework": {
+                    "avg_duration_ms": 0.0038,
+                    "peak_memory_mb": 0.38,
+                    "operators": {
+                      "aclnnMul_MulAiCore_Mul": {
+                        "avg_us": 3.8396,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "implementation": {
+                    "avg_duration_ms": 0.0024,
+                    "peak_memory_mb": 0.25,
+                    "operators": {
+                      "_gate_mul_kernel": {
+                        "avg_us": 2.4134,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "speedup_vs_torch": 1.5833,
+                  "error_type": null,
+                  "error_msg": null
+                },
+                {
+                  "case_idx": 5,
+                  "input_desc": [
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        33,
+                        1
+                      ],
+                      "dtype": "torch.bfloat16"
+                    },
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        33,
+                        2048
+                      ],
+                      "dtype": "torch.bfloat16"
+                    }
+                  ],
+                  "status": "pass",
+                  "framework": {
+                    "avg_duration_ms": 0.0039,
+                    "peak_memory_mb": 0.39,
+                    "operators": {
+                      "aclnnMul_MulAiCore_Mul": {
+                        "avg_us": 3.9451,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "implementation": {
+                    "avg_duration_ms": 0.0039,
+                    "peak_memory_mb": 0.26,
+                    "operators": {
+                      "aclnnMul_MulAiCore_Mul": {
+                        "avg_us": 3.9481,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "speedup_vs_torch": 1.0,
+                  "error_type": null,
+                  "error_msg": null
+                },
+                {
+                  "case_idx": 6,
+                  "input_desc": [
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        97,
+                        1
+                      ],
+                      "dtype": "torch.bfloat16"
+                    },
+                    {
+                      "type": "tensor",
+                      "shape": [
+                        97,
+                        2048
+                      ],
+                      "dtype": "torch.bfloat16"
+                    }
+                  ],
+                  "status": "pass",
+                  "framework": {
+                    "avg_duration_ms": 0.0045,
+                    "peak_memory_mb": 1.14,
+                    "operators": {
+                      "aclnnMul_MulAiCore_Mul": {
+                        "avg_us": 4.5217,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "implementation": {
+                    "avg_duration_ms": 0.0046,
+                    "peak_memory_mb": 0.76,
+                    "operators": {
+                      "aclnnMul_MulAiCore_Mul": {
+                        "avg_us": 4.5815,
+                        "launch_count": 1
+                      }
+                    }
+                  },
+                  "speedup_vs_torch": 0.9783,
+                  "error_type": null,
+                  "error_msg": null
+                }
+              ],
+              "result_sha256": "64ea6b366c55546527ace20909055600f0c49910553ca8e9bcc826c2d474e4bd",
+              "scope": "eager kernel durations; separate from graph replay timing; rows above 32 use native fallback",
+              "command": "benchmark.py --op_name moe_epilogue --warmup 10 --repeats 100 --no-lock-frequency --keep_res",
+              "returncode": 0
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "serving_sync": {
+    "archive": "file:///root/vllm-workspace/benchmark-archives/pending-longrun-20261116T091816Z/moe_epilogue",
+    "files": {
+      "config.json": "cfcc24b1b41943af3b76767f4bf43fcee1c69eb07c38cc90a2ceb7396f63112a",
+      "host_preflight.json": "a338eb3b30ded02edb8a6c7fea2458c8ed002ef8be972583532c26b4fc36316e",
+      "guard_off/invocation.json": "da11417f72a864273f9d3d651cb29fe7a8557ff9d28c1b7fcd5ef5387a8c5666",
+      "guard_off/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "guard_off/responses.json": "5b026a3756bd4107b7bb6bca13a18821d6b7773d1d193b2de603b4a35fd50a78",
+      "guard_off/greedy.json": "758bd7566c1cb0f2adc22049ccb5862b5ce55be7ce2dd3f17a30e2b22c3aed79",
+      "guard_on/invocation.json": "ac092d3fa72a6239290f20d5b08f9113bbb8f54a3d93cc7b51c72241b8fde712",
+      "guard_on/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "guard_on/responses.json": "9952944285e651f36b9f6f2ee8d79a551850c14373c4d4b8edecb9ecbc8ab063",
+      "guard_on/greedy.json": "758bd7566c1cb0f2adc22049ccb5862b5ce55be7ce2dd3f17a30e2b22c3aed79",
+      "bench_0_off/invocation.json": "18861bab9071e75b1b16eeb2f33975d75198dd9397df03705a0572f175e487c6",
+      "bench_0_off/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "bench_1_on/invocation.json": "bad5df54cb5fc58e88114ceda1ff005a0b001e6a559f3d84031fbcd4c2393dbb",
+      "bench_1_on/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "bench_2_on/invocation.json": "bad5df54cb5fc58e88114ceda1ff005a0b001e6a559f3d84031fbcd4c2393dbb",
+      "bench_2_on/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "bench_3_off/invocation.json": "18861bab9071e75b1b16eeb2f33975d75198dd9397df03705a0572f175e487c6",
+      "bench_3_off/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "serving_l3.json": "bfc9c0c4cbebd6e1067c0cb81937b286582477e7494968857cdd6898edda0424",
+      "l4.json": "ed7d4827508acb5203b53034be852d824a9f533d1824ac6f82b9eb6f1b6486a1",
+      "guard_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_50570_20261116092711241_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv": "29357fb233cb8af758b9185562cc8376c96ab061d0f748777ee2e9e6cff47934",
+      "guard_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_50571_20261116092711244_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv": "47a3d4a2beb92be1612568d0351317bc92fd4e66a9704d02a91ecd842d10b30f",
+      "guard_on/profile/dp0_pp0_tp0_dcp0_ep0_rank0_68199_20261116093638821_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv": "54667d394ea5877c9b0ed66bb951b19a02ae1afa05785d81fc6c7da08525090b",
+      "guard_on/profile/dp0_pp0_tp1_dcp0_ep1_rank1_68200_20261116093638820_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv": "07e21a7438cb0f7c41f0664ea3c0d24c8091a60804169eafd1a1635104e19e98",
+      "workload_pairing.json": "729701f161693c0b673feccd838f48e592eb17a2d45130ba8fafd527608d0661",
+      "bench_0_off/random.json": "d3e54382db4eb2d8dcc3828299da72daa8ace6267d91c47f7f25a9b924cbb142",
+      "bench_0_off/random_invocation.json": "b7169ed3e3b6a17973cc3ba119835304dcdc39564c61b328a066aeae14a327d9",
+      "bench_1_on/random.json": "1db32899fd1791ce212ad337838f80d7896b6307f2fc209efa1558d28c9cac8b",
+      "bench_1_on/random_invocation.json": "d55b3f1b8aa95475260aa4282008683a7044dd2f471018caa5f579539619f732",
+      "bench_2_on/random.json": "93bc97b08527734eb66d2955001d9df7b1b89f98d4731e27377cf83a65953213",
+      "bench_2_on/random_invocation.json": "984b060d9af35df8c08b3b2f5e90614da7e98755fed8a7df899be10420b2b92c",
+      "bench_3_off/random.json": "24b302f755ec967b8c9855c7d20a8f63eca1555532f98721404d272ab4368760",
+      "bench_3_off/random_invocation.json": "9b419f7773db701ae1eb6b47df68cbb150804d132f80200bf879feebddc7e305",
+      "bench_0_off/sharegpt.json": "2a897778ef0a52107631cea952b5504556cb55a90bdd9c5378cf69aa494cfba0",
+      "bench_0_off/sharegpt_invocation.json": "0517927dd3704fc8548fe622a3ae37ba7e5196e0914644b92dbad55cc52ef5d6",
+      "bench_1_on/sharegpt.json": "d8d76a9002c17732067283854cb387f1ed214c809708259aea78f587f2f9e9fd",
+      "bench_1_on/sharegpt_invocation.json": "85418d6b5cbbe693a8ff0cfc3a3c5d9c0edc2ecf2a68bab4ab9ae24e327774ff",
+      "bench_2_on/sharegpt.json": "def4b728b34b494c4730eb71b3b7ec531dddb0c785892da5bb19c3299cf9c2ca",
+      "bench_2_on/sharegpt_invocation.json": "9f77ca031e88153c5ed29e256ff002678d0a114dccfed17f40067e1e261bdabf",
+      "bench_3_off/sharegpt.json": "97dd9cde44a92bd1b9f27715f4b15a2aade719ac54162e302930d8e4445b75a3",
+      "bench_3_off/sharegpt_invocation.json": "82e0f171dfedb8496727b20be02330239ab9ded51bab0f0869d57551bff864e3",
+      "bench_0_off/long-prefix.json": "dfdf0e480d880715069c58ada98a562dc2e20015a925c07be6da517e9bd25fd4",
+      "bench_0_off/long-prefix_invocation.json": "31b614d58fa1f644f4d5bdda9143e4965c938bb74c1235584fa400fb86435478",
+      "bench_1_on/long-prefix.json": "0bd6733f7a310f344f146ee9fb0eb96cc63f7d2c87d1665a35ed591236dacbeb",
+      "bench_1_on/long-prefix_invocation.json": "6ba94c83a18f81e8c25b102ed2f3daedcecfbde5c3cdff9c0a9fd44af4a715ff",
+      "bench_2_on/long-prefix.json": "e69a165bd7097b4c89b87387f129bdaab6b25f430f77d62c068e277a83571bbb",
+      "bench_2_on/long-prefix_invocation.json": "ba6d5678aaf376080530c3fa2c6e7b7b8a274ff9a09d6b0f4a192dee7221db78",
+      "bench_3_off/long-prefix.json": "e7f3597ced3c74fd4a451bdf10a39b0948bef7c616ae3e8af398de8737c3c684",
+      "bench_3_off/long-prefix_invocation.json": "7e2726e8385b0bb9d861cb687ea2082678ef50e269a19ecc3ddd6e652f8b7575",
+      "summary.json": "79f06bf01cb8344d5e3e9dd867103184ed1395f761e8a9b211a131ca88f623f4"
+    },
+    "host_commits": {
+      "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+      "vllm-ascend": "e59aaeef26788e9f895aefa568d779ad84cc7842"
+    },
+    "completed_ns": 1794825422746017255
+  }
 }

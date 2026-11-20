@@ -12,5 +12,6 @@ tests/test_verifier_layout.py
 tests/test_host_runtime.py
 tests/test_l0_trace_record.py
 tests/test_repo_audit.py
+tests/test_pending_longrun.py
 -m
 not npu

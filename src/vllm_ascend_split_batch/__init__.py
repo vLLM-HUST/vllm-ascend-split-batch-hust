@@ -11,7 +11,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Split-batch planning contracts and inert runtime metadata."""
+"""Split-batch planning contracts and inert runtime metadata.
+
+The public names are resolved lazily through :func:`__getattr__` (one lookup
+source: ``__all__``), so importing this package never imports ``planner``.
+"""
 
 from typing import TYPE_CHECKING
 
@@ -24,33 +28,19 @@ if TYPE_CHECKING:
         precheck_reason,
     )
 
-
-class VllmAscendSplitBatchContractProposal:
-    """Metadata-only proposal; this class performs no runtime activation."""
-
-
-_EXPORTS = {
-    "DualPadPlan",
-    "SplitBatchConfig",
-    "SplitSlice",
-    "plan_dual_pad",
-    "precheck_reason",
-}
-
-
-def __getattr__(name: str):
-    if name in _EXPORTS:
-        from . import planner
-
-        return getattr(planner, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 __all__ = [
     "DualPadPlan",
     "SplitBatchConfig",
     "SplitSlice",
-    "VllmAscendSplitBatchContractProposal",
     "plan_dual_pad",
     "precheck_reason",
 ]
+
+
+def __getattr__(name: str):
+    """Resolve one public name from ``planner`` on first access."""
+    if name in __all__:
+        from . import planner
+
+        return getattr(planner, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

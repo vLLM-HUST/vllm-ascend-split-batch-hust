@@ -7,7 +7,8 @@
 
 1. **宿主只读**:`$VLLM_ASCEND_REPO` 与 `$VLLM_HUST_REPO`
    禁止修改。宿主能力只走官方公开面:`vllm.general_plugins` entry point、
-   `--worker-cls` 子类、`--additional-config`、官方 CLI/env。
+   `--worker-cls` 子类、`--additional-config`、官方 CLI/env。确实必须改宿主
+   私有代码时走第 7 条的宿主 Fork 路径,不在本仓的工作区里改。
 2. **不注册 `vllm.platform_plugins`**(已被 vllm-ascend 的 AscendPlatform 占用)。
 3. **default-off**:任何新能力关闭时必须与原生行为零差异。新开关一律
    env-gated、默认缺省,patch 方法未开启时逐字委托原实现。
@@ -16,11 +17,17 @@
    明确锁定已验证区间,禁止写 `>=0`。
 5. **provenance/ 只读**:提取历史代码必须保留原版权头(Huawei, Apache-2.0)
    与 commit 溯源。
-6. **不做上游 PR(2026-09-11 定)**:改动只在本地落地(本仓 + 本地 clone/PYTHONPATH
-   覆盖),不向上游(vllm / vllm-ascend 社区)提补丁,也不做"推动宿主提供 typed
-   contract"这类上游化动作。与上游的关系只有一条:**跟随 `vllm-hust` release
-   节奏做版本同步**(重新锁定基线与 `host.version_range`,见 release.md §4)。
+6. **不做上游 PR(2026-09-11 定)**:不向上游(vllm / vllm-ascend 社区)提补丁,
+   也不做"推动宿主提供 typed contract"这类上游化动作。与上游的关系只有一条:
+   **跟随 `vllm-hust` release 节奏做版本同步**(重新锁定基线与
+   `host.version_range`,见 release.md §4)。
    `docs/upstream/` 素材冻结留档,不再维护、不提交。
+7. **宿主改动的唯一落地路径是宿主 Fork**:必须从宿主 Fork 仓库的
+   `based/split-batch-baseline` 切特性分支并在该基线上提 PR,见
+   [容器与插件边界规范](container-and-plugin-boundary-spec.md) §3.2 与 §3.6。
+   严禁用本地源码 clone、`PYTHONPATH` 覆盖、editable 安装等手段遮蔽已安装的
+   宿主包;也不得在运行树上 replay 补丁。屏蔽已安装包会让"测的是哪份源码"
+   无法核验,`tools/operator_tools/host_runtime.py` 的服务内核验会因此失准。
 
 ## 2. 开发工作流
 

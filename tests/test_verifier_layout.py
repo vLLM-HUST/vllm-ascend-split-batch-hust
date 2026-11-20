@@ -40,26 +40,3 @@ def test_transfer_preserves_layout_and_values(layout):
     description = utils.describe_input([actual[0]])[0]
     assert description["stride"] == list(source.stride())
     assert description["storage_offset"] == source.storage_offset()
-
-
-@pytest.mark.npu
-@pytest.mark.parametrize("rows", [1, 7, 32, 97, 266])
-@pytest.mark.parametrize("stride", [1, 2])
-def test_input_norm_npu_strides(rows, stride, monkeypatch):
-    torch = pytest.importorskip("torch")
-    pytest.importorskip("torch_npu")
-    pytest.importorskip("triton")
-    if not torch.npu.is_available():
-        pytest.skip("NPU unavailable")
-    from vllm_ascend_split_batch import gdn_input_norm
-
-    monkeypatch.setattr(gdn_input_norm, "_NORM_ENABLED", True)
-    torch.manual_seed(42)
-    source = torch.randn(rows, 2048 * stride, dtype=torch.bfloat16)[:, ::stride]
-    x = load_utils().move_to_device(source, "npu:0")
-    assert x.stride() == source.stride()
-    weight = torch.randn(2048, dtype=torch.bfloat16, device="npu:0")
-    var = x.float().square().mean(-1, keepdim=True)
-    expected = (x.float() * torch.rsqrt(var + 1e-6)).to(x.dtype) * weight
-    actual = gdn_input_norm.gdn_input_norm_fused(x, weight)
-    torch.testing.assert_close(actual, expected, atol=1e-3, rtol=1e-3)

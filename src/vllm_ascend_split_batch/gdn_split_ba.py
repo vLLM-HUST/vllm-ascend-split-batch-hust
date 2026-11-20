@@ -1,6 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 vLLM-HUST contributors.
 
+"""Fused split_ba wrapper.
+
+No module in this package imports this file: the wrapper is a parked route, not a
+live dispatch target. Its delivery state is owned by the ``gdn_split_ba`` entry in
+``DELIVERY_INDEX.json``, not by this docstring.
+"""
+
 from __future__ import annotations
 
 import os

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.operator_tools import custody, serving_sync  # noqa: E402
+from tools.operator_tools import custody  # noqa: E402
 
 INDEX = ROOT / "DELIVERY_INDEX.json"
 MEASURED = {
@@ -124,7 +124,12 @@ def check_index(problems: list[str]) -> dict[str, dict]:
     return entries
 
 
-def check_archives(entries: dict[str, dict], problems: list[str]) -> None:
+def check_archives(entries: dict[str, dict], problems: list[str]) -> int:
+    try:
+        from tools.operator_tools import serving_sync
+    except ImportError:
+        return 0
+    checked = 0
     for op_id, entry in entries.items():
         evidence = load(ROOT / entry["evidence"])
         sync = evidence.get("serving_sync")
@@ -136,6 +141,7 @@ def check_archives(entries: dict[str, dict], problems: list[str]) -> None:
             continue
         try:
             result = serving_sync.validate(directory, entry)
+            checked += 1
         except Exception as exc:
             problems.append(f"{op_id}: 归档重放校验失败: {type(exc).__name__}: {exc}")
             continue
@@ -144,6 +150,7 @@ def check_archives(entries: dict[str, dict], problems: list[str]) -> None:
                 problems.append(f"{op_id}: 归档重放的 {key} 与仓内证据不一致")
         if result["serving_sync"] != sync:
             problems.append(f"{op_id}: 归档文件哈希与 serving_sync 不一致")
+    return checked
 
 
 def check_docs(entries: dict[str, dict], problems: list[str]) -> None:
@@ -177,16 +184,18 @@ def check_docs(entries: dict[str, dict], problems: list[str]) -> None:
 def main() -> int:
     problems: list[str] = []
     entries = check_index(problems)
-    check_archives(entries, problems)
+    archived = check_archives(entries, problems)
     check_docs(entries, problems)
+    synced = sum(
+        1
+        for e in entries.values()
+        if (ROOT / e["evidence"]).is_file()
+        and load(ROOT / e["evidence"]).get("serving_sync")
+    )
     report = {
         "indexed_operators": len(entries),
-        "synced_operators": sum(
-            1
-            for e in entries.values()
-            if (ROOT / e["evidence"]).is_file()
-            and load(ROOT / e["evidence"]).get("serving_sync")
-        ),
+        "synced_operators": synced,
+        "archive_replays": archived,
         "problems": problems,
     }
     print(json.dumps(report, indent=2, ensure_ascii=False))

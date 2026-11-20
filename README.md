@@ -46,7 +46,7 @@ agents, release process, pitfall history, progress log) lives in
 [docs/](docs/README.md) — start there. Repo-level agent rules:
 [AGENTS.md](AGENTS.md).
 
-## GDN QKV norm (tier-2, default-off)
+## GDN QKV norm (host proposal, default-off)
 
 The accepted kernel and reversible host proposal live in
 `host-proposals/GDN-qkv-norm`. There is no `gdn-qkv-norm` general plugin or
@@ -55,7 +55,7 @@ combination remains inside an opaque core without a proven narrow dispatch.
 Do not treat a packaged kernel as plug-and-play callsite replacement.
 
 Scope: Qwen3.5-35B-A3B bf16/ND, TP2, pure non-spec decode T16, FULL graph.
-Existing tier-2 activation requires the reviewed host patch plus
+Existing host-proposal activation requires the reviewed host patch plus
 `VLLM_HUST_GDN_QKV_NORM=1` and `USE_DEFAULT_FLA_NORM=0` before startup;
 unsupported inputs retain native fallback. No automatic patching is provided.
 Rollback requires disabling the env and restarting/recapturing; reverse the
@@ -71,7 +71,7 @@ The published root planner remains `import_only` and cannot be activated. Curren
 ### Cohort scope (what our evidence does and does not cover)
 
 > Authority: [`docs/cohort-and-ownership.md`](docs/cohort-and-ownership.md) — the cohort boundary plus the four
-> ownership items returned to this repository; binding rule: [`AGENTS.md`](AGENTS.md) hard constraint 9.
+> ownership items returned to this repository; binding rule: [`AGENTS.md`](AGENTS.md) §2.7 (cohort boundary).
 
 Stated here so the numbers below are not over-extended. **2026-10-13 owner ruling: the baseline moved to the
 0.28 image + Qwen3.5-35B-A3B** ("we no longer work on Qwen2.5"). The upstream audit quotes in
@@ -138,7 +138,7 @@ CPU 回归使用 `pytest -q -m 'not host_tree'`；仓内保留的算子基准按
 `tools/bench_*.py` 用法运行。`tools/bench-ladder.sh` 是特定 serving 主机的
 L0/L1/L2/L3/L4 流程，依赖模型、解释器、解析工具及仓外结果目录；它不是
 clean-checkout CPU 测试，不是安装包依赖，也不能替代缺失的 NPU/服务验证。
-性能主张须遵守[交付清单](docs/delivery-inventory.md#性能证据最小字段)：算子与
+性能主张须遵守[交付清单](docs/delivery-inventory.md#5-性能证据最小字段与评测阶梯)：算子与
 服务收益分开记录，保留负结果、失败及适用边界。具体开发和发布门见
 [发布检查表](docs/release.md)。
 

@@ -6,6 +6,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+#: The three unpack outputs, in the order ``unpack_norm`` returns them.
+OUTPUT_NAMES = ("q", "k", "v")
+#: Outputs compared bitwise instead of by value: ``v`` is a verbatim copy in the
+#: fused path, so any byte difference is a defect (and ``-0.0`` must not pass).
+BITWISE_OUTPUTS = frozenset({"v"})
+
 
 def attention_class_for_model(model, core):
     classes = {
@@ -49,6 +55,20 @@ def tensor_difference(actual, expected, *, bitwise=False):
 
 
 class NormDiagnostic:
+    """Per-layer shadow comparison of the fused and the native qkv unpack.
+
+    Required call order -- ``install()`` only replaces methods, it does not know
+    where a step starts or ends, so the driver has to bracket every step:
+
+    1. :meth:`install` once, before the model runs;
+    2. :meth:`begin_step` before each step (clears the per-step activity flags);
+    3. run the model forward;
+    4. :meth:`end_step` after each step (counts the step, writes the report).
+
+    Comparison rule per output name (``OUTPUT_NAMES``): ``q``/``k`` by value with
+    NaN treated as equal, ``v`` bitwise -- see ``BITWISE_OUTPUTS``.
+    """
+
     def __init__(self, directory, rank, max_steps=128, metadata=None):
         if max_steps < 1:
             raise ValueError("max_steps must be positive")
@@ -80,11 +100,13 @@ class NormDiagnostic:
             }
         slot = self.slots[name]
         slot["input"].copy_(x)
-        for i, (a, b) in enumerate(zip(actual, expected, strict=True)):
-            slot["actual"][i].copy_(a)
-            slot["expected"][i].copy_(b)
-            same = equality_mask(a, b, bitwise=i == 2)
-            slot["counts"][i].copy_((~same).sum())
+        for index, (output, a, b) in enumerate(
+            zip(OUTPUT_NAMES, actual, expected, strict=True)
+        ):
+            slot["actual"][index].copy_(a)
+            slot["expected"][index].copy_(b)
+            same = equality_mask(a, b, bitwise=output in BITWISE_OUTPUTS)
+            slot["counts"][index].copy_((~same).sum())
         slot["active"].fill_(1)
 
     def begin_step(self):
@@ -127,9 +149,9 @@ class NormDiagnostic:
             name, slot, counts = first
             report.update(layer=name, counts=counts, status="DIVERGENCE")
             report["differences"] = {
-                key: tensor_difference(a, b, bitwise=key == "v")
+                key: tensor_difference(a, b, bitwise=key in BITWISE_OUTPUTS)
                 for key, a, b in zip(
-                    ("q", "k", "v"), slot["actual"], slot["expected"], strict=True
+                    OUTPUT_NAMES, slot["actual"], slot["expected"], strict=True
                 )
             }
             payload = {
