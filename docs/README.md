@@ -51,6 +51,7 @@
 | 算子测试标准、形状合同与验收报告 | [operator-benchmark-standard.md](operator-benchmark-standard.md) |
 | 各阶段测试执行手册（进入条件、执行命令、回填顺序、决策树） | [execution-workflow.md](execution-workflow.md) |
 | **热点 profile 采集口径、pipe 判读与结论边界** | [hotspot-profile-method.md](hotspot-profile-method.md) |
+| **验收形态对齐口径、并发三口径与结论适用范围** | [acceptance-shape-alignment.md](acceptance-shape-alignment.md) + [结构化对照](acceptance-shape.json) |
 | **NPU 带卡环境实测与评测指南** | [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) |
 | **cohort 边界（我们能声称什么）× 四项归属** | [cohort-and-ownership.md](cohort-and-ownership.md)（约束入口：[../AGENTS.md](../AGENTS.md) 的「证据与结论」节） |
 | 宿主提案补丁（host proposal，未提交上游） | [`host-proposals/README.md`](../host-proposals/README.md)（章程）+ `host-proposals/<id>/`（`proposal_meta.json` = env 语法/哈希/版本精确锁定/上游状态）；`docs/upstream/` 只是路径消歧 stub |
