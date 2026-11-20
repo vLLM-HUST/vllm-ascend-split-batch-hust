@@ -7,16 +7,24 @@
 #   PY / RUNTIME_PY / RUN_ID / RUN_DIR / ARCHIVE_ROOT / PORT_BASE /
 #   PROFILE_GATE / PROFILE_ROUNDS / PROFILE_SLEEP_SECONDS
 #   采集形态: MODEL_PATH / MODEL_ALIAS / TP_SIZE / MAX_MODEL_LEN /
+#   MAX_NUM_SEQS / MAX_BATCHED_TOKENS / BLOCK_SIZE / GPU_MEMORY_UTILIZATION /
+#   ENABLE_EXPERT_PARALLEL / CUDAGRAPH_CAPTURE_SIZES /
 #   SERVER_MODE（eager|graph）/ WORKLOAD / PREFIX_CACHING /
 #   HOST_VLLM_COMMIT / HOST_ASCEND_COMMIT /
-#   WARMUP_TOKENS / L3_TOKENS / PROFILE_TOKENS / WARMUP_REPEATS
+#   WARMUP_TOKENS / L3_TOKENS / PROFILE_TOKENS / WARMUP_REPEATS /
+#   PROFILE_REQUESTS / CONCURRENCY / SHARED_PREFIX_TOKENS
 # 产物落点: 仓内 $RUN_DIR（默认 <仓根>/.openbitfun/profile-hotspot-longrun-<RUN_ID>）落
 #   config.json / status.json / hotspots_NN.json / nohup.log / summary.txt；
 #   设备侧原始采集落仓外 $ARCHIVE_ROOT 下的 round_NN_off/。
 #
-# 换形态只改环境变量，不改脚本：输出长度、并发与提示数由 --workload 选中的
-# 预设决定（见 tools/operator_tools/workloads.py），SERVER_MODE=graph 时不再传
-# --enforce-eager，采集落进 ACLGraph 形态。
+# 换形态只改环境变量，不改脚本：SERVER_MODE=graph 时不传 --enforce-eager，
+# 采集落进 ACLGraph 形态，并按 CUDAGRAPH_CAPTURE_SIZES 捕获图。
+# 服务形态默认值逐项对齐冻结验收 profile（max-model-len 32768、
+# max-num-seqs 16、max-num-batched-tokens 8192、block-size 128、
+# expert parallel 开、capture sizes 1 2 4 8 16、显存水位 0.85、
+# prefix caching 关），Profile 窗口默认 16 条请求按 16 并发发出。
+# 要回退旧的单请求 eager 形态，设：
+#   SERVER_MODE=eager MAX_MODEL_LEN=4096 PROFILE_REQUESTS=1 CONCURRENCY=1
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -34,15 +42,22 @@ SLEEP_SECONDS=${PROFILE_SLEEP_SECONDS:-30}
 MODEL_PATH=${MODEL_PATH:-"/models/Qwen3.5-35B-A3B"}
 MODEL_ALIAS=${MODEL_ALIAS:-"qwen35-35b"}
 TP_SIZE=${TP_SIZE:-2}
-MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
+# 服务形态默认值 = 冻结验收 profile；要回退旧形态就逐项改环境变量。
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-32768}
+MAX_NUM_SEQS=${MAX_NUM_SEQS:-16}
+MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-8192}
+BLOCK_SIZE=${BLOCK_SIZE:-128}
+GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.85}
+ENABLE_EXPERT_PARALLEL=${ENABLE_EXPERT_PARALLEL:-1}
+CUDAGRAPH_CAPTURE_SIZES=${CUDAGRAPH_CAPTURE_SIZES:-"1 2 4 8 16"}
 WORKLOAD=${WORKLOAD:-"random"}
-SERVER_MODE=${SERVER_MODE:-"eager"}
+SERVER_MODE=${SERVER_MODE:-"graph"}
 PREFIX_CACHING=${PREFIX_CACHING:-0}
-# profile 窗口里的请求形状：请求数与并发度默认都是 1，与改造前完全一致。
+# profile 窗口的请求形状默认对齐验收客户端的并发：16 条请求、并发 16。
 # 要让 prefix caching 真正起作用，profile 窗口里必须有至少两个共享前缀的请求；
 # 单个请求没有可复用的前缀，只剩查找开销。
-PROFILE_REQUESTS=${PROFILE_REQUESTS:-1}
-CONCURRENCY=${CONCURRENCY:-1}
+PROFILE_REQUESTS=${PROFILE_REQUESTS:-16}
+CONCURRENCY=${CONCURRENCY:-16}
 SHARED_PREFIX_TOKENS=${SHARED_PREFIX_TOKENS:-0}
 HOST_VLLM_COMMIT=${HOST_VLLM_COMMIT:-"f18cf803c5f63625e2c71253ddaf8b0bad0bad1a"}
 HOST_ASCEND_COMMIT=${HOST_ASCEND_COMMIT:-"320eced8c1bba71c0329bf59caa721a2382e7499"}
@@ -58,13 +73,29 @@ else
   CACHE_ARG="--no-enable-prefix-caching"
 fi
 case "$SERVER_MODE" in
-  eager) GUARD_ARGS="[\"--enforce-eager\", \"$CACHE_ARG\"]" ;;
-  graph) GUARD_ARGS="[\"$CACHE_ARG\"]" ;;
+  eager) GUARD_BODY="\"--enforce-eager\", \"$CACHE_ARG\"" ;;
+  graph) GUARD_BODY="\"$CACHE_ARG\"" ;;
   *)
     echo "SERVER_MODE must be eager or graph, got: $SERVER_MODE" >&2
     exit 1
     ;;
 esac
+# 服务形态参数全部显式下发并与冻结验收 profile 对齐；capture sizes 只在
+# graph 模式下传（eager 模式传了也不会有图可回放，只会让 manifest 撒谎）。
+GUARD_BODY="$GUARD_BODY, \"--max-num-seqs\", \"$MAX_NUM_SEQS\""
+GUARD_BODY="$GUARD_BODY, \"--max-num-batched-tokens\", \"$MAX_BATCHED_TOKENS\""
+GUARD_BODY="$GUARD_BODY, \"--block-size\", \"$BLOCK_SIZE\""
+GUARD_BODY="$GUARD_BODY, \"--gpu-memory-utilization\", \"$GPU_MEMORY_UTILIZATION\""
+if [[ "$ENABLE_EXPERT_PARALLEL" == "1" ]]; then
+  GUARD_BODY="$GUARD_BODY, \"--enable-expert-parallel\""
+fi
+if [[ "$SERVER_MODE" == "graph" ]]; then
+  GUARD_BODY="$GUARD_BODY, \"--cudagraph-capture-sizes\""
+  for size in $CUDAGRAPH_CAPTURE_SIZES; do
+    GUARD_BODY="$GUARD_BODY, \"$size\""
+  done
+fi
+GUARD_ARGS="[$GUARD_BODY]"
 # 自检：参数串与开关必须同向，防止再次出现「manifest 说开了、服务没开」。
 if [[ "$PREFIX_CACHING" == "1" && "$GUARD_ARGS" != *"--enable-prefix-caching"* ]]; then
   echo "internal error: PREFIX_CACHING=1 but guard args lack --enable-prefix-caching" >&2
@@ -72,6 +103,14 @@ if [[ "$PREFIX_CACHING" == "1" && "$GUARD_ARGS" != *"--enable-prefix-caching"* ]
 fi
 if [[ "$PREFIX_CACHING" != "1" && "$GUARD_ARGS" != *"--no-enable-prefix-caching"* ]]; then
   echo "internal error: PREFIX_CACHING=0 but guard args lack --no-enable-prefix-caching" >&2
+  exit 1
+fi
+if [[ "$SERVER_MODE" == "graph" && "$GUARD_ARGS" != *"--cudagraph-capture-sizes"* ]]; then
+  echo "internal error: SERVER_MODE=graph but guard args lack --cudagraph-capture-sizes" >&2
+  exit 1
+fi
+if [[ "$SERVER_MODE" == "eager" && "$GUARD_ARGS" == *"--cudagraph-capture-sizes"* ]]; then
+  echo "internal error: SERVER_MODE=eager must not pass --cudagraph-capture-sizes" >&2
   exit 1
 fi
 
@@ -145,6 +184,12 @@ cat > config.json <<JSON
     "prefix_caching_flag": "$CACHE_ARG",
     "workload": "$WORKLOAD",
     "max_model_len": $MAX_MODEL_LEN,
+    "max_num_seqs": $MAX_NUM_SEQS,
+    "max_num_batched_tokens": $MAX_BATCHED_TOKENS,
+    "block_size": $BLOCK_SIZE,
+    "gpu_memory_utilization": $GPU_MEMORY_UTILIZATION,
+    "expert_parallel": $ENABLE_EXPERT_PARALLEL,
+    "cudagraph_capture_sizes": "$CUDAGRAPH_CAPTURE_SIZES",
     "warmup_tokens": ${WARMUP_TOKENS:-16},
     "l3_tokens": ${L3_TOKENS:-128},
     "profile_tokens": ${PROFILE_TOKENS:-16},
