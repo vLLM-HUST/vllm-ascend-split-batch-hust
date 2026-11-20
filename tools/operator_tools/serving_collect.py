@@ -14,6 +14,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
@@ -178,18 +179,78 @@ def server(config, output, arm, profile=False):
             )
 
 
+PROFILE_PROMPT = "Explain a binary heap."
+
+# Roughly four characters per token for the filler sentence below; only used to
+# size a shared prefix that is long enough to fill a cache block.
+_PREFIX_FILLER = "The quick brown fox jumps over the lazy dog while counting. "
+
+
+def build_shared_prefix(tokens: int) -> str:
+    if tokens <= 0:
+        return ""
+    return _PREFIX_FILLER * max(1, math.ceil(tokens * 4 / len(_PREFIX_FILLER)))
+
+
+def build_profile_prompts(count: int, shared_prefix: str) -> list[str]:
+    """Prompts for the profile window of one collection run.
+
+    A shared prefix is the part a prefix cache can reuse, so measuring it needs
+    at least two requests inside the same profile window, each with a distinct
+    suffix. With no prefix and a single request this returns the original probe
+    prompt, which keeps the default run identical to what it was.
+    """
+    if count <= 1 and not shared_prefix:
+        return [PROFILE_PROMPT]
+    return [
+        f"{shared_prefix}Now explain variant {index} of a binary heap."
+        for index in range(max(1, count))
+    ]
+
+
+def run_profile_requests(config, prompts, tokens, concurrency):
+    """Send the profile-window requests, optionally several at a time."""
+    if concurrency <= 1 or len(prompts) <= 1:
+        return [completion(config, prompt, tokens) for prompt in prompts]
+    workers = min(concurrency, len(prompts))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(lambda p: completion(config, p, tokens), prompts))
+
+
 def collect_guard(config, output, arm):
+    """Run the guard probe sequence and analyse the captured profile.
+
+    Token counts and prompt count come from ``config["collection_shape"]`` when
+    present, so a run can target a different output-length regime without
+    editing this function. The defaults preserve the original shape.
+    """
+    shape = config.get("collection_shape") or {}
+    warmup_tokens = int(shape.get("warmup_tokens") or 16)
+    l3_tokens = int(shape.get("l3_tokens") or 128)
+    profile_tokens = int(shape.get("profile_tokens") or 16)
+    warmup_repeats = int(shape.get("warmup_repeats") or 10)
+    profile_requests = int(shape.get("profile_requests") or 1)
+    concurrency = int(shape.get("concurrency") or 1)
+    shared_prefix = shape.get("shared_prefix") or ""
+    if not shared_prefix:
+        shared_prefix = build_shared_prefix(int(shape.get("shared_prefix_tokens") or 0))
     with server(config, output, arm, profile=True):
-        for _ in range(10):
-            completion(config, "Explain RMSNorm briefly.", 16)
-        responses = [completion(config, p, 128) for p in FIXED_L3_PROMPTS]
+        for _ in range(warmup_repeats):
+            completion(config, "Explain RMSNorm briefly.", warmup_tokens)
+        responses = [completion(config, p, l3_tokens) for p in FIXED_L3_PROMPTS]
         save(output / "responses.json", responses)
         texts = [r["choices"][0]["text"] for r in responses]
         save(output / "greedy.json", texts)
+        prompts = build_profile_prompts(profile_requests, shared_prefix)
         request(config["port"], "/start_profile", {})
         try:
-            response = completion(config, "Explain a binary heap.", 16)
-            save(output / "profile_response.json", response)
+            profiled = run_profile_requests(
+                config, prompts, profile_tokens, concurrency
+            )
+            if len(profiled) == 1:
+                save(output / "profile_response.json", profiled[0])
+            else:
+                save(output / "profile_responses.json", profiled)
         finally:
             request(config["port"], "/stop_profile", {})
     analyse_profile(config, output)

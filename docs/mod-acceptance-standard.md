@@ -103,4 +103,4 @@ HLE 与 Frontier 使用同一固定 judge；记录模型、运行时、提示、
 
 当前缺项及执行优先级见 [缺项报告](mod-acceptance-audit.md)。可复用流程见 [mod-acceptance skill](../.openbitfun/skills/mod-acceptance/SKILL.md)。
 
-在隔离虚拟环境中清空 `PYTHONPATH`，执行 `pytest @tests/offline-checks.args`。这些检查验证规范与记录一致性，不代表模型实验通过。推送前另按 `AGENTS.md` 跑全量门禁。
+在隔离虚拟环境中清空 `PYTHONPATH`，执行 `pytest @tests/offline-checks.args`。这些检查验证规范与记录一致性，不代表模型实验通过。推送前另按 [agent-guide.md](agent-guide.md) §7 的常用验证命令跑全量门禁。

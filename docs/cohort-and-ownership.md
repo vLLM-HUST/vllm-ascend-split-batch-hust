@@ -1,7 +1,7 @@
 # cohort 边界与归属（长期核心约束）
 
 > **本文件是"我们能声称什么、谁负责什么"的权威源。**
-> 约束已写进 [AGENTS.md](../AGENTS.md) 硬约束 6；此处给依据、边界与判定口径。
+> 约束已写进 [AGENTS.md](../AGENTS.md) §2.7；此处给依据、边界与判定口径。
 > 来源：上游 @ShuhaoZhangTony 的两条裁定（本仓 issue，逐字原文见
 > `knowledge/handoffs/receipts/20260929-upstream-cohort/facts.md`，工作区）：
 > - issue #2 comment `5867233862`（2026-09-28，**Frontier 合同审计结论**）

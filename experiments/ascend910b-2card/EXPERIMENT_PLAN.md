@@ -19,7 +19,7 @@
 | 项 | 要求 | 校验动作 |
 |---|---|---|
 | 硬件 | 2 张 Ascend910B2，TP=2 | `python3 -c "from tools.operator_tools.guard import check_npu_environment as c; print(c(2))"` |
-| 宿主基线 | 按 `AGENTS.md` 固定的宿主分支与提交核验，不在此维护另一份版本 | `git -C "$VLLM_ASCEND_REPO" rev-parse --short HEAD` |
+| 宿主基线 | 按 `DELIVERY_INDEX.json` 的 `baseline_branch` / `baseline_commit`（约束见 `AGENTS.md` §1.7）核验，不在此维护另一份版本 | `git -C "$VLLM_ASCEND_REPO" rev-parse --short HEAD` |
 | 结果目录 | 必须在仓库外，`bench/evidence_paths.py` 会强制校验 | `export SPLIT_BATCH_RESULTS_DIR=<仓库外的绝对目录>/<stamp>` |
 | 门控 | 全部 `VLLM_HUST_*=0` 起服后再逐项打开 | `tools/bench-ladder.sh carriers` |
 | 单变量 | 贪心采样、固定 seed、`--no-enable-prefix-caching`、固定并发与输入输出长度 | 见 `docs/npu-benchmark-execution-guide.md` |

@@ -71,7 +71,7 @@ The published root planner remains `import_only` and cannot be activated. Curren
 ### Cohort scope (what our evidence does and does not cover)
 
 > Authority: [`docs/cohort-and-ownership.md`](docs/cohort-and-ownership.md) — the cohort boundary plus the four
-> ownership items returned to this repository; binding rule: [`AGENTS.md`](AGENTS.md) hard constraint 6.
+> ownership items returned to this repository; binding rule: [`AGENTS.md`](AGENTS.md) §2.7 (cohort boundary).
 
 Stated here so the numbers below are not over-extended. **2026-10-13 owner ruling: the baseline moved to the
 0.28 image + Qwen3.5-35B-A3B** ("we no longer work on Qwen2.5"). The upstream audit quotes in

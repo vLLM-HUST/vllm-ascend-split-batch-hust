@@ -3,11 +3,28 @@
 #
 # 必需环境变量: BASE_PLAN —— 提供 `config.environment`（CANN 依赖路径等）的 plan JSON，
 #   无默认值；脚本从该 plan 首条带 environment 的条目取运行环境，取不到直接退出。
-# 可选环境变量: PY / RUNTIME_PY / RUN_ID / RUN_DIR / ARCHIVE_ROOT / PORT_BASE /
-#   PROFILE_GATE / PROFILE_ROUNDS / PROFILE_SLEEP_SECONDS（下方取值即默认）。
+# 可选环境变量（下方取值即默认）:
+#   PY / RUNTIME_PY / RUN_ID / RUN_DIR / ARCHIVE_ROOT / PORT_BASE /
+#   PROFILE_GATE / PROFILE_ROUNDS / PROFILE_SLEEP_SECONDS
+#   采集形态: MODEL_PATH / MODEL_ALIAS / TP_SIZE / MAX_MODEL_LEN /
+#   MAX_NUM_SEQS / MAX_BATCHED_TOKENS / BLOCK_SIZE / GPU_MEMORY_UTILIZATION /
+#   ENABLE_EXPERT_PARALLEL / CUDAGRAPH_CAPTURE_SIZES /
+#   SERVER_MODE（eager|graph）/ WORKLOAD / PREFIX_CACHING /
+#   HOST_VLLM_COMMIT / HOST_ASCEND_COMMIT /
+#   WARMUP_TOKENS / L3_TOKENS / PROFILE_TOKENS / WARMUP_REPEATS /
+#   PROFILE_REQUESTS / CONCURRENCY / SHARED_PREFIX_TOKENS
 # 产物落点: 仓内 $RUN_DIR（默认 <仓根>/.openbitfun/profile-hotspot-longrun-<RUN_ID>）落
 #   config.json / status.json / hotspots_NN.json / nohup.log / summary.txt；
 #   设备侧原始采集落仓外 $ARCHIVE_ROOT 下的 round_NN_off/。
+#
+# 换形态只改环境变量，不改脚本：SERVER_MODE=graph 时不传 --enforce-eager，
+# 采集落进 ACLGraph 形态，并按 CUDAGRAPH_CAPTURE_SIZES 捕获图。
+# 服务形态默认值逐项对齐冻结验收 profile（max-model-len 32768、
+# max-num-seqs 16、max-num-batched-tokens 8192、block-size 128、
+# expert parallel 开、capture sizes 1 2 4 8 16、显存水位 0.85、
+# prefix caching 关），Profile 窗口默认 16 条请求按 16 并发发出。
+# 要回退旧的单请求 eager 形态，设：
+#   SERVER_MODE=eager MAX_MODEL_LEN=4096 PROFILE_REQUESTS=1 CONCURRENCY=1
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -21,6 +38,81 @@ BASE_PLAN=${BASE_PLAN:?需显式指定 BASE_PLAN（提供 config.environment 的
 GATE=${PROFILE_GATE:-"VLLM_HUST_GDN_SPLIT_BA"}
 ROUNDS=${PROFILE_ROUNDS:-3}
 SLEEP_SECONDS=${PROFILE_SLEEP_SECONDS:-30}
+
+MODEL_PATH=${MODEL_PATH:-"/models/Qwen3.5-35B-A3B"}
+MODEL_ALIAS=${MODEL_ALIAS:-"qwen35-35b"}
+TP_SIZE=${TP_SIZE:-2}
+# 服务形态默认值 = 冻结验收 profile；要回退旧形态就逐项改环境变量。
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-32768}
+MAX_NUM_SEQS=${MAX_NUM_SEQS:-16}
+MAX_BATCHED_TOKENS=${MAX_BATCHED_TOKENS:-8192}
+BLOCK_SIZE=${BLOCK_SIZE:-128}
+GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.85}
+ENABLE_EXPERT_PARALLEL=${ENABLE_EXPERT_PARALLEL:-1}
+CUDAGRAPH_CAPTURE_SIZES=${CUDAGRAPH_CAPTURE_SIZES:-"1 2 4 8 16"}
+WORKLOAD=${WORKLOAD:-"random"}
+SERVER_MODE=${SERVER_MODE:-"graph"}
+PREFIX_CACHING=${PREFIX_CACHING:-0}
+# profile 窗口的请求形状默认对齐验收客户端的并发：16 条请求、并发 16。
+# 要让 prefix caching 真正起作用，profile 窗口里必须有至少两个共享前缀的请求；
+# 单个请求没有可复用的前缀，只剩查找开销。
+PROFILE_REQUESTS=${PROFILE_REQUESTS:-16}
+CONCURRENCY=${CONCURRENCY:-16}
+SHARED_PREFIX_TOKENS=${SHARED_PREFIX_TOKENS:-0}
+HOST_VLLM_COMMIT=${HOST_VLLM_COMMIT:-"f18cf803c5f63625e2c71253ddaf8b0bad0bad1a"}
+HOST_ASCEND_COMMIT=${HOST_ASCEND_COMMIT:-"320eced8c1bba71c0329bf59caa721a2382e7499"}
+
+# guard 服务参数由「图模式」与「prefix caching」两个开关共同决定，两个轴都显式写出来。
+# 两点教训：
+#   1. 不要事后 sed 字符串——单元素列表里没有逗号，替换会静默失效；
+#   2. 不能靠「去掉 --no-enable-prefix-caching」来打开缓存，vLLM 不会因此开启，
+#      必须显式传 --enable-prefix-caching，否则 manifest 写着命中、实际命中率恒为 0。
+if [[ "$PREFIX_CACHING" == "1" ]]; then
+  CACHE_ARG="--enable-prefix-caching"
+else
+  CACHE_ARG="--no-enable-prefix-caching"
+fi
+case "$SERVER_MODE" in
+  eager) GUARD_BODY="\"--enforce-eager\", \"$CACHE_ARG\"" ;;
+  graph) GUARD_BODY="\"$CACHE_ARG\"" ;;
+  *)
+    echo "SERVER_MODE must be eager or graph, got: $SERVER_MODE" >&2
+    exit 1
+    ;;
+esac
+# 服务形态参数全部显式下发并与冻结验收 profile 对齐；capture sizes 只在
+# graph 模式下传（eager 模式传了也不会有图可回放，只会让 manifest 撒谎）。
+GUARD_BODY="$GUARD_BODY, \"--max-num-seqs\", \"$MAX_NUM_SEQS\""
+GUARD_BODY="$GUARD_BODY, \"--max-num-batched-tokens\", \"$MAX_BATCHED_TOKENS\""
+GUARD_BODY="$GUARD_BODY, \"--block-size\", \"$BLOCK_SIZE\""
+GUARD_BODY="$GUARD_BODY, \"--gpu-memory-utilization\", \"$GPU_MEMORY_UTILIZATION\""
+if [[ "$ENABLE_EXPERT_PARALLEL" == "1" ]]; then
+  GUARD_BODY="$GUARD_BODY, \"--enable-expert-parallel\""
+fi
+if [[ "$SERVER_MODE" == "graph" ]]; then
+  GUARD_BODY="$GUARD_BODY, \"--cudagraph-capture-sizes\""
+  for size in $CUDAGRAPH_CAPTURE_SIZES; do
+    GUARD_BODY="$GUARD_BODY, \"$size\""
+  done
+fi
+GUARD_ARGS="[$GUARD_BODY]"
+# 自检：参数串与开关必须同向，防止再次出现「manifest 说开了、服务没开」。
+if [[ "$PREFIX_CACHING" == "1" && "$GUARD_ARGS" != *"--enable-prefix-caching"* ]]; then
+  echo "internal error: PREFIX_CACHING=1 but guard args lack --enable-prefix-caching" >&2
+  exit 1
+fi
+if [[ "$PREFIX_CACHING" != "1" && "$GUARD_ARGS" != *"--no-enable-prefix-caching"* ]]; then
+  echo "internal error: PREFIX_CACHING=0 but guard args lack --no-enable-prefix-caching" >&2
+  exit 1
+fi
+if [[ "$SERVER_MODE" == "graph" && "$GUARD_ARGS" != *"--cudagraph-capture-sizes"* ]]; then
+  echo "internal error: SERVER_MODE=graph but guard args lack --cudagraph-capture-sizes" >&2
+  exit 1
+fi
+if [[ "$SERVER_MODE" == "eager" && "$GUARD_ARGS" == *"--cudagraph-capture-sizes"* ]]; then
+  echo "internal error: SERVER_MODE=eager must not pass --cudagraph-capture-sizes" >&2
+  exit 1
+fi
 
 if [[ ! -x "$PY" || ! -x "$RUNTIME_PY" ]]; then
   echo "python not found: py=$PY runtime=$RUNTIME_PY" >&2
@@ -57,38 +149,55 @@ cat > config.json <<JSON
     "-m",
     "vllm.entrypoints.cli.main",
     "serve",
-    "/models/Qwen3.5-35B-A3B",
+    "$MODEL_PATH",
     "--host",
     "127.0.0.1",
     "--port",
     "__PORT__",
     "--served-model-name",
-    "qwen35-35b",
+    "$MODEL_ALIAS",
     "--tensor-parallel-size",
-    "2",
+    "$TP_SIZE",
     "--seed",
     "42",
     "--max-model-len",
-    "4096"
+    "$MAX_MODEL_LEN"
   ],
   "host_commits": {
-    "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
-    "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+    "vllm": "$HOST_VLLM_COMMIT",
+    "vllm-ascend": "$HOST_ASCEND_COMMIT"
   },
   "gate": "$GATE",
   "port": 0,
-  "model_alias": "qwen35-35b",
-  "model_path": "/models/Qwen3.5-35B-A3B",
+  "model_alias": "$MODEL_ALIAS",
+  "model_path": "$MODEL_PATH",
   "sharegpt_path": "/models/datasets/ShareGPT/ShareGPT_V3_unfiltered_cleaned_split.json",
-  "world_size": 2,
+  "world_size": $TP_SIZE,
   "attention_layers": 30,
   "phase": "decode",
   "startup_timeout": 1200,
   "environment": $ENVIRONMENT_JSON,
-  "guard_server_args": [
-    "--enforce-eager",
-    "--no-enable-prefix-caching"
-  ]
+  "guard_server_args": $GUARD_ARGS,
+  "collection_shape": {
+    "server_mode": "$SERVER_MODE",
+    "prefix_caching": $PREFIX_CACHING,
+    "prefix_caching_flag": "$CACHE_ARG",
+    "workload": "$WORKLOAD",
+    "max_model_len": $MAX_MODEL_LEN,
+    "max_num_seqs": $MAX_NUM_SEQS,
+    "max_num_batched_tokens": $MAX_BATCHED_TOKENS,
+    "block_size": $BLOCK_SIZE,
+    "gpu_memory_utilization": $GPU_MEMORY_UTILIZATION,
+    "expert_parallel": $ENABLE_EXPERT_PARALLEL,
+    "cudagraph_capture_sizes": "$CUDAGRAPH_CAPTURE_SIZES",
+    "warmup_tokens": ${WARMUP_TOKENS:-16},
+    "l3_tokens": ${L3_TOKENS:-128},
+    "profile_tokens": ${PROFILE_TOKENS:-16},
+    "warmup_repeats": ${WARMUP_REPEATS:-10},
+    "profile_requests": $PROFILE_REQUESTS,
+    "concurrency": $CONCURRENCY,
+    "shared_prefix_tokens": $SHARED_PREFIX_TOKENS
+  }
 }
 JSON
 
@@ -158,6 +267,35 @@ for index in range(rounds):
         )
     if index + 1 < rounds:
         time.sleep(sleep_seconds)
+
+# 归档自述：strict 校验要求归档能说清自己是什么形态、由哪个宿主产生。
+manifest = {
+    "schema": "vllm-hust/collection/collection-manifest/v1",
+    "produced_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "host_commits": template.get("host_commits", {}),
+    "collection_shape": template.get("collection_shape", {}),
+    "rounds": rounds,
+    "artifacts": [
+        "op_statistic.csv",
+        "kernel_details.csv",
+        "step_trace_time.csv",
+        "api_statistic.csv",
+        "communication_matrix.json",
+    ],
+}
+(archive_root / "collection_manifest.json").write_text(
+    json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+)
+
+from tools.operator_tools import artifact_contract
+
+for strict in (False, True):
+    report = artifact_contract.inspect(archive_root, strict=strict)
+    mode = "strict" if strict else "legacy"
+    (run_dir / f"contract_{mode}.json").write_text(
+        json.dumps(report.as_dict(), indent=2, ensure_ascii=False) + "\n"
+    )
+    print(f"contract[{mode}]: ok={report.ok} findings={len(report.findings)}", flush=True)
 PY
 
 echo $! > "$RUN_DIR/runner.pid"

@@ -88,7 +88,7 @@ JSON/TXT/LOG 结果；混合源码改动、测试、workflow、依赖或打包�
 ## 5. Git 与网络
 
 - commit 原子:一个逻辑变更一个 commit,不混格式化与功能修改。
-- 提交前装好本地钩子:`python -m pip install pre-commit pytest ruff && pre-commit install`;
+- 提交前装好本地钩子(安装命令见 §7);
   钩子内容见 [`.pre-commit-config.yaml`](../.pre-commit-config.yaml)。它只跑纯文本快检
   ——`ruff check`、`ruff format --check`、交付状态一致性、算子交付面结构与指纹、文档行文一致性,
   目的是让"标签比证据走得远"这类问题在 `git commit` 时就被拦下;CI 仍以 `.github/workflows/` 为准。
@@ -101,3 +101,23 @@ JSON/TXT/LOG 结果；混合源码改动、测试、workflow、依赖或打包�
 改了什么就要同步它的权威文档(分工表见 [README.md](README.md)):
 行为/开关 → 根 README;patch 面 → HOST_CONTRACT.md + release.md;
 新坑 → pitfalls.md;当前状态与证据边界 → delivery-inventory.md。agent 在收尾时自查一遍。
+
+## 7. 常用验证命令
+
+本节是全仓验证命令的权威清单;`AGENTS.md` §2.4 的推送前门禁判据引用此处。
+
+```bash
+# 代码风格检查
+ruff check .
+ruff format --check .
+
+# 统一离线交付检查（本地、pre-commit 与 CI 共用）
+pytest @tests/offline-checks.args
+
+# 本地提交钩子（安装一次；只跑纯文本快检，与上面两条判据一致）
+python -m pip install pre-commit pytest ruff && pre-commit install
+pre-commit run --all-files
+
+# 全量 CPU 门禁套件
+pytest -q -m "not host_tree"
+```

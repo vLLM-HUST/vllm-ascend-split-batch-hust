@@ -403,6 +403,30 @@ def test_outer_loop_greedy_l3_and_op_statistic_l4(tmp_path):
     assert snr_large["recommend_full_ab"] is True
 
 
+def test_snr_gate_scales_by_device_share():
+    """Kernel savings cannot reach the idle part of the wall-clock window."""
+    full = serving_loop.evaluate_e2e_snr_gate(
+        net_saved_ms=120.0, all_kernel_total_ms=5700.0, serving_noise_floor_pct=1.5
+    )
+    assert full["recommend_full_ab"] is True
+    assert full["device_share"] == 1.0
+
+    idle = serving_loop.evaluate_e2e_snr_gate(
+        net_saved_ms=120.0,
+        all_kernel_total_ms=5700.0,
+        serving_noise_floor_pct=1.5,
+        device_share=0.25,
+    )
+    assert (
+        abs(
+            idle["expected_all_kernel_delta_pct"]
+            - full["expected_all_kernel_delta_pct"] * 0.25
+        )
+        < 1e-3
+    )
+    assert idle["recommend_full_ab"] is False
+
+
 def test_outer_loop_ab_summary_is_read_only(tmp_path):
     op_dir = tmp_path / "demo_op"
     op_dir.mkdir()
@@ -1007,3 +1031,66 @@ def test_status_marks_requested_stop_without_erasing_completed_guards(tmp_path):
     assert result["status"] == "stopped_by_request"
     assert result["operators"][0]["reason"] == "Switch to combination A/B"
     assert result["operators"][1]["status"] == "numerical_only_attribution_pending"
+
+
+def _collector():
+    return _load_module(
+        "tools.operator_tools.serving_collect",
+        "tools/operator_tools/serving_collect.py",
+    )
+
+
+def test_profile_prompts_default_to_the_original_probe():
+    collector = _collector()
+    assert collector.build_profile_prompts(1, "") == [collector.PROFILE_PROMPT]
+
+
+def test_shared_prefix_reaches_every_profiled_request():
+    collector = _collector()
+    prompts = collector.build_profile_prompts(3, "shared context. ")
+    assert len(prompts) == 3
+    assert all(prompt.startswith("shared context. ") for prompt in prompts)
+    # Distinct suffixes, otherwise the cache hit would be indistinguishable
+    # from a repeated identical request.
+    assert len(set(prompts)) == 3
+
+
+def test_prefix_is_used_even_for_a_single_request():
+    collector = _collector()
+    prompts = collector.build_profile_prompts(1, "shared context. ")
+    assert len(prompts) == 1
+    assert prompts[0].startswith("shared context. ")
+
+
+def test_shared_prefix_sizing():
+    collector = _collector()
+    assert collector.build_shared_prefix(0) == ""
+    # A cache block is far smaller than this, so the filler must clear it.
+    assert len(collector.build_shared_prefix(256)) >= 1024
+
+
+def test_concurrent_profile_requests_keep_prompt_order(monkeypatch):
+    collector = _collector()
+
+    def fake_completion(config, prompt, tokens):
+        return {
+            "choices": [{"text": prompt}],
+            "usage": {"completion_tokens": tokens},
+        }
+
+    monkeypatch.setattr(collector, "completion", fake_completion)
+    out = collector.run_profile_requests({}, ["a", "b", "c"], 4, 2)
+    assert [row["choices"][0]["text"] for row in out] == ["a", "b", "c"]
+
+
+def test_sequential_path_is_the_default(monkeypatch):
+    collector = _collector()
+    order = []
+
+    def fake_completion(config, prompt, tokens):
+        order.append(prompt)
+        return {"choices": [{"text": prompt}], "usage": {"completion_tokens": tokens}}
+
+    monkeypatch.setattr(collector, "completion", fake_completion)
+    collector.run_profile_requests({}, ["a", "b"], 4, 1)
+    assert order == ["a", "b"]

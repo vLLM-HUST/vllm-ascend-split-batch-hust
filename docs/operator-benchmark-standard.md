@@ -214,6 +214,8 @@ shape/stride、执行相位、图模式、随机种子、调用点和回退条�
 
 没有独立测量入口的 `bench_l0.py` 必须在导入设备依赖前退出，退出码为三，表示无测量；保留可导入的实现函数不等于提供测量入口。
 
+L0 计时与 `bench_l0.py` 执行状态由 `tools/operator_tools/l0_trace_record.py` 机械入账：计时 receipt 或执行输出原样追加进 `ops/<operator>/evidence.json` 的 `l0_traces` 并自动刷新目录指纹，结论标签不由该工具改动；度量数字禁止手抄进 evidence。
+
 统一离线清单为 `tests/offline-checks.args`。本地、pre-commit 和 Text invariants 执行同一命令 `pytest @tests/offline-checks.args`；CPU 全套另执行 `pytest -q -m "not host_tree"`。
 
 纯逻辑、环境变量、默认关闭和元数据测试不得因缺少 torch 或宿主而整文件跳过。CPU 张量测试在用例或 fixture 内申请 torch；缺包时明确跳过，不要求 torch_npu 或宿主包。额外安装 CPU torch 后使用同一命令补测，结果与只安装 CI 依赖的门禁分别记录。

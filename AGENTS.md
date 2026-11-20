@@ -20,6 +20,7 @@
 4. L3 失败时不得写服务收益标签。L4 未完成时不得给出服务结论。历史结果必须使用 `historical_only`。
 5. MOD 验收按 [MOD 最终验收规范](docs/mod-acceptance-standard.md) 执行。算子服务结论不能替代 MOD 验收。
 6. 修改 `ops/<operator>/` 被 `checksum.sha256` 覆盖的文件后，必须重新生成指纹。
+7. 任何正确性 / 性能声明必须带 cohort 边界；历史 cohort 的证据只作独立历史专项保留，严禁跨域外推（判定口径见 [docs/cohort-and-ownership.md](docs/cohort-and-ownership.md)）。
 
 ## 3. 文档与行文
 

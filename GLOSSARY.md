@@ -76,6 +76,7 @@
 | 单变量上下文 | 两次对比除被测项外全部固定：种子、采样、图模式、并发、负载。 | `docs/operator-benchmark-standard.md` §1.2 | — |
 | 服务指标写法 | 对外统一写「首字耗时 (FTL)」「单字耗时 (POTL)」「生成速度 (GenRate)」。行业措辞 `TTFT`、`TPOT`、输出速率是同义写法，MOD 冻结协议与组织政策沿用后者；同一份文档内混排时须在同段声明对应关系，只留一套主写法。度量数字只落结构化 `evidence.json`，行文与标题不得「关键词加数字」同段。 | `docs/operator-benchmark-standard.md` 的服务收益段；`docs/mod-acceptance-standard.md` | 三项指标分别达标，不得互相抵消 |
 | 数值护栏 | 按容差与原生实现比对；失败后关闭能力，不接受性能结论。 | `ops/<operator>/evidence.json` 的 `l3_numerical_guard` | — |
+| l0_traces | `evidence.json` 里机械追加的 L0 计时入账数组：数字只来自测量 receipt 或 `bench_l0.py` 执行输出，禁止手抄改写；失败用例照原样保留。 | `tools/operator_tools/l0_trace_record.py`；`ops/<operator>/evidence.json` 的 `l0_traces` | 手写的 `l0_microbenchmark` 摘要不是 trace 记录 |
 | 一票否决 | 数值不一致时立即关闭能力并保持 default-off，不再谈性能。 | `AGENTS.md` 的「数值失败一票否决」条；`docs/operator-benchmark-standard.md` §2 | — |
 | all-kernel 分母 | 模型整体算子耗时，用来判断单算子净省时能否被服务观测到。 | `tools/operator_tools/serving_loop.py` 的 `parse-l4` | 不等于服务墙钟时间 |
 | `within_noise` | 服务结论标签：同条件配对测量的组间差异落在组内波动之内（散文里也写作 "within noise"）。不构成收益。 | `DELIVERY_INDEX.json` 的 `serving_status` | 不构成收益 |
@@ -102,7 +103,7 @@
 | 动态形状探针 | 未参与预热编译的尺寸；编译缓存或日志用于核查是否重编译。 | `.openbitfun/skills/operator-sol-optimizer/SKILL.md` | 单次时间不能证明重编译 |
 | 短路评估 | 数值检查失败后不接受该候选的性能结论。 | `.openbitfun/skills/operator-sol-optimizer/SKILL.md` | — |
 | 泳道图 | 由 timeline 折叠出的高层级子图片段可视化，供人工审阅。 | `tools/operator_tools/timeline_insight.py` | 不能自动推定计算语义 |
-| SNR 预筛 | 用算子份额估算是否值得投入服务实验，不构成服务收益判定。 | `tools/operator_tools/serving_loop.py` | 全核份额不等于墙钟关键路径 |
+| SNR 预筛 | 用算子份额估算是否值得投入服务实验，不构成服务收益判定；已知墙钟构成时按设备时间占比缩放。 | `tools/operator_tools/serving_loop.py` 的 `evaluate_e2e_snr_gate`（参数 `device_share`） | 全核份额不等于墙钟关键路径 |
 | 负载（workload） | 主测、动态压力和跨相位诊断输入，按算子生效条件配对。 | `tools/operator_tools/workloads.py`；`workloads/README.md` | MOD 冻结任务 |
 | `primary_workload` / `stress_workload` | 主测对比负载与动态形状压力负载，缺一即证据不完整。 | `workloads/README.md` | — |
 | 载体状态快照（`carriers.env`） | 一次起服窗口里被核验的开关与入口点状态集合，唯一来源是与 serve 日志同名的环境记录。 | `tools/bench-ladder.sh` | 插件载体 |
@@ -119,6 +120,19 @@
 | provenance（溯源） | 从历史实现或提交提取代码时的原貌保存：版权头、commit、只读。 | `provenance/`；`docs/PROVENANCE.md` | — |
 | CPU 门禁 | 不接 NPU 也能跑的测试集；纯逻辑不依赖设备包，可选张量测试缺包时跳过；`host_tree` 排除的宿主源码与入口集成在显式选择后缺依赖即失败。 | `docs/operator-benchmark-standard.md` §6；`pyproject.toml` 的 `markers` | 与统一离线交付检查的范围不同 |
 | `MOD_METADATA.json` | 仓库身份、责任人、default-off、回滚与证据限定。 | `MOD_METADATA.json` | — |
+
+### 1.7 采集产物与时间口径
+
+| 术语 | 定义与判据 | 锚点 | 易混项 |
+|---|---|---|---|
+| 采集产物（collection artifact） | 归档目录里按契约命名的类型化文件，落盘形状由 schema 固定；不符合契约的产物不进判据。 | `tools/operator_tools/artifact_contract.py` | 原始 profiler 输出（`profile/`、`ASCEND_PROFILER_OUTPUT/`）不属于采集产物 |
+| 归档（archive） | 一次采集的完整落盘目录，物理存放在仓外；仓内只引路径，不复制原始数据。 | `docs/npu-benchmark-execution-guide.md` | 不等于仓内证据目录 |
+| 墙钟时间（wall clock） | 采集窗口的总时长，即 `Stage` 字段；判据只看它，不拿算子耗时替代。 | `tools/operator_tools/artifact_view.py` 的 `wall` 视图 | 与设备时间混用 |
+| 设备时间占比（device share） | `Computing / Stage`，即算子能影响的那部分窗口；小于 1 时任何算子优化的上限都要按它折算。 | `tools/operator_tools/serving_loop.py` 的 `evaluate_e2e_snr_gate` 参数 `device_share` | 不是 SOL%，也不等于算子份额 |
+| 长调用（long call） | `total_us − median_us × calls`，即少数慢调用额外贡献的时间；prefill 与 decode 混采时它近似 prefill 段。 | `tools/operator_tools/artifact_view.py` 的 `hotspot` 视图 | 不等于单次最长调用 |
+| 宿主侧时间（host api time） | `api_statistic` 里按 `API Name` 累计的调用耗时，反映 host 线程花在哪；它接近墙钟时说明窗口由 host 串行推进。 | `tools/operator_tools/artifact_view.py` 的 `api` 视图 | 不是设备执行时间，也不能与算子耗时相加 |
+| 宿主阻塞（host blocking） | 单次调用平均耗时达到毫秒量级且调用次数与输出步数同阶的宿主侧等待，判据看 `api` 视图的 `avg_us` 与 `count` 两项配合，不看总时间一项。 | `tools/operator_tools/artifact_view.py` 的 `api` 视图 | 不等于集合通信慢；通信耗时另有独立条目 |
+| 同步点（synchronisation point） | `wait/dur` 远大于 1 的算子，其 `Wait Time` 是排队等前序完成而非自身计算；这类项可移除，不算优化空间。 | `tools/operator_tools/artifact_view.py` 的 `wait` 视图 | 与热点算子同列但性质相反，不得计入可优化份额 |
 
 ## 2. 易混术语
 
