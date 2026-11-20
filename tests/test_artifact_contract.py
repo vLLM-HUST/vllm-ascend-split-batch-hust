@@ -9,17 +9,22 @@ from __future__ import annotations
 
 import csv
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from tools.operator_tools.artifact_contract import (
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.operator_tools.artifact_contract import (  # noqa: E402
     KINDS,
     check_manifest_shape,
     classify,
     inspect,
 )
-from tools.operator_tools.artifact_view import (
+from tools.operator_tools.artifact_view import (  # noqa: E402
     NOISE_FLOOR_PCT,
     Archive,
     e2e_view,
