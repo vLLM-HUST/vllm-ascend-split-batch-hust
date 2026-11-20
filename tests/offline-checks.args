@@ -8,6 +8,7 @@ tests/test_document_custody.py
 tests/test_ops_delivery_policy.py
 tests/test_operator_sol.py
 tests/test_operator_serving.py
+tests/test_artifact_contract.py
 tests/test_verifier_layout.py
 tests/test_host_runtime.py
 tests/test_l0_trace_record.py

@@ -139,16 +139,27 @@ def evaluate_e2e_snr_gate(
     net_saved_ms: float,
     all_kernel_total_ms: float,
     serving_noise_floor_pct: float = 1.5,
+    device_share: float = 1.0,
 ) -> dict[str, Any]:
     """Assess whether L4 operator savings exceed the serving noise floor.
 
     This all-kernel heuristic only prioritizes experiments. It is neither a
     critical-path Amdahl bound nor evidence of a serving outcome.
+
+    ``device_share`` is the fraction of wall-clock time the device spends
+    computing (``Computing / Stage`` in a collection's step trace). Kernel
+    savings cannot reach the idle part of the window, so the heuristic divides
+    by it when it is known. The default of 1.0 keeps the all-kernel reading.
     """
     if (
         not all(
             math.isfinite(v)
-            for v in (net_saved_ms, all_kernel_total_ms, serving_noise_floor_pct)
+            for v in (
+                net_saved_ms,
+                all_kernel_total_ms,
+                serving_noise_floor_pct,
+                device_share,
+            )
         )
         or serving_noise_floor_pct <= 0
     ):
@@ -157,12 +168,13 @@ def evaluate_e2e_snr_gate(
         return {
             "expected_all_kernel_delta_pct": 0.0,
             "noise_floor_pct": serving_noise_floor_pct,
+            "device_share": device_share,
             "snr_ratio": 0.0,
             "recommend_full_ab": False,
             "verdict_hint": "invalid_denominator",
         }
 
-    delta_pct = (net_saved_ms / all_kernel_total_ms) * 100.0
+    delta_pct = (net_saved_ms * device_share / all_kernel_total_ms) * 100.0
     snr = abs(delta_pct) / max(serving_noise_floor_pct, 1e-6)
     recommend_ab = snr >= 0.5
     hint = (
@@ -171,6 +183,7 @@ def evaluate_e2e_snr_gate(
     return {
         "expected_all_kernel_delta_pct": round(delta_pct, 3),
         "noise_floor_pct": serving_noise_floor_pct,
+        "device_share": device_share,
         "snr_ratio": round(snr, 2),
         "recommend_full_ab": recommend_ab,
         "verdict_hint": hint,

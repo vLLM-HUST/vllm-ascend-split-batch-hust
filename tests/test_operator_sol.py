@@ -167,6 +167,33 @@ def test_profile_hotspot_scripts_read_actual_profile_directory():
         assert 'output / "profile"' in body, script.name
 
 
+def test_profile_hotspot_script_wires_acceptance_shape_flags():
+    """服务形态参数必须显式下发并被 manifest 记录，不许悄悄退回默认值。"""
+    script = ROOT / "workloads" / "profile_hotspot_longrun.sh"
+    body = script.read_text()
+    for flag in (
+        "--max-num-seqs",
+        "--max-num-batched-tokens",
+        "--block-size",
+        "--gpu-memory-utilization",
+        "--enable-expert-parallel",
+        "--cudagraph-capture-sizes",
+    ):
+        assert flag in body, flag
+    for field in (
+        "max_num_seqs",
+        "max_num_batched_tokens",
+        "block_size",
+        "gpu_memory_utilization",
+        "expert_parallel",
+        "cudagraph_capture_sizes",
+    ):
+        assert f'"{field}"' in body, field
+    # eager 模式传 capture sizes 只会让 manifest 说谎，必须双向自检拦住。
+    assert "SERVER_MODE=eager must not pass --cudagraph-capture-sizes" in body
+    assert "SERVER_MODE=graph but guard args lack --cudagraph-capture-sizes" in body
+
+
 def test_active_entrypoints_do_not_reference_removed_optimizer():
     removed = (
         "tools/" + "op_agent",
