@@ -8,8 +8,11 @@
 # 安装一次即可：
 #   python -m pip install pre-commit pytest ruff
 #   pre-commit install
+#   pre-commit install --hook-type pre-push
 # 手动全量复跑：
 #   pre-commit run --all-files
+# 手动模拟一次推送检查（pre-push 阶段不按文件过滤，总是整跑）：
+#   pre-commit run push-identity --hook-stage pre-push
 repos:
   - repo: local
     hooks:
@@ -39,5 +42,14 @@ repos:
         description: 拦住 collect_guard 产物目录与热点汇总目录不一致、空热点表被当成无热点的情况
         entry: env -u PYTHONPATH pytest -q tests/test_operator_sol.py::test_profile_hotspot_scripts_read_actual_profile_directory tests/test_operator_sol.py::test_optimizer_workflow_reference_exists_and_covers_current_flow
         language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: push-identity
+        name: push 前提交身份检查
+        description: 拦住 committer 邮箱映射不到 GitHub 账号的提交，避免 CI auto-merge 因资格门禁拒绝合入
+        entry: python3 tools/check_push_identity.py
+        language: system
+        stages: [pre-push]
         pass_filenames: false
         always_run: true
