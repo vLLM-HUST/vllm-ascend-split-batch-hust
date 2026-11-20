@@ -39,6 +39,7 @@ def test_all_repository_jsons_belong_to_governed_categories():
         "host-proposals/",
         "docs/evidence/",
         "docs/mod-acceptance/evidence.json",
+        "docs/acceptance-shape.json",
         "bench/results/",
     )
     for p in ROOT.rglob("*.json"):

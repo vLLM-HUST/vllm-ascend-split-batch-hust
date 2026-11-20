@@ -178,6 +178,10 @@ def test_profile_hotspot_script_wires_acceptance_shape_flags():
         "--gpu-memory-utilization",
         "--enable-expert-parallel",
         "--cudagraph-capture-sizes",
+        "--enable-chunked-prefill",
+        "--scheduling-policy",
+        "--disable-custom-all-reduce",
+        "--compilation-config",
     ):
         assert flag in body, flag
     for field in (
@@ -187,11 +191,20 @@ def test_profile_hotspot_script_wires_acceptance_shape_flags():
         "gpu_memory_utilization",
         "expert_parallel",
         "cudagraph_capture_sizes",
+        "chunked_prefill",
+        "scheduling_policy",
+        "disable_custom_all_reduce",
+        "compilation_config",
     ):
         assert f'"{field}"' in body, field
-    # eager 模式传 capture sizes 只会让 manifest 说谎，必须双向自检拦住。
+    # eager 模式传 capture sizes / compilation-config 只会让 manifest 说谎，
+    # 必须双向自检拦住。
     assert "SERVER_MODE=eager must not pass --cudagraph-capture-sizes" in body
     assert "SERVER_MODE=graph but guard args lack --cudagraph-capture-sizes" in body
+    assert "SERVER_MODE=eager must not pass --compilation-config" in body
+    assert "SERVER_MODE=graph but guard args lack --compilation-config" in body
+    # 冻结 profile 的 seed 是 0，脚本不得退回自己的旧值。
+    assert "SERVER_SEED=${SERVER_SEED:-0}" in body
 
 
 def test_active_entrypoints_do_not_reference_removed_optimizer():

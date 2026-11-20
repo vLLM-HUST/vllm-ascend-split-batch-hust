@@ -1,0 +1,182 @@
+{
+  "schema": "acceptance-shape-alignment/v1",
+  "recorded_at": "2026-11-20",
+  "purpose": "冻结验收形态与本仓采集/测量形态的参数对照与来源登记。只登记形状事实与判据，不登记任何服务收益结论。",
+  "acceptance_service_profile": {
+    "source": {
+      "repository": "vLLM-HUST/hust-eval-client-mmlu-pro",
+      "commit": "b6215bf76808b1e9d351295e2ecb401542317372",
+      "path": "examples/profile.b0_35b.json",
+      "profile_id": "b0-35b-v1",
+      "status": "frozen",
+      "evidence_level": "documented command; not a runtime receipt"
+    },
+    "serve_args": {
+      "tensor_parallel_size": 2,
+      "dtype": "bfloat16",
+      "block_size": 128,
+      "enable_expert_parallel": true,
+      "max_model_len": 32768,
+      "gpu_memory_utilization": 0.85,
+      "max_num_seqs": 16,
+      "max_num_batched_tokens": 8192,
+      "enable_prefix_caching": false,
+      "enable_chunked_prefill": true,
+      "enforce_eager": false,
+      "seed": 0,
+      "scheduling_policy": "fcfs",
+      "disable_custom_all_reduce": true,
+      "compilation_config": {
+        "mode": 3,
+        "cudagraph_mode": "FULL_DECODE_ONLY"
+      },
+      "cudagraph_capture_sizes": [1, 2, 4, 8, 16]
+    },
+    "distinct_caliber_note": "引擎 B1 r6 组合形态独立维护于 vLLM-HUST/vllm-hust-engine engines/b1-r4.json（叠加 engines/b1-r6-overlay.json）：max_model_len 65536、max_num_seqs 24、max_num_batched_tokens 4096、resident_seats 36、mtp_tokens 2、cudagraph_mode FULL。它与本条 B0 35B 客户端期望配置不是同一口径，禁止混用或互相佐证。"
+  },
+  "request_shapes_standard": {
+    "source": {
+      "url": "https://vllm-hust.sage.org.ai/data/dataset-standard-v1/standard.json",
+      "standard_id": "five-datasets-20261113-v1",
+      "status": "frozen_protocol_not_measurement",
+      "repository": "vLLM-HUST/vllm-hust-benchmark",
+      "path": "website-publication/data/dataset-standard-v1/standard.json"
+    },
+    "datasets": {
+      "mmlu": {
+        "requests_per_arm": 200,
+        "max_output_tokens": 8192,
+        "concurrency_budget": 200,
+        "temperature": 0,
+        "seed": 0
+      },
+      "hle": {
+        "requests_per_arm": 200,
+        "max_output_tokens": 16384,
+        "judge_max_tokens": 8192,
+        "concurrency_budget": 16,
+        "temperature": 0,
+        "seed": 17
+      },
+      "frontier": {
+        "requests_per_arm": 160,
+        "max_output_tokens": 16384,
+        "judge_max_tokens": 8192,
+        "concurrency_budget": 16,
+        "temperature": 0,
+        "seed": 17
+      },
+      "swe": {
+        "requests_per_arm": 64,
+        "max_output_tokens": 2048,
+        "concurrency_budget": 8,
+        "temperature": 0,
+        "seed": 17,
+        "mode": "inference_only"
+      },
+      "terminal": {
+        "requests_per_arm": 48,
+        "max_output_tokens": 2048,
+        "concurrency_budget": 8,
+        "temperature": 0,
+        "seed": 17,
+        "mode": "inference_only"
+      }
+    },
+    "trace_input_limit_tokens": 16384,
+    "trace_tokenizer_binding": "trace token IDs 与 16K 资格冻结于 Qwen3.5-35B-A3B BF16 tokenizer；两臂 /tokenize 哈希必须一致，fresh cache_salt、零 KV 复用",
+    "judge_boundary": "HLE/Frontier judge 流量不计入 solver 性能与费用"
+  },
+  "concurrency_calibers": {
+    "note": "同一数据集存在三个不同位置的并发声明，禁止混算；引用并发结论必须写明口径来源。",
+    "mmlu": {
+      "standard_budget": 200,
+      "client_default": 16,
+      "frozen_plan_contract": 1,
+      "readme_example_flag": 16,
+      "deviation_handling": "客户端 run.py 把 concurrency differs from contract.generation.concurrency 写进 run.<ts>.json；偏离契约是被记录的行为",
+      "sources": {
+        "client_default_and_contract": "vLLM-HUST/hust-eval-client-mmlu-pro@b6215bf7 src/hust_eval_mmlu_pro/mmlu_pro/run.py",
+        "readme_example": "同一提交 README.md 的全量精度命令"
+      }
+    },
+    "hle": {
+      "standard_budget": 16,
+      "example_solver_json": 1,
+      "source": "vLLM-HUST/hust-eval-client-hle-verified@534c22cd examples/solver.json"
+    },
+    "frontier": {
+      "standard_budget": 16,
+      "example_solver_json": 1,
+      "source": "vLLM-HUST/hust-eval-client-frontierscience@ff7b431 examples/solver.json"
+    }
+  },
+  "repository_shapes": {
+    "historical_serving_ab": {
+      "covers_operators": [
+        "gate_fp32",
+        "gdn_conv_pack",
+        "gdn_merge_inproj",
+        "gdn_split_fusion",
+        "gdn_output_norm_fusion",
+        "moe_epilogue"
+      ],
+      "server": {
+        "tensor_parallel_size": 2,
+        "max_model_len": 4096,
+        "guard_server_args": ["--enforce-eager", "--no-enable-prefix-caching"],
+        "other_shape_flags": "vllm 默认值（max-num-seqs/block-size 等未显式下发）"
+      },
+      "client": {
+        "workload": "random",
+        "prompt_tokens": 512,
+        "decode_tokens": 256,
+        "concurrency": 32
+      },
+      "archive_examples": [
+        "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-e2e-resumable/gdn_conv_pack/config.json",
+        "file:///root/vllm-workspace/benchmark-archives/pending-longrun-20261116T091816Z"
+      ],
+      "scope_statement": "索引内全部 within_noise 服务结论的测量形态是本条记录；结论只在该形态内成立，不能外推到冻结验收形态。"
+    },
+    "profile_collection_script": {
+      "script": "workloads/profile_hotspot_longrun.sh",
+      "alignment_commit_note": "PR #75 完成主要参数对齐；chunked prefill/compilation-config/fcfs/disable-custom-all-reduce/seed 0 于本轮补齐。",
+      "defaults_now": {
+        "max_model_len": 32768,
+        "max_num_seqs": 16,
+        "max_num_batched_tokens": 8192,
+        "block_size": 128,
+        "gpu_memory_utilization": 0.85,
+        "expert_parallel": 1,
+        "cudagraph_capture_sizes": "1 2 4 8 16",
+        "chunked_prefill": 1,
+        "scheduling_policy": "fcfs",
+        "disable_custom_all_reduce": 1,
+        "server_seed": 0,
+        "compilation_config": "{\"mode\":3,\"cudagraph_mode\":\"FULL_DECODE_ONLY\"}",
+        "server_mode": "graph",
+        "prefix_caching": 0,
+        "profile_requests": 16,
+        "concurrency": 16
+      },
+      "prior_defaults": {
+        "max_model_len": 4096,
+        "profile_requests": 1,
+        "concurrency": 1,
+        "server_mode": "eager"
+      }
+    }
+  },
+  "unverified_risks": [
+    "新接的 --compilation-config/--enable-chunked-prefill/--scheduling-policy/--disable-custom-all-reduce 是否被宿主构建接受，未经真机验证；启动失败会 fail-closed 落进 status.json，不产生假采集。",
+    "MMLU 客户端走 /v1/completions 冻结 token id，本仓采集脚本用文本合成请求；请求构造路径不同，热点对比只能比方向。",
+    "trace 输入上限 16384 与 MMLU 的 200 同时到达尚未在本仓负载中复刻。"
+  ],
+  "conclusion_scope_rules": [
+    "跨形态只比方向，不比数字；batch 维度的方向推演只能使用已记录的 shape_buckets 桶数据。",
+    "图回放形态下 host 下发开销被摊薄，eager 形态中由下发/同步主导的小算子排名会下降。",
+    "上下文从 4096 提升到 32768 时预填充占比上升，decode-only 收益被稀释，prefill 侧算子权重上升。",
+    "并发三口径（标准预算/客户端默认/plan 契约）不一致时，采集配置必须显式记录所用口径。"
+  ]
+}

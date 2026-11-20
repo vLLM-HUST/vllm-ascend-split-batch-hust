@@ -8,7 +8,9 @@
 #   PROFILE_GATE / PROFILE_ROUNDS / PROFILE_SLEEP_SECONDS
 #   采集形态: MODEL_PATH / MODEL_ALIAS / TP_SIZE / MAX_MODEL_LEN /
 #   MAX_NUM_SEQS / MAX_BATCHED_TOKENS / BLOCK_SIZE / GPU_MEMORY_UTILIZATION /
-#   ENABLE_EXPERT_PARALLEL / CUDAGRAPH_CAPTURE_SIZES /
+#   ENABLE_EXPERT_PARALLEL / CUDAGRAPH_CAPTURE_SIZES / ENABLE_CHUNKED_PREFILL /
+#   SCHEDULING_POLICY / DISABLE_CUSTOM_ALL_REDUCE / SERVER_SEED /
+#   COMPILATION_CONFIG /
 #   SERVER_MODE（eager|graph）/ WORKLOAD / PREFIX_CACHING /
 #   HOST_VLLM_COMMIT / HOST_ASCEND_COMMIT /
 #   WARMUP_TOKENS / L3_TOKENS / PROFILE_TOKENS / WARMUP_REPEATS /
@@ -22,7 +24,10 @@
 # 服务形态默认值逐项对齐冻结验收 profile（max-model-len 32768、
 # max-num-seqs 16、max-num-batched-tokens 8192、block-size 128、
 # expert parallel 开、capture sizes 1 2 4 8 16、显存水位 0.85、
-# prefix caching 关），Profile 窗口默认 16 条请求按 16 并发发出。
+# prefix caching 关、chunked prefill 开、fcfs 调度、关 custom all-reduce、
+# seed 0、编译配置 FULL_DECODE_ONLY），Profile 窗口默认 16 条请求按 16 并发发出。
+# 参数来源：vLLM-HUST/hust-eval-client-mmlu-pro examples/profile.b0_35b.json
+# （frozen，documented command 口径，非运行回执）。
 # 要回退旧的单请求 eager 形态，设：
 #   SERVER_MODE=eager MAX_MODEL_LEN=4096 PROFILE_REQUESTS=1 CONCURRENCY=1
 set -euo pipefail
@@ -50,6 +55,15 @@ BLOCK_SIZE=${BLOCK_SIZE:-128}
 GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.85}
 ENABLE_EXPERT_PARALLEL=${ENABLE_EXPERT_PARALLEL:-1}
 CUDAGRAPH_CAPTURE_SIZES=${CUDAGRAPH_CAPTURE_SIZES:-"1 2 4 8 16"}
+ENABLE_CHUNKED_PREFILL=${ENABLE_CHUNKED_PREFILL:-1}
+SCHEDULING_POLICY=${SCHEDULING_POLICY:-"fcfs"}
+DISABLE_CUSTOM_ALL_REDUCE=${DISABLE_CUSTOM_ALL_REDUCE:-1}
+SERVER_SEED=${SERVER_SEED:-0}
+# 冻结 profile 用 --compilation-config 把图模式钉在 FULL_DECODE_ONLY；只在
+# graph 模式下发，eager 模式下发只会让 manifest 撒谎。
+COMPILATION_CONFIG=${COMPILATION_CONFIG:-'{"mode":3,"cudagraph_mode":"FULL_DECODE_ONLY"}'}
+# 值里带引号，落进 config.json 前必须转义成 \"，否则整份 JSON 失效。
+ESCAPED_CONFIG=${COMPILATION_CONFIG//\"/\\\"}
 WORKLOAD=${WORKLOAD:-"random"}
 SERVER_MODE=${SERVER_MODE:-"graph"}
 PREFIX_CACHING=${PREFIX_CACHING:-0}
@@ -89,11 +103,19 @@ GUARD_BODY="$GUARD_BODY, \"--gpu-memory-utilization\", \"$GPU_MEMORY_UTILIZATION
 if [[ "$ENABLE_EXPERT_PARALLEL" == "1" ]]; then
   GUARD_BODY="$GUARD_BODY, \"--enable-expert-parallel\""
 fi
+if [[ "$ENABLE_CHUNKED_PREFILL" == "1" ]]; then
+  GUARD_BODY="$GUARD_BODY, \"--enable-chunked-prefill\""
+fi
+GUARD_BODY="$GUARD_BODY, \"--scheduling-policy\", \"$SCHEDULING_POLICY\""
+if [[ "$DISABLE_CUSTOM_ALL_REDUCE" == "1" ]]; then
+  GUARD_BODY="$GUARD_BODY, \"--disable-custom-all-reduce\""
+fi
 if [[ "$SERVER_MODE" == "graph" ]]; then
   GUARD_BODY="$GUARD_BODY, \"--cudagraph-capture-sizes\""
   for size in $CUDAGRAPH_CAPTURE_SIZES; do
     GUARD_BODY="$GUARD_BODY, \"$size\""
   done
+  GUARD_BODY="$GUARD_BODY, \"--compilation-config\", \"$ESCAPED_CONFIG\""
 fi
 GUARD_ARGS="[$GUARD_BODY]"
 # 自检：参数串与开关必须同向，防止再次出现「manifest 说开了、服务没开」。
@@ -111,6 +133,18 @@ if [[ "$SERVER_MODE" == "graph" && "$GUARD_ARGS" != *"--cudagraph-capture-sizes"
 fi
 if [[ "$SERVER_MODE" == "eager" && "$GUARD_ARGS" == *"--cudagraph-capture-sizes"* ]]; then
   echo "internal error: SERVER_MODE=eager must not pass --cudagraph-capture-sizes" >&2
+  exit 1
+fi
+if [[ "$ENABLE_CHUNKED_PREFILL" == "1" && "$GUARD_ARGS" != *"--enable-chunked-prefill"* ]]; then
+  echo "internal error: ENABLE_CHUNKED_PREFILL=1 but guard args lack --enable-chunked-prefill" >&2
+  exit 1
+fi
+if [[ "$SERVER_MODE" == "graph" && "$GUARD_ARGS" != *"--compilation-config"* ]]; then
+  echo "internal error: SERVER_MODE=graph but guard args lack --compilation-config" >&2
+  exit 1
+fi
+if [[ "$SERVER_MODE" == "eager" && "$GUARD_ARGS" == *"--compilation-config"* ]]; then
+  echo "internal error: SERVER_MODE=eager must not pass --compilation-config" >&2
   exit 1
 fi
 
@@ -159,7 +193,7 @@ cat > config.json <<JSON
     "--tensor-parallel-size",
     "$TP_SIZE",
     "--seed",
-    "42",
+    "$SERVER_SEED",
     "--max-model-len",
     "$MAX_MODEL_LEN"
   ],
@@ -190,6 +224,11 @@ cat > config.json <<JSON
     "gpu_memory_utilization": $GPU_MEMORY_UTILIZATION,
     "expert_parallel": $ENABLE_EXPERT_PARALLEL,
     "cudagraph_capture_sizes": "$CUDAGRAPH_CAPTURE_SIZES",
+    "chunked_prefill": $ENABLE_CHUNKED_PREFILL,
+    "scheduling_policy": "$SCHEDULING_POLICY",
+    "disable_custom_all_reduce": $DISABLE_CUSTOM_ALL_REDUCE,
+    "server_seed": $SERVER_SEED,
+    "compilation_config": "$ESCAPED_CONFIG",
     "warmup_tokens": ${WARMUP_TOKENS:-16},
     "l3_tokens": ${L3_TOKENS:-128},
     "profile_tokens": ${PROFILE_TOKENS:-16},
