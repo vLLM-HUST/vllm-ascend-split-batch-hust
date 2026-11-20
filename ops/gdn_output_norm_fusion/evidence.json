@@ -27,79 +27,226 @@
     "optimized_median_us": 7.65,
     "measurement": "NPU graph, 20 repetitions packed per replay, single 910B2, strided z from mixed_qkvz slice [T, 16, 128] (TP=2 per-rank shape)",
     "raw_measurements": {
-      "Tokens_1_H16_strided_z": {"native_us": 22.07, "candidate_us": 4.21, "speedup": 5.25},
-      "Tokens_8_H16_strided_z": {"native_us": 47.96, "candidate_us": 7.77, "speedup": 6.17},
-      "Tokens_16_H16_strided_z": {"native_us": 73.82, "candidate_us": 7.65, "speedup": 9.65},
-      "Tokens_32_H16_strided_z": {"native_us": 91.10, "candidate_us": 9.22, "speedup": 9.88},
-      "Tokens_64_H16_strided_z": {"native_us": 92.59, "candidate_us": 10.38, "speedup": 8.92},
-      "Tokens_128_H16_strided_z": {"native_us": 96.94, "candidate_us": 12.68, "speedup": 7.64}
+      "Tokens_1_H16_strided_z": {
+        "native_us": 22.07,
+        "candidate_us": 4.21,
+        "speedup": 5.25
+      },
+      "Tokens_8_H16_strided_z": {
+        "native_us": 47.96,
+        "candidate_us": 7.77,
+        "speedup": 6.17
+      },
+      "Tokens_16_H16_strided_z": {
+        "native_us": 73.82,
+        "candidate_us": 7.65,
+        "speedup": 9.65
+      },
+      "Tokens_32_H16_strided_z": {
+        "native_us": 91.1,
+        "candidate_us": 9.22,
+        "speedup": 9.88
+      },
+      "Tokens_64_H16_strided_z": {
+        "native_us": 92.59,
+        "candidate_us": 10.38,
+        "speedup": 8.92
+      },
+      "Tokens_128_H16_strided_z": {
+        "native_us": 96.94,
+        "candidate_us": 12.68,
+        "speedup": 7.64
+      }
     },
     "contiguous_h4_probe_measurements": {
-      "Tokens_1": {"native_us": 16.48, "candidate_us": 4.14, "speedup": 3.98},
-      "Tokens_4": {"native_us": 23.31, "candidate_us": 4.16, "speedup": 5.60},
-      "Tokens_8": {"native_us": 36.71, "candidate_us": 4.29, "speedup": 8.55},
-      "Tokens_16": {"native_us": 35.87, "candidate_us": 4.47, "speedup": 8.03},
-      "Tokens_32": {"native_us": 46.99, "candidate_us": 4.53, "speedup": 10.36},
-      "Tokens_64": {"native_us": 71.79, "candidate_us": 4.71, "speedup": 15.25},
-      "Tokens_128": {"native_us": 87.88, "candidate_us": 5.78, "speedup": 15.22}
+      "Tokens_1": {
+        "native_us": 16.48,
+        "candidate_us": 4.14,
+        "speedup": 3.98
+      },
+      "Tokens_4": {
+        "native_us": 23.31,
+        "candidate_us": 4.16,
+        "speedup": 5.6
+      },
+      "Tokens_8": {
+        "native_us": 36.71,
+        "candidate_us": 4.29,
+        "speedup": 8.55
+      },
+      "Tokens_16": {
+        "native_us": 35.87,
+        "candidate_us": 4.47,
+        "speedup": 8.03
+      },
+      "Tokens_32": {
+        "native_us": 46.99,
+        "candidate_us": 4.53,
+        "speedup": 10.36
+      },
+      "Tokens_64": {
+        "native_us": 71.79,
+        "candidate_us": 4.71,
+        "speedup": 15.25
+      },
+      "Tokens_128": {
+        "native_us": 87.88,
+        "candidate_us": 5.78,
+        "speedup": 15.22
+      }
     }
   },
   "l3_numerical_guard": {
     "passed": true,
-    "metric": "exact_match",
-    "max_abs_diff": 0.0,
-    "serving_greedy_match": "8/8 exact match across 8 fixed prompts (max_tokens=256, temperature=0.0) between VLLM_HUST_GDN_OUTPUT_NORM_FUSED=0 and =1",
-    "note": "output is bitwise identical to discrete norm and rearrange chain with absolute zero difference across both contiguous and strided z inputs; 20/20 unit tests in tests/ut/ops/test_gdn_epilogue.py passed"
+    "matched": 8,
+    "total": 8,
+    "match_summary": "8/8",
+    "mismatched_indices": []
   },
   "l4_attribution": {
-    "call_count_expected": 15360,
-    "call_count_actual": 15360,
-    "window": "single-request 512-token generation window (30 GDN layers x 512 steps = 15360 calls, rank0 op_statistic.csv)",
-    "fused_kernel_name": "_output_norm_kernel",
-    "fused_kernel_total_ms": 43.43,
-    "fused_kernel_avg_us": 2.83,
-    "all_kernel_ms_before": 5743.34,
-    "all_kernel_ms_after": 5654.99,
-    "all_kernel_delta_ms": -88.35,
-    "all_kernel_delta_pct": -1.54,
-    "note": "Initial PR #69 required z.is_contiguous(), which evaluated to False on Qwen3.5 non-interleaved mixed_qkvz slice views and caused 0 fused calls. Commit 8499a55aa relaxed the check to unit last-dim stride and marked M as do_not_specialize, achieving 15360/15360 fused calls (100% hit rate, 0 fallback)."
+    "passed": true,
+    "expected_per_rank_on": 480,
+    "profiles": {
+      "off": [
+        {
+          "path": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/serving-gdn-output-norm/guard_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_370931_20261115054649907_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+          "target_kernel": "_output_norm_kernel",
+          "matched_op_types": [],
+          "call_count_expected": null,
+          "call_count_actual": 0,
+          "hit_verified": false,
+          "target_total_ms": 0.0,
+          "target_avg_us": null,
+          "all_kernel_total_ms": 187.113,
+          "target_share_pct": 0.0
+        },
+        {
+          "path": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/serving-gdn-output-norm/guard_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_370932_20261115054649906_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+          "target_kernel": "_output_norm_kernel",
+          "matched_op_types": [],
+          "call_count_expected": null,
+          "call_count_actual": 0,
+          "hit_verified": false,
+          "target_total_ms": 0.0,
+          "target_avg_us": null,
+          "all_kernel_total_ms": 185.401,
+          "target_share_pct": 0.0
+        }
+      ],
+      "on": [
+        {
+          "path": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/serving-gdn-output-norm/guard_on/profile/dp0_pp0_tp0_dcp0_ep0_rank0_393008_20261115055224266_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+          "target_kernel": "_output_norm_kernel",
+          "matched_op_types": [
+            "_output_norm_kernel"
+          ],
+          "call_count_expected": null,
+          "call_count_actual": 480,
+          "hit_verified": true,
+          "target_total_ms": 1.705,
+          "target_avg_us": 3.55,
+          "all_kernel_total_ms": 187.296,
+          "target_share_pct": 0.9103
+        },
+        {
+          "path": "/root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/serving-gdn-output-norm/guard_on/profile/dp0_pp0_tp1_dcp0_ep1_rank1_393009_20261115055224266_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+          "target_kernel": "_output_norm_kernel",
+          "matched_op_types": [
+            "_output_norm_kernel"
+          ],
+          "call_count_expected": null,
+          "call_count_actual": 480,
+          "hit_verified": true,
+          "target_total_ms": 1.713,
+          "target_avg_us": 3.57,
+          "all_kernel_total_ms": 185.126,
+          "target_share_pct": 0.9251
+        }
+      ]
+    },
+    "call_count_expected": 960,
+    "call_count_actual": 960,
+    "status": "completed",
+    "verified": true
   },
   "serving_end_to_end": {
     "tested": true,
-    "status": "verified_faster",
-    "dataset": "random",
-    "random_input_len": 512,
-    "random_output_len": 256,
-    "num_prompts": 128,
-    "concurrency": 32,
-    "design": "2 independent full-restart runs per configuration with all other VLLM_HUST_* gates fixed to 0 and VLLM_DISABLE_COMPILE_CACHE=1",
-    "speedup": 1.0266,
-    "gen_rate_off_tok_s": 760.32,
-    "gen_rate_on_tok_s": 780.57,
-    "gen_rate_delta_pct": 2.66,
-    "total_rate_off_tok_s": 2311.78,
-    "total_rate_on_tok_s": 2373.38,
-    "total_rate_delta_pct": 2.66,
-    "mean_per_token_off_ms": 37.13,
-    "mean_per_token_on_ms": 36.30,
-    "mean_per_token_delta_pct": -2.24,
-    "median_per_token_off_ms": 38.09,
-    "median_per_token_on_ms": 37.03,
-    "median_per_token_delta_pct": -2.81,
-    "mean_first_token_off_ms": 1273.14,
-    "mean_first_token_on_ms": 1209.30,
-    "mean_first_token_delta_pct": -5.01,
-    "same_config_spread_pct": {
-      "off_gen_rate": 0.79,
-      "on_gen_rate": 0.96,
-      "off_mean_per_token": 0.13,
-      "on_mean_per_token": 2.51
+    "diagnostic_only": false,
+    "status": "within_noise",
+    "workload": "random",
+    "num_runs_off": 2,
+    "num_runs_on": 2,
+    "speedup": 1.0316,
+    "gen_rate_off": 577.82,
+    "gen_rate_on": 596.1,
+    "gen_rate_delta_pct": 3.16,
+    "intra_group_spread_pct": {
+      "off": 0.75,
+      "on": 4.86
     },
-    "runs": {
-      "off_1": {"duration_s": 42.93, "gen_rate_tok_s": 763.31, "total_rate_tok_s": 2320.89, "mean_first_token_ms": 1236.65, "mean_per_token_ms": 37.11, "median_per_token_ms": 38.05},
-      "off_2": {"duration_s": 43.27, "gen_rate_tok_s": 757.32, "total_rate_tok_s": 2302.68, "mean_first_token_ms": 1309.63, "mean_per_token_ms": 37.16, "median_per_token_ms": 38.14},
-      "on_1": {"duration_s": 42.18, "gen_rate_tok_s": 776.81, "total_rate_tok_s": 2361.94, "mean_first_token_ms": 1142.30, "mean_per_token_ms": 36.76, "median_per_token_ms": 37.59},
-      "on_2": {"duration_s": 41.78, "gen_rate_tok_s": 784.33, "total_rate_tok_s": 2384.81, "mean_first_token_ms": 1276.30, "mean_per_token_ms": 35.85, "median_per_token_ms": 36.46}
+    "mean_step_off_ms": 47.57,
+    "mean_step_on_ms": 46.48,
+    "mean_step_delta_pct": -2.27,
+    "applicability": "current",
+    "scope": "operator serving A/B; not MOD acceptance",
+    "workloads": {
+      "random": {
+        "tested": true,
+        "diagnostic_only": true,
+        "status": "within_noise",
+        "workload": "random",
+        "num_runs_off": 2,
+        "num_runs_on": 2,
+        "speedup": 1.0316,
+        "gen_rate_off": 577.82,
+        "gen_rate_on": 596.1,
+        "gen_rate_delta_pct": 3.16,
+        "intra_group_spread_pct": {
+          "off": 0.75,
+          "on": 4.86
+        },
+        "mean_step_off_ms": 47.57,
+        "mean_step_on_ms": 46.48,
+        "mean_step_delta_pct": -2.27
+      },
+      "sharegpt": {
+        "tested": true,
+        "diagnostic_only": true,
+        "status": "verified_faster",
+        "workload": "sharegpt",
+        "num_runs_off": 2,
+        "num_runs_on": 2,
+        "speedup": 1.0552,
+        "gen_rate_off": 397.71,
+        "gen_rate_on": 419.68,
+        "gen_rate_delta_pct": 5.52,
+        "intra_group_spread_pct": {
+          "off": 2.34,
+          "on": 2.14
+        },
+        "mean_step_off_ms": 79.71,
+        "mean_step_on_ms": 73.08,
+        "mean_step_delta_pct": -8.31
+      },
+      "long-prefix": {
+        "tested": true,
+        "diagnostic_only": true,
+        "status": "within_noise",
+        "workload": "long-prefix",
+        "num_runs_off": 2,
+        "num_runs_on": 2,
+        "speedup": 1.0276,
+        "gen_rate_off": 53.57,
+        "gen_rate_on": 55.04,
+        "gen_rate_delta_pct": 2.76,
+        "intra_group_spread_pct": {
+          "off": 2.57,
+          "on": 3.48
+        },
+        "mean_step_off_ms": 15.78,
+        "mean_step_on_ms": 15.48,
+        "mean_step_delta_pct": -1.89
+      }
     }
   },
   "status": "integrated_host_fork_measured",
@@ -115,5 +262,728 @@
     "host_merge_commit": "0ee02051620ccab1d505bcf9c1ce41e3ed715b04",
     "host_fix_commit": "8499a55aa",
     "baseline_state": "initial implementation merged into based/split-batch-baseline via PR #69; strided-z and dynamic-M fix on work/gdn-output-norm-fusion (8499a55aa)"
+  },
+  "device_retests": [
+    {
+      "run_id": "npu-retest-20261115T041855Z",
+      "scope": "isolated operator, synthetic historical shapes on current runtime; model integration, L4 and service not retested",
+      "environment": {
+        "timestamp": "2026-11-15T04:26:03+00:00",
+        "triton": {
+          "version": "3.2.0",
+          "path": "/usr/local/python3.12.13/lib/python3.12/site-packages/triton",
+          "key_sha256": "73b738272f0aea6d69eccefdb8a7405173f3f99169f46c355ea9b1beeb1be1da"
+        },
+        "cache": {
+          "dir": "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/triton-cache",
+          "fresh": false,
+          "fresh_effective": true,
+          "always_compile": false
+        },
+        "cann": {
+          "ascend_home_path": "/usr/local/Ascend/cann-9.1.0",
+          "info_sha256": "a9b17ef608ebeb70ade09cde1c12a545eb5e8f3e5312f6806ca0d368b0464848",
+          "info_file": "/usr/local/Ascend/cann-9.1.0/aarch64-linux/ascend_toolkit_install.info",
+          "version": "9.1.0"
+        },
+        "torch": {
+          "version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0.post4"
+        },
+        "device": {
+          "ASCEND_RT_VISIBLE_DEVICES": null,
+          "current_device": 0,
+          "npu_name": "Ascend910B2"
+        },
+        "cmdline": {
+          "triton_impl_name": "triton_ascend_impl",
+          "non_compute": false
+        }
+      },
+      "host_source_commit": "e59aaeef26788e9f895aefa568d779ad84cc7842",
+      "source_sha256": "ca67420995a69bf0779a548f9ac4b0c6328631f80c0d7b512a171582d8e81e26",
+      "generic_verifier": {
+        "passed": 12,
+        "total": 12,
+        "limitation": "device transfer may compact CPU views; layout validation is provided by stride-preserving graph cases"
+      },
+      "stride_preserving_check": {
+        "passed": 12,
+        "total": 12,
+        "cases": [
+          {
+            "case": 0,
+            "passed": true,
+            "shape": [
+              [
+                1,
+                16,
+                128
+              ],
+              [
+                1,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 6.1449187256503,
+            "baseline": {
+              "median_us": 20.649999380111694,
+              "p90_us": 21.16200029850006,
+              "p99_us": 22.011999785900116
+            },
+            "candidate": {
+              "median_us": 3.3605000004172325,
+              "p90_us": 4.100999981164932,
+              "p99_us": 6.479000300168991
+            }
+          },
+          {
+            "case": 1,
+            "passed": true,
+            "shape": [
+              [
+                1,
+                16,
+                128
+              ],
+              [
+                1,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 5.965936733353086,
+            "baseline": {
+              "median_us": 20.579499751329422,
+              "p90_us": 20.859000086784363,
+              "p99_us": 21.629999577999115
+            },
+            "candidate": {
+              "median_us": 3.4495001658797264,
+              "p90_us": 4.019000008702278,
+              "p99_us": 5.1180001348257065
+            }
+          },
+          {
+            "case": 2,
+            "passed": true,
+            "shape": [
+              [
+                8,
+                16,
+                128
+              ],
+              [
+                8,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 13.338841238968188,
+            "baseline": {
+              "median_us": 44.79849934577942,
+              "p90_us": 44.98000144958496,
+              "p99_us": 46.02200090885162
+            },
+            "candidate": {
+              "median_us": 3.3585000783205032,
+              "p90_us": 3.7930000573396683,
+              "p99_us": 4.706000164151192
+            }
+          },
+          {
+            "case": 3,
+            "passed": true,
+            "shape": [
+              [
+                8,
+                16,
+                128
+              ],
+              [
+                8,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                4096,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 6.47229225533202,
+            "baseline": {
+              "median_us": 47.47750014066696,
+              "p90_us": 47.57300019264221,
+              "p99_us": 48.64400029182434
+            },
+            "candidate": {
+              "median_us": 7.335500046610832,
+              "p90_us": 7.400000095367432,
+              "p99_us": 7.903999835252762
+            }
+          },
+          {
+            "case": 4,
+            "passed": true,
+            "shape": [
+              [
+                16,
+                16,
+                128
+              ],
+              [
+                16,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 20.67587499595622,
+            "baseline": {
+              "median_us": 72.97550141811371,
+              "p90_us": 73.11000227928162,
+              "p99_us": 74.18699860572815
+            },
+            "candidate": {
+              "median_us": 3.5295000299811363,
+              "p90_us": 4.194999858736992,
+              "p99_us": 5.093999952077866
+            }
+          },
+          {
+            "case": 5,
+            "passed": true,
+            "shape": [
+              [
+                16,
+                16,
+                128
+              ],
+              [
+                16,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                4096,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 7.424509314739103,
+            "baseline": {
+              "median_us": 75.85249841213226,
+              "p90_us": 76.68399810791016,
+              "p99_us": 76.93700194358826
+            },
+            "candidate": {
+              "median_us": 10.216499865055084,
+              "p90_us": 10.76200008392334,
+              "p99_us": 10.892999917268753
+            }
+          },
+          {
+            "case": 6,
+            "passed": true,
+            "shape": [
+              [
+                32,
+                16,
+                128
+              ],
+              [
+                32,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 22.810643667321663,
+            "baseline": {
+              "median_us": 88.30000162124634,
+              "p90_us": 89.28300142288208,
+              "p99_us": 89.49999809265137
+            },
+            "candidate": {
+              "median_us": 3.870999999344349,
+              "p90_us": 4.974000155925751,
+              "p99_us": 5.138000100851059
+            }
+          },
+          {
+            "case": 7,
+            "passed": true,
+            "shape": [
+              [
+                32,
+                16,
+                128
+              ],
+              [
+                32,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                4096,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 8.60824830757185,
+            "baseline": {
+              "median_us": 94.97050046920776,
+              "p90_us": 95.43799757957458,
+              "p99_us": 95.87500095367432
+            },
+            "candidate": {
+              "median_us": 11.032500118017197,
+              "p90_us": 11.342000216245651,
+              "p99_us": 11.496999859809875
+            }
+          },
+          {
+            "case": 8,
+            "passed": true,
+            "shape": [
+              [
+                64,
+                16,
+                128
+              ],
+              [
+                64,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 18.178683895497187,
+            "baseline": {
+              "median_us": 89.88450169563293,
+              "p90_us": 90.93199968338013,
+              "p99_us": 91.27600193023682
+            },
+            "candidate": {
+              "median_us": 4.944499954581261,
+              "p90_us": 6.080999970436096,
+              "p99_us": 6.436999887228012
+            }
+          },
+          {
+            "case": 9,
+            "passed": true,
+            "shape": [
+              [
+                64,
+                16,
+                128
+              ],
+              [
+                64,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                4096,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 7.770675847834832,
+            "baseline": {
+              "median_us": 95.1324999332428,
+              "p90_us": 96.10199928283691,
+              "p99_us": 96.57400250434875
+            },
+            "candidate": {
+              "median_us": 12.242500111460686,
+              "p90_us": 13.278999924659729,
+              "p99_us": 13.500000536441803
+            }
+          },
+          {
+            "case": 10,
+            "passed": true,
+            "shape": [
+              [
+                128,
+                16,
+                128
+              ],
+              [
+                128,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 13.860862949276743,
+            "baseline": {
+              "median_us": 93.94199848175049,
+              "p90_us": 94.65600252151489,
+              "p99_us": 95.16100287437439
+            },
+            "candidate": {
+              "median_us": 6.7774999886751175,
+              "p90_us": 7.727999985218048,
+              "p99_us": 8.290000259876251
+            }
+          },
+          {
+            "case": 11,
+            "passed": true,
+            "shape": [
+              [
+                128,
+                16,
+                128
+              ],
+              [
+                128,
+                16,
+                128
+              ],
+              [
+                128
+              ]
+            ],
+            "stride": [
+              [
+                2048,
+                128,
+                1
+              ],
+              [
+                4096,
+                128,
+                1
+              ],
+              [
+                1
+              ]
+            ],
+            "atol": 0,
+            "rtol": 0,
+            "speedup": 6.0029813201700595,
+            "baseline": {
+              "median_us": 98.66200089454651,
+              "p90_us": 99.22299981117249,
+              "p99_us": 100.03199577331543
+            },
+            "candidate": {
+              "median_us": 16.435500234365463,
+              "p90_us": 17.484000325202942,
+              "p99_us": 17.67899990081787
+            }
+          }
+        ]
+      },
+      "measurement": {
+        "warmup": 10,
+        "repetitions_per_graph": 20,
+        "samples": 100,
+        "timing": "NPU event per replay, alternating order"
+      },
+      "limitations": [
+        "single device; frequency not locked",
+        "event timing per graph replay includes replay scheduling gaps",
+        "no memory peak measurement or service conclusion"
+      ],
+      "archive": {
+        "uri": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z",
+        "files": {
+          "gdn_output_norm_fusion-graph.json": "3b6dea741eee80c928c9f8d3e270ea27e1d9a96dc3916f7d3e6f1b2c7a08e7d3",
+          "gdn_output_norm_fusion-verify-v2.json": "58e12c9f2bc76900a4a48045209098337db1b02ddf973927d88461390f48c34e",
+          "gdn_output_norm_fusion-receipt-v2.json": "0d279444b6cf1dfb35d1bf737f89c2748b5a3192102c26c81eae750b0cc0441c"
+        },
+        "runner_sha256": "a853c9c06d77f29ff52b540e81c03a0da4bdf1ca56f098d1918b8ce5cf7400bd",
+        "verification_command": {
+          "argv": [
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/skills/triton-op-verifier/scripts/verify.py",
+            "--op_name",
+            "gdn_output_norm_fusion",
+            "--verify_dir",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/gdn_output_norm_fusion",
+            "--output",
+            "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/gdn_output_norm_fusion/verify_result.json"
+          ],
+          "returncode": 0,
+          "duration_s": 38.30177307128906
+        },
+        "graph_command": [
+          "env",
+          "-u",
+          "PYTHONPATH",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/cpu-tensor-venv/bin/python",
+          "/root/vllm-workspace/vllm-ascend-split-batch-hust/.openbitfun/npu-retest-20261115T041855Z/graph_retest.py",
+          "gdn_output_norm_fusion"
+        ],
+        "graph_result_note": "Runner exit zero requires per-case status inspection; compilation failures are retained, not accepted timings."
+      },
+      "dependency_sha256": {
+        ".openbitfun/skills/triton-op-verifier/scripts/verify.py": "d7145025abdb33ba126328fc26bf0e66480744d59c18adc329d9dfd38ea647d7",
+        ".openbitfun/skills/triton-op-verifier/scripts/eco_limits.py": "11658fcf93c028a6d6b8f4b3aeef1f74855613cec9c6bef4a8423e65e855f1c0"
+      }
+    }
+  ],
+  "serving_sync": {
+    "archive": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/serving-gdn-output-norm",
+    "files": {
+      "config.json": "1ea34407eb5fa60a62e17e0e3622b762515267f61d75fa0a7aa9567864371319",
+      "host_preflight.json": "6cd3e7d59dad2566ab33f2e6dfa75520e28ac1aaac185803c2da009b42c3ff1f",
+      "guard_off/invocation.json": "832936c7c7b01d13171b3a1271a548e69ca603d08f6b6d490e2bbb8a5529d8cd",
+      "guard_off/exit.json": "1e3f6691f455051e8adb15d961e4bf3c7a17e83dd88b2afdd13315cc288250bb",
+      "guard_off/responses.json": "22f2c40625866a3eb0f8f7902ad20870446f0442b5b55337e5843450a3cd61c5",
+      "guard_off/greedy.json": "b69a7825ac172d97e92b140be264a52f7493540a49cdd804d4383771e1f08804",
+      "guard_on/invocation.json": "00512326d66e9ba85dd05e065e74bd4e0258ab3a061cabf0f3a62fc5894dc552",
+      "guard_on/exit.json": "1e3f6691f455051e8adb15d961e4bf3c7a17e83dd88b2afdd13315cc288250bb",
+      "guard_on/responses.json": "cd896adaac7a4f06c0569b20133f43621b2c1b9c72df7a197e249d2fd31466ed",
+      "guard_on/greedy.json": "b69a7825ac172d97e92b140be264a52f7493540a49cdd804d4383771e1f08804",
+      "bench_0_off/invocation.json": "18861bab9071e75b1b16eeb2f33975d75198dd9397df03705a0572f175e487c6",
+      "bench_0_off/exit.json": "1e3f6691f455051e8adb15d961e4bf3c7a17e83dd88b2afdd13315cc288250bb",
+      "bench_1_on/invocation.json": "bad5df54cb5fc58e88114ceda1ff005a0b001e6a559f3d84031fbcd4c2393dbb",
+      "bench_1_on/exit.json": "1e3f6691f455051e8adb15d961e4bf3c7a17e83dd88b2afdd13315cc288250bb",
+      "bench_2_on/invocation.json": "bad5df54cb5fc58e88114ceda1ff005a0b001e6a559f3d84031fbcd4c2393dbb",
+      "bench_2_on/exit.json": "1e3f6691f455051e8adb15d961e4bf3c7a17e83dd88b2afdd13315cc288250bb",
+      "bench_3_off/invocation.json": "18861bab9071e75b1b16eeb2f33975d75198dd9397df03705a0572f175e487c6",
+      "bench_3_off/exit.json": "1e3f6691f455051e8adb15d961e4bf3c7a17e83dd88b2afdd13315cc288250bb",
+      "serving_l3.json": "bfc9c0c4cbebd6e1067c0cb81937b286582477e7494968857cdd6898edda0424",
+      "l4.json": "46a928a08689b2808e2fd5bab21957932e6053b90b0e979830dd078e05509ef3",
+      "guard_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_370931_20261115054649907_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv": "63e63092d5049425ca26bbab12c1610bf0fdf69dcbc683e0ec8413206bd318ea",
+      "guard_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_370932_20261115054649906_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv": "cfe9f6a6c63be68045ad333342bddfbe3d853513ee4ce2b5806976c56e658a26",
+      "guard_on/profile/dp0_pp0_tp0_dcp0_ep0_rank0_393008_20261115055224266_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv": "387a8f2d4bfcc79697006f519bafb56423276c94305c97ed7190d47c7b7bb014",
+      "guard_on/profile/dp0_pp0_tp1_dcp0_ep1_rank1_393009_20261115055224266_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv": "a342a02a5531bcb5d853b01c73a4cccc6f450cacaa94445e04fb561c526f33fa",
+      "workload_pairing.json": "729701f161693c0b673feccd838f48e592eb17a2d45130ba8fafd527608d0661",
+      "bench_0_off/random.json": "6a1a96b02f6ea62f6f22b16cddc5c5c98120ef35c54c050e8f7c799dfef5d4cf",
+      "bench_0_off/random_invocation.json": "fdc08d6815b846bc6db3db0d979bdda55b220a876ddaa4b741f105cdd9b73484",
+      "bench_1_on/random.json": "30a3bc4a7d569cf474929ca62733810a44af47e9f020610a7e3def8f84cef414",
+      "bench_1_on/random_invocation.json": "23e3a5abdd300cb248911d43504556d8c131395897952e9a51a87d89decf7b28",
+      "bench_2_on/random.json": "4f8e9570deaf25580292286845ab5d18708205e84405068e4f859dc0f4930e45",
+      "bench_2_on/random_invocation.json": "8aa720fb49d6b2df9e0f4d9eec7c0e14ca82176990b8add3b1a739d5156bb522",
+      "bench_3_off/random.json": "30c9423beabd798320f0ec980d938ee5443bc1b3e05c6f68890cac19faa2f53a",
+      "bench_3_off/random_invocation.json": "3907d661f94adba1b9088e7877ce28429014d3bc1f51ef0e87eb3397682d0bb5",
+      "bench_0_off/sharegpt.json": "9e73ca28aff47ad5ade2bbb6a1e9bef6b10ee08d81337faa360d6a4e2f91a2e1",
+      "bench_0_off/sharegpt_invocation.json": "ff4cfb18c5203a500e3eb3563996f092e09a155d76e75306fd4c23795f2605ca",
+      "bench_1_on/sharegpt.json": "572c87810ecd394b1b4f90a12fc4a8e42a812c570e76c177ab8fb3d8abedafa3",
+      "bench_1_on/sharegpt_invocation.json": "619805945fa937c9bb454bc38b2b193c654de92d77c52e16425d414e1e47411c",
+      "bench_2_on/sharegpt.json": "92d5a2519ac89fa93d69b448a04e3a952c7a8ea81d97c608266d179ea7e80d79",
+      "bench_2_on/sharegpt_invocation.json": "5adfd59c528ad6ece779985c47e0810367af5ca567a27007ce744ae4c9a8719a",
+      "bench_3_off/sharegpt.json": "245932b7507e88398208060aa1601277c6a30050d1574c2297f71f4ca29125a0",
+      "bench_3_off/sharegpt_invocation.json": "5d32bec871fdd079f1aee3ff0d4acb5663d196ee279eb84c61293356b55cae80",
+      "bench_0_off/long-prefix.json": "394ff179c7f64f99ef599a2d50214a767529b0a99d7d2b6cef39b36892821396",
+      "bench_0_off/long-prefix_invocation.json": "3b159473b88f991b666b587d37919804dc7eaad42b0d9c0b56e5730f8ad09a83",
+      "bench_1_on/long-prefix.json": "c16ef995ef70d0969c6ccae70105d6ef451641d35cc272f753d65bc1733b9ba6",
+      "bench_1_on/long-prefix_invocation.json": "dbdf2323947694dec9dac0809162975e737c250884ade2995e7fde96759b1a6d",
+      "bench_2_on/long-prefix.json": "189d0df97391b390e8b362375ec5ade9018d8cfd4c72c0f19bb3d9374b258e26",
+      "bench_2_on/long-prefix_invocation.json": "156d57bdb327a3558378f3964eb7e077c74be13dd4dca92de2e90d0f40f11454",
+      "bench_3_off/long-prefix.json": "c26a07f9e26b8f03f566a67577d3b79d31f6ee72038c26d7b7d0363de6d95715",
+      "bench_3_off/long-prefix_invocation.json": "6234fb2729a4d6742477acaff65bce865a64db9141282652a6d132f29e35fbb3",
+      "summary.json": "4645e869d2c427c2f74ce638778c7bf7d35d7cb702c5eaded25a853d88e495e2"
+    },
+    "host_commits": {
+      "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+      "vllm-ascend": "e59aaeef26788e9f895aefa568d779ad84cc7842"
+    },
+    "completed_ns": 1794725500250380731
   }
 }

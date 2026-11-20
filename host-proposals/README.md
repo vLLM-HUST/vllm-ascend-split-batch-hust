@@ -23,6 +23,6 @@
 | `comm-trace-stop-gil/` | 修复 torch_npu 性能分析工具中 GIL 释放导致的崩溃 | C++ 底层缺陷定位与补丁验证；待上游修复或在自定义构建中合入 |
 | `comm-mechanism/` | 通信重叠与分析机制链路 | 保留离线通信归因与测试逻辑 |
 | `W1R-gmm-tuning-config/` | GMM 算子参数调优与频次采样 | 方案冻结（因在计算图解码模式下无法通过 Python 层统计真实频次） |
-| `D4-conv-hoist-site2/` | GDN 卷积权重转置外提与连续打包 | **已下沉至宿主 Fork 源码**（`vllm-ascend-hust`），独立算子报告见 `ops/gdn_conv_pack/` |
-| `W3F2-runtime-tree/` | GDN 输入投影权重合并 | **已下沉至宿主 Fork 源码**（`vllm-ascend-hust`），此处仅保留历史参考快照 |
-| `ConcatD-zero-copy-unpack/` | GDN 解包零拷贝视图 | 探索性实验原型，已由 D4 连续打包路径替代 |
+| `D4-conv-hoist-site2/`（现名 `conv-hoist-site2/`） | GDN 卷积权重转置外提与连续打包 | **已下沉至宿主 Fork 源码**（`vllm-ascend-hust`），独立算子报告见 `ops/gdn_conv_pack/` |
+| `W3F2-runtime-tree/`（现名 `gdn-inproj-merge/`） | GDN 输入投影权重合并 | **已下沉至宿主 Fork 源码**（`vllm-ascend-hust`），此处仅保留历史参考快照 |
+| `ConcatD-zero-copy-unpack/` | GDN 解包零拷贝视图 | 探索性实验原型，已由连续打包路径（`conv-hoist-site2/`，历史代号 D4）替代 |

@@ -37,7 +37,7 @@
 | 算子测试标准、形状合同与验收报告 | [operator-benchmark-standard.md](operator-benchmark-standard.md) |
 | 各阶段测试执行手册（进入条件、执行命令、回填顺序、决策树） | [execution-workflow.md](execution-workflow.md) |
 | **NPU 带卡环境实测与评测指南** | [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) |
-| **cohort 边界（我们能声称什么）× 四项归属** | [cohort-and-ownership.md](cohort-and-ownership.md)（约束入口 [../AGENTS.md](../AGENTS.md) 硬约束 6） |
+| **cohort 边界（我们能声称什么）× 四项归属** | [cohort-and-ownership.md](cohort-and-ownership.md)（约束入口 [../AGENTS.md](../AGENTS.md) 硬约束 9） |
 | 宿主提案补丁（tier-2，未提交上游） | [`host-proposals/README.md`](../host-proposals/README.md)（章程）+ `host-proposals/<id>/`（`proposal_meta.json` = env 语法/哈希/版本精确锁定/上游状态）；`docs/upstream/` 只是路径消歧 stub |
 | 宿主 seam 与 monkeypatch 面清单 | [HOST_CONTRACT.md](HOST_CONTRACT.md) |
 | 历史实现溯源（索引 + 逐条核对结论） | [PROVENANCE.md](PROVENANCE.md) / [provenance-verification.md](provenance-verification.md) / [../provenance/](../provenance/)(只读) |
@@ -45,6 +45,7 @@
 | 算子优化与证据交接 | [算子优化 Skill](../.openbitfun/skills/operator-sol-optimizer/SKILL.md) |
 | 算子交付形态：编译型实现独立交付；**Triton/纯 Python 算子实现由本仓承载** | [architecture.md](architecture.md) §2/§5 + 本仓 `src/vllm_ascend_split_batch/` |
 | 算子调度(选择)接口 | [design/operator-dispatch.md](design/operator-dispatch.md)(骨架,未接线) |
+| 常用验证命令与本地门禁清单 | [agent-guide.md](agent-guide.md) §7 |
 | 架构语义、编程规范、发布、踩坑、进度 | 本目录 |
 
 改行为必须同步改对应权威文档;本目录只放指针,不复制内容。

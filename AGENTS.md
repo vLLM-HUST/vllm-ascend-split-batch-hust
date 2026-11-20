@@ -1,10 +1,12 @@
 # AGENTS.md — 开发规范与工作约束
 
-本文件是面向开发者与 Agent 的最高工作契约。只保留必要的架构约束、开发规则与言行准则，不记录历史沿革、实现叙事或具体环境路径。
+本文件是面向开发者与 Agent 的最高工作契约，只保留必须遵守的约束、判据与言行准则。常用验证命令在 [docs/agent-guide.md](docs/agent-guide.md) §7，算子评测细则在 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md)，宿主基线事实在 `DELIVERY_INDEX.json`；本文件只放规则与指针，不复制上述内容，也不记录历史沿革、实现叙事或具体环境路径。
 
 ---
 
 ## 1. 核心架构与边界约束
+
+**测试前先核对宿主**：已安装的社区版不等于 HUST 基线，源码目录存在也不等于服务正在使用它。服务采集配置必须提供两个宿主的完整 `host_commits`，由 `tools/operator_tools/host_runtime.py` 在服务解释器内核验实际安装来源；缺失或不匹配即停止。单独加载参考源码只支持局部算子结论，不能作为宿主集成或服务证据。
 
 1. **宿主与插件两层分工**（详见 [docs/container-and-plugin-boundary-spec.md](docs/container-and-plugin-boundary-spec.md)）：
    - **宿主层**：承载模型私有前向拦截、权重加载后处理钩子与底层运行时修复，随宿主镜像原生发布；
@@ -23,35 +25,33 @@
    - 严禁在可能遮蔽已安装依赖的顶层或未隔离目录中执行命令，确保执行环境与依赖包路径清晰解耦；
    - 调优临时项目与候选代码严格受限于仓库根目录内部，严禁引用或向仓外物理路径写文件。
 7. **宿主 Fork 必须定死基线分支（严禁在 main 上提 PR）**：
-   - 两个宿主仓库在当前容器运行时中的基线分支定死如下，严禁以追新脱节的 `main` 为 Base：
-     - `vLLM-HUST/vllm-ascend-hust`：Base 定死为 **`based/split-batch-baseline`**（锚定镜像 `74f0c0a27`，分支头 `ad82d77cb`，内容为镜像源码 + 3 个构建文件修复）；
-     - `vLLM-HUST/vllm-hust`：Base 定死为 **`based/split-batch-baseline`**（锚定镜像 `f18cf803c`，当前与旧 `based/image-baseline` 指向同一 commit）；
-   - 任何针对宿主源码的修改必须基于对应仓库的上述基线分支切分支，发起 PR 时的 Target / Base 分支必须指定为该基线分支；
+   - 两个宿主仓库的基线分支定死为 **`based/split-batch-baseline`**，严禁以追新脱节的 `main` 或已归档的 `based/image-baseline` 为 Base；分支头与锚定镜像等基线事实以 `DELIVERY_INDEX.json` 的 `baseline_branch` / `baseline_commit` 为准，分支规范见 [docs/container-and-plugin-boundary-spec.md](docs/container-and-plugin-boundary-spec.md)；
+   - 任何针对宿主源码的修改必须基于对应基线分支切分支，发起 PR 时的 Target / Base 分支必须指定为该基线分支；
    - 宿主侧算子的修改与收益必须在当前插件仓的 `ops/<operator>/` 与 `DELIVERY_INDEX.json`（标记 `layer: host_fork`）中登记验收报告与证据，实现全生命周期可追溯。
 8. **GitHub API 访问凭据配置**：
    - 容器持久化环境变量文件 `<凭据环境变量文件>` 中配置了 GitHub API 鉴权凭据 `GITHUB_TOKEN`；
    - 严禁将 Token 真实字面值提交至 Git 仓库或明文写入任何版本受控文档；需要调用 GitHub API 或进行自动化操作时，通过读取系统环境变量 `GITHUB_TOKEN` 或引用 `<凭据环境变量文件>` 接入。
+9. **cohort 边界与归属（长期核心约束）**：
+   - 任何正确性 / 性能声明必须带 cohort 边界；四项归属、判定口径与基准切换裁定见 [docs/cohort-and-ownership.md](docs/cohort-and-ownership.md)；
+   - 历史 cohort 的证据只作独立历史专项保留，严禁跨域外推到当前基准。
 
 ---
 
 ## 2. 算子开发与评测约束
 
-1. **四级验证阶梯**（详见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) 与 [docs/npu-benchmark-execution-guide.md](docs/npu-benchmark-execution-guide.md)）：
-   - 严格遵循 `L0 纯算子微基准 -> L3 数值正确性护栏 -> L4 调用链路归因 -> 服务端到端实测` 阶梯；
-   - MOD 最终验收按 [docs/mod-acceptance-standard.md](docs/mod-acceptance-standard.md) 执行；算子服务结论不能替代冻结数据集、连续窗口与四项目标验收；执行完整性与目标达标分开记录；
+1. **四级验证阶梯**（评测细则见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) §2，执行手册见 [docs/npu-benchmark-execution-guide.md](docs/npu-benchmark-execution-guide.md)）：
    - 数值失败（L3 未过）一票否决，严格保持 default-off；
-   - 负收益或在噪声范围内的结论必须如实记录，绝不夸大或伪造加速比。
+   - 负收益或在噪声范围内的结论必须如实记录，绝不夸大或伪造加速比；
+   - 不将组合收益分摊为单算子收益；MOD 最终验收按 [docs/mod-acceptance-standard.md](docs/mod-acceptance-standard.md) 执行，算子服务结论不能替代冻结数据集、连续窗口与四项目标验收，执行完整性与目标达标分开记录。
 2. **可比性事实口径**：
    - 算子对比只认**形状事实**（张量维度、专家分布、执行相位、调用点）与**权重标签**（模型、精度格式），条件不同只比方向，不混算数字。
 3. **注释与文档原则**：
    - 代码只写必需注释，不写解释性叙事或改动沿革；
    - 文档只写技术规范、判据与约束，不写心路历程。
-4. **推送前本地全绿与组织政策合规**（详见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) §5）：
-   - 推送或发 PR 前必须在本地完整跑通 §4 全部命令；CI package job 的 `ruff check .`、`ruff format --check .` 对 `ops/`、`docs/`、`tests/` 下新增文件同样生效，不得借排除清单绕过；
+4. **推送前本地全绿与组织政策合规**（逐条自检清单见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) §5）：
+   - 推送或发 PR 前必须在本地完整跑通 [docs/agent-guide.md](docs/agent-guide.md) §7 全部命令；CI package job 的 `ruff check .`、`ruff format --check .` 对 `ops/`、`docs/`、`tests/` 下新增文件同样生效，不得借排除清单绕过；
    - CPU 门禁必须用隔离虚拟环境、清空 `PYTHONPATH` 并执行 CI 的 `pytest` 命令复验；不能只用 `python -m pytest` 或依赖本机预装包。仓内未安装工具按文件路径加载，不得为导入错误跳过守护测试；
-   - 组织工作流 `Benchmark-only data (organization)` 对 PR 变更文件执行 fail-closed 审查：文本新增行命中下行任一关键词后同行出现数字即拒绝：
-     `ttft`、`tpot`、`throughput`、`latency`、`tokens/s`、`实测`、`吞吐`、`延迟`；
-     度量数字一律落在结构化 `evidence.json`，行文与标题避免"关键词+数字"同段；
+   - 组织工作流 `Benchmark-only data (organization)` 按"度量关键词 + 同行数字"对 PR 变更文本 fail-closed 拒绝，关键词清单见 [docs/operator-benchmark-standard.md](docs/operator-benchmark-standard.md) §5；度量数字一律落在结构化 `evidence.json`，行文与标题避免"关键词 + 数字"同段；
    - 算子交付面由 `pytest -q tests/test_ops_delivery_policy.py` 把关；修改 `ops/<operator>/` 下被 `checksum.sha256` 覆盖的文件后，必须用 `tools/operator_tools/custody.py` 重新生成指纹。
 5. **文档行文与仓库事实必须一致**（由 `pytest -q tests/test_doc_consistency.py` 与工作流 `Text invariants` 把关）：
    - 任何 Markdown 里写的"N 个插件 / N 个 bundle"必须等于 `pyproject.toml` 中 `vllm.general_plugins` 与 `vllm_hust.extension_bundles` 的实际条目数；改入口点必须同步改行文；
@@ -87,37 +87,11 @@
 5. **术语以 [GLOSSARY.md](GLOSSARY.md) 为准**：
    - 统一语言（Ubiquitous Language）词表在 [GLOSSARY.md](GLOSSARY.md)，一律按其中的唯一写法与定义判据说话、命名代码与写文档；
    - 一物一名、一名一物：不造同义词，不裸用同名异义词（如 `gate`、`L3`/`L4`），废止词不得复活；
-   - 引入新概念或新标签时，先按 `GLOSSARY.md` §1.4 登记词条与锚点，再改代码与文档；
+   - 引入新概念或新标签时，先在 `GLOSSARY.md` 登记词条与锚点，再改代码与文档；
    - `GLOSSARY.md` 只定义词与判据，不承载数字、阈值与状态值，不得成为第二事实源。
 
 ---
 
-## 4. 常用验证命令
+## 4. 权威文档导航
 
-```bash
-# 代码风格检查
-ruff check .
-ruff format --check .
-
-# 统一离线交付检查（本地、pre-commit 与 CI 共用）
-pytest @tests/offline-checks.args
-
-# 本地提交钩子（安装一次；只跑纯文本快检，与上面两条判据一致）
-python -m pip install pre-commit pytest ruff && pre-commit install
-pre-commit run --all-files
-
-# 全量 CPU 门禁套件
-pytest -q -m "not host_tree"
-```
-
----
-
-## 5. 权威文档导航
-
-详细技术规范与权威文档均位于 [docs/README.md](docs/README.md)，请按单一事实源原则查阅与维护。
-
-| 主题 | 权威位置 |
-|---|---|
-| 术语唯一写法、定义判据、代码锚点、同名异义与废止词 | [GLOSSARY.md](GLOSSARY.md) |
-| 架构约束、开发规则、言行准则（本文件） | [AGENTS.md](AGENTS.md) |
-| 交付规范、架构契约、支持边界与发布检查 | [docs/README.md](docs/README.md) |
+详细技术规范与权威文档的统一入口是 [docs/README.md](docs/README.md)；术语唯一写法、定义判据与废止词在 [GLOSSARY.md](GLOSSARY.md)；常用验证命令在 [docs/agent-guide.md](docs/agent-guide.md) §7。请按单一事实源原则查阅与维护，不在本文件复制各权威文档的内容。

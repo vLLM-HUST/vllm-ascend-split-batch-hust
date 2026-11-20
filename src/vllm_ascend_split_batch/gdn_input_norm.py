@@ -22,6 +22,9 @@ def gdn_input_norm_fused(x, weight):
 
     from .gdn_input_norm_kernel import rms_norm_kernel
 
+    # Strided vector loads can exceed Ascend UB after compiler padding.
+    if x.stride(1) != 1:
+        x = x.contiguous()
     M, N = x.shape
     out = x.new_empty(x.shape)
     rms_norm_kernel[(M,)](

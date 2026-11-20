@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import statistics
 import time
@@ -129,6 +130,7 @@ def main():
     parser.add_argument("--profile", action="store_true")
     parser.add_argument("--graph-only", action="store_true")
     parser.add_argument("--replay", type=Path)
+    parser.add_argument("--reference-source", type=Path)
     args = parser.parse_args()
     if args.replay and (args.profile or args.graph_only):
         parser.error("--replay is correctness-only; no profile/graph-only")
@@ -174,7 +176,16 @@ def main():
     try:
         import torch_npu
         import triton
-        from vllm.third_party.flash_linear_attention.ops import l2norm
+
+        if args.reference_source:
+            source = args.reference_source.resolve(strict=True)
+            spec = importlib.util.spec_from_file_location(
+                "hust_l2norm_reference", source
+            )
+            l2norm = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(l2norm)
+        else:
+            from vllm.third_party.flash_linear_attention.ops import l2norm
 
         assert l2norm.USE_DEFAULT_FLA_NORM == 0
         report["reference"] = {

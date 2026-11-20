@@ -85,6 +85,7 @@ def server(config, output, arm, profile=False):
     env[config["gate"]] = "1" if arm == "on" else "0"
     cmd = list(config["server_command"])
     if profile:
+        cmd += config.get("guard_server_args", [])
         cmd += [
             "--profiler-config",
             json.dumps(
@@ -92,6 +93,7 @@ def server(config, output, arm, profile=False):
                     "profiler": "torch",
                     "torch_profiler_dir": str(output / "profile"),
                     "torch_profiler_with_stack": False,
+                    "torch_profiler_record_shapes": bool(config.get("attribution")),
                     "ignore_frontend": True,
                 }
             ),
@@ -107,6 +109,7 @@ def server(config, output, arm, profile=False):
             start_new_session=True,
         )
         save(output / "owner.json", {"pid": proc.pid})
+        collection_completed = False
         try:
             deadline = time.monotonic() + config.get("startup_timeout", 900)
             while True:
@@ -120,16 +123,34 @@ def server(config, output, arm, profile=False):
                         raise TimeoutError(f"Server startup: {output}") from None
                     time.sleep(2)
             yield env
+            if proc.poll() is not None:
+                raise RuntimeError(
+                    f"Server exited before collection finished: {output}"
+                )
+            collection_completed = True
         finally:
+            before_shutdown = proc.poll()
+            forced_kill = False
             # Only signal the process group created by this context.
             with suppress(ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGTERM)
             try:
                 proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                os.killpg(proc.pid, signal.SIGKILL)
+                forced_kill = True
+                with suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
                 proc.wait(timeout=30)
-            save(output / "exit.json", {"returncode": proc.returncode})
+            save(
+                output / "exit.json",
+                {
+                    "returncode": proc.returncode,
+                    "returncode_before_shutdown": before_shutdown,
+                    "shutdown_requested": before_shutdown is None,
+                    "forced_kill": forced_kill,
+                    "collection_completed": collection_completed,
+                },
+            )
 
 
 def collect_guard(config, output, arm):
@@ -174,6 +195,16 @@ def analyse_profile(config, output):
 
 
 def verify_profiles(config, output):
+    if config.get("attribution"):
+        from tools.operator_tools.serving_attribution import verify
+
+        result = verify(config, output)
+        save(output / "l4.json", result)
+        if not result["passed"]:
+            raise ValueError(
+                "Dedicated L4 attribution failed; performance runs refused"
+            )
+        return
     reports = {}
     for arm in ("off", "on"):
         paths = sorted((output / f"guard_{arm}" / "profile").rglob("op_statistic.csv"))
@@ -213,12 +244,52 @@ def validate_benchmark(path, expected):
             raise ValueError(f"Invalid benchmark metrics: {path}")
 
 
+def verify_host(config, output):
+    if config["server_command"][0] != config["python"]:
+        raise ValueError("server_command must use the configured Python interpreter")
+    # Use the same explicit dependency environment as the server.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k != "PYTHONPATH" and not k.startswith("VLLM_HUST_")
+    }
+    env.update(config.get("environment", {}))
+    probe = subprocess.run(
+        [
+            config["python"],
+            "-c",
+            "import importlib.util,json,sys; "
+            "s=importlib.util.spec_from_file_location('host_runtime',sys.argv[1]); "
+            "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+            "print(json.dumps(m.check_host_runtime(json.loads(sys.argv[2]))))",
+            str(ROOT / "tools/operator_tools/host_runtime.py"),
+            json.dumps(config.get("host_commits", {})),
+        ],
+        env=env,
+        cwd=output,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    save(
+        output / "host_preflight.json",
+        {
+            "argv": probe.args,
+            "returncode": probe.returncode,
+            "stdout": probe.stdout,
+            "stderr": probe.stderr,
+        },
+    )
+    probe.check_returncode()
+
+
 def run(config, output):
     pairing = select_workloads_for_operator(
         config.get("phase", "decode"), config.get("max_active_rows")
     )
     if not Path(config["sharegpt_path"]).is_file():
         raise FileNotFoundError(config["sharegpt_path"])
+    verify_host(config, output)
     save(output / "config.json", config)
     texts = {}
     for arm in ("off", "on"):
@@ -228,6 +299,8 @@ def run(config, output):
     save(output / "serving_l3.json", guard)
     if not guard["passed"]:
         raise ValueError("Serving L3 failed; performance runs refused")
+    if config.get("guard_only", False):
+        return
     verify_profiles(config, output)
     save(output / "workload_pairing.json", pairing)
     paths = {w: {a: [] for a in ("off", "on")} for w in WORKLOAD_CATALOG}

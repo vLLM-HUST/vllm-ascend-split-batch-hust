@@ -82,6 +82,47 @@
     },
     "open_question": "Operator-level single-token output is bitwise identical while end-to-end output diverges, pointing at output layout or downstream kernel selection rather than the kernel numerics"
   },
+  "serving_recheck": {
+    "archive": "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-e2e-resumable/qwen_text_split_qkv_fuse",
+    "host_commits": {
+      "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+      "vllm-ascend": "e59aaeef26788e9f895aefa568d779ad84cc7842"
+    },
+    "greedy_guard": {
+      "passed": true,
+      "matched": 8,
+      "total": 8,
+      "artifact": "serving_l3.json"
+    },
+    "l4_attribution": {
+      "passed": false,
+      "protocol": "single-request-16-tokens",
+      "devices": {
+        "0": {
+          "passed": false,
+          "checks": {
+            "off_rope_kernel": {"actual": 160, "expected": 0, "passed": false},
+            "on_rope_kernel": {"actual": 160, "expected": 160, "passed": true}
+          }
+        },
+        "1": {
+          "passed": false,
+          "checks": {
+            "off_rope_kernel": {"actual": 160, "expected": 0, "passed": false},
+            "on_rope_kernel": {"actual": 160, "expected": 160, "passed": true}
+          }
+        }
+      },
+      "sources": [
+        {"path": "guard_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_746863_20261115155205144_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv", "sha256": "35bbe4666b67a6acfba1ce89b51afcfee8e7ee7d389cd019b7305e444062b107"},
+        {"path": "guard_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_746864_20261115155205142_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv", "sha256": "8c70c36376c06e88f4bc80abad254bf217736e576dc513104c521d547be17f4f"},
+        {"path": "guard_on/profile/dp0_pp0_tp0_dcp0_ep0_rank0_763572_20261115160058212_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv", "sha256": "0122775229246745548d5d396508f64a83af61049004ab93f2e80087320b2e89"},
+        {"path": "guard_on/profile/dp0_pp0_tp1_dcp0_ep1_rank1_763573_20261115160058211_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv", "sha256": "09c59e893210722fac7d2d44401e25a19682bc027c36b338b1706b5773f49c7b"}
+      ]
+    },
+    "outcome": "关闭臂仍命中 rope 核函数，逐卡归因失败，性能阶段未执行；原有数值失败与 default-off 结论不变",
+    "failure_artifact": "failure.json"
+  },
   "status": "default_off_serving_l3_failed",
   "default_enabled": false,
   "evidence_fingerprint": {

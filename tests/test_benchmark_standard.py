@@ -196,3 +196,29 @@ def test_mod_skill_structure_and_local_contract_references():
     cases = json.loads((folder / "evals/cases.json").read_text())
     assert len({row["id"] for row in cases["cases"]}) == len(cases["cases"])
     assert all(row["prompt"] and row["checks"] for row in cases["cases"])
+
+
+def test_combination_policy_keeps_single_operator_ab_optional():
+    for name in (
+        "docs/operator-benchmark-standard.md",
+        ".openbitfun/skills/operator-sol-optimizer/SKILL.md",
+        ".openbitfun/skills/mod-acceptance/SKILL.md",
+    ):
+        text = (ROOT / name).read_text()
+        assert "单算子端到端 A/B 按需选测" in text
+    data = json.loads((ROOT / "docs/mod-acceptance/evidence.json").read_text())
+    plan = data["assessment"]["combination_plan"]
+    assert plan["tested"] is False
+    assert plan["single_operator_ab"] == "optional"
+    assert plan["required_guards"] == ["numerical", "per_operator_attribution"]
+    index = json.loads((ROOT / "DELIVERY_INDEX.json").read_text())
+    entries = {e["id"]: e for e in index["operators"]}
+    assert set(plan["candidates"]).isdisjoint(plan["excluded"])
+    assert set(plan["candidates"]) | set(plan["excluded"]) == set(entries)
+    for name, gate in plan["candidates"].items():
+        assert entries[name]["gate_env"] == gate + "=1"
+        assert entries[name]["l3_numerical_guard"] != "failed"
+        assert plan["arms"]["off"][gate] == "0"
+        assert plan["arms"]["on"][gate] == "1"
+    assert set(plan["arms"]["off"]) == set(plan["arms"]["on"])
+    assert all(plan["excluded"].values())
