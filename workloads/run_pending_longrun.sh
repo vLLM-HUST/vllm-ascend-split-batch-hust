@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if (( $# == 0 )); then
+  echo 'usage: run_pending_longrun.sh <reviewed-operator> [...]; for design use python -m tools.operator_tools.next' >&2
+  exit 2
+fi
+operators=()
+for op in "$@"; do operators+=(--operator="$op"); done
+
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PY=${PY:-"$ROOT/.openbitfun/mod-acceptance-venv/bin/python"}
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
@@ -17,7 +24,7 @@ mkdir -p "$RUN_DIR"
 cd "$RUN_DIR"
 
 env -u PYTHONPATH "$PY" "$ROOT/tools/operator_tools/pending_longrun.py" \
-  --template "$TEMPLATE" --plan "$RUN_DIR/plan.json" --report "$RUN_DIR/readiness.json" \
+  "${operators[@]}" --template "$TEMPLATE" --plan "$RUN_DIR/plan.json" --report "$RUN_DIR/readiness.json" \
   | tee "$RUN_DIR/plan-generation.log"
 
 nohup env -u PYTHONPATH PYTHONUNBUFFERED=1 "$PY" \

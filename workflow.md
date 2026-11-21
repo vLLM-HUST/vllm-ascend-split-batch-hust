@@ -10,6 +10,14 @@
 4. 新分支基于当前 `main`。分支名使用 `openbitfun/<short-name>`。
 5. 开工前确认 `git status --short --branch` 为 clean。
 
+**新会话收到“继续优化”**：从仓根运行只读入口，不用复制本机队列或恢复聊天历史。
+
+```bash
+python -B -m tools.operator_tools.next
+```
+
+[当前研发任务](docs/optimization-next.json) 是选题的唯一记录，换方向时在同一 PR 更新范围、依据、跳过项、下一步、停止条件和归档指纹。它不授予执行或回填资格。归档换了挂载点时加 `--archive <目录>`。退出码 `0` 表示已核对记录及其归档输入，不表示当前宿主已通过预检；`2` 表示缺输入，只可静态设计；`1` 表示记录或身份核验失败，应停下。原件路径来自回执和结果清单，不从忽略目录补找。整网热点的读取方法见[热点判读](docs/hotspot-profile-method.md)。
+
 ## 2. 提交与 PR
 
 1. 只暂存明确属于本任务的路径。不默认暂存整个工作区。
@@ -44,10 +52,10 @@
 ## 5. NPU 长测
 
 1. 申请 NPU 前，在干净分支跑完整离线检查和 `repo_audit.py`。
-2. 一键启动命令：
+2. 只有已评审、明确点名的服务复测才用以下命令；它不是选题入口：
 
 ```bash
-SERVING_BASE_PLAN=/path/to/reviewed-plan.json bash workloads/run_pending_longrun.sh
+SERVING_BASE_PLAN=/path/to/reviewed-plan.json bash workloads/run_pending_longrun.sh "$OPERATOR"
 ```
 
 3. 脚本会生成计划，并用 nohup 启动 `serving_e2e_auto.py`。
