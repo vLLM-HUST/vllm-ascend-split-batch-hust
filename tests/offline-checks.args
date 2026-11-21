@@ -11,6 +11,7 @@ tests/test_operator_serving.py
 tests/test_serving_backfill.py
 tests/test_artifact_contract.py
 tests/test_optimization_handoff.py
+tests/test_recurrent_closeout.py
 tests/test_hotspot_rounds.py
 tests/test_verifier_layout.py
 tests/test_host_runtime.py
