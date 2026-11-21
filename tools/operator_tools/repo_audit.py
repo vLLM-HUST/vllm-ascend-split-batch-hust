@@ -154,7 +154,10 @@ def check_archives(entries: dict[str, dict], problems: list[str]) -> int:
         except Exception as exc:
             problems.append(f"{op_id}: 归档重放校验失败: {type(exc).__name__}: {exc}")
             continue
-        for key in ("l3_numerical_guard", "l4_attribution", "serving_end_to_end"):
+        keys = ["l3_numerical_guard", "l4_attribution", "serving_end_to_end"]
+        if "serving_cohort" in evidence:  # Older receipts have no timing cohort.
+            keys.append("serving_cohort")
+        for key in keys:
             if result[key] != evidence.get(key):
                 problems.append(f"{op_id}: 归档重放的 {key} 与仓内证据不一致")
         if result["serving_sync"] != sync:

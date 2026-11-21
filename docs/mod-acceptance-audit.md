@@ -27,7 +27,7 @@
 |---|---|---|
 | 已接入的宿主或插件算子 | 单项结论按[交付索引](../DELIVERY_INDEX.json)与各算子证据核对 | 不把单项结果当作 MOD 组合验收 |
 | `gdn_qkv_norm` | 保留历史算子验证，插件注册已撤回 | [宿主提案](../host-proposals/GDN-qkv-norm/OWNERSHIP.md)未部署到所测基线 |
-| `gdn_split_ba` | 宿主已有独立开关与调用点 | 不在已冻结的组合内；没有经过评审的当前服务结论 |
+| `gdn_split_ba` | [宿主单项服务 A/B](../ops/gdn_split_ba/REPORT.md) 的三个负载均为 `within_noise` | 不在已冻结的组合内；单项结果不作 MOD 结论 |
 | `moe_down_residual_norm`、`ffn_activation` | 仅有独立验证 | 无服务路径，不再安排空转对拍 |
 | 已被取代或否定的探索 | 只保留原有证据 | 不重复排期 |
 

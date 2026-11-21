@@ -255,7 +255,7 @@
       "excluded": {
         "gdn_qkv_norm": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
         "gdn_norm_gate": "Superseded by gdn_output_norm_fusion; do not count twice",
-        "gdn_split_ba": "Outside this frozen combination; the host fork now exposes a separate gate, without a reviewed service result for this candidate",
+        "gdn_split_ba": "Outside this frozen combination; see ops/gdn_split_ba/evidence.json for the separate host-fork serving A/B, not a MOD result",
         "moe_gate_merge": "Rejected exploration; retain history, no service retest",
         "moe_gating_routing": "Rejected exploration; retain history, no service retest",
         "moe_down_residual_norm": "No exposed independent service implementation; direction or isolated candidate record only; outside this combination",
