@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 import copy
 import csv
 import fcntl
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 
 from tools.operator_tools import (
@@ -66,6 +68,28 @@ def validate_route(entry, observed):
     return receipt
 
 
+def timing_cohort(config, concurrency, order):
+    # Only record explicit timing flags. Guard flags and runtime defaults may differ.
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--tensor-parallel-size", "-tp", type=int)
+    parser.add_argument("--max-model-len")
+    parser.add_argument("--enforce-eager", action="store_true")
+    parser.add_argument(
+        "--enable-prefix-caching", action=argparse.BooleanOptionalAction
+    )
+    flags, _ = parser.parse_known_args(config["server_command"][1:])
+    length = flags.max_model_len
+    return {
+        "model": config["model_path"],
+        "tensor_parallel_size": flags.tensor_parallel_size,
+        "max_model_len": int(length) if length and length.isdecimal() else length,
+        "server_mode": "eager" if flags.enforce_eager else None,
+        "prefix_caching": flags.enable_prefix_caching,
+        "concurrency": concurrency,
+        "order": order,
+    }
+
+
 def validate(directory, entry, *, legacy_replay=False):
     files = {}
 
@@ -103,8 +127,9 @@ def validate(directory, entry, *, legacy_replay=False):
     if not legacy_replay or "service_routes" in observed:
         receipt = validate_route(entry, observed)
     texts = {}
+    order = ["off", "on", "on", "off"]
     for stage, arm in [("guard_off", "off"), ("guard_on", "on")] + [
-        (f"bench_{i}_{arm}", arm) for i, arm in enumerate(("off", "on", "on", "off"))
+        (f"bench_{i}_{arm}", arm) for i, arm in enumerate(order)
     ]:
         invocation = read(f"{stage}/invocation.json")
         require(invocation["gate"] == ("1" if arm == "on" else "0"), "Arm mismatch")
@@ -113,6 +138,8 @@ def validate(directory, entry, *, legacy_replay=False):
             command[: len(config["server_command"])] == config["server_command"],
             "Server command mismatch",
         )
+        if stage.startswith("bench_"):
+            require(command == config["server_command"], "Timing server command drift")
         exit_info = read(f"{stage}/exit.json")
         if "collection_completed" in exit_info:
             require(
@@ -164,6 +191,7 @@ def validate(directory, entry, *, legacy_replay=False):
         require(config["world_size"] == 2, "Unaudited device count")
         expected = config["attention_layers"] * 16
         device_sets = []
+        profiles = {"off": [], "on": []}
         for arm in ("off", "on"):
             devices = set()
             paths = sorted(
@@ -178,15 +206,20 @@ def validate(directory, entry, *, legacy_replay=False):
                 files[str(path.relative_to(directory))] = hashlib.sha256(
                     path.read_bytes()
                 ).hexdigest()
-                count = parse_op_statistic_csv(str(path), config["kernel"])[
-                    "call_count_actual"
-                ]
+                stats = parse_op_statistic_csv(str(path), config["kernel"])
+                profiles[arm].append({"path": str(path), **stats})
                 require(
-                    count == (expected if arm == "on" else 0), "Kernel count mismatch"
+                    stats["call_count_actual"] == (expected if arm == "on" else 0),
+                    "Kernel count mismatch",
                 )
             device_sets.append(devices)
         require(device_sets[0] == device_sets[1], "OFF/ON devices differ")
-        require(l4["passed"] is True, "Attribution failed")
+        require(
+            l4["passed"] is True
+            and l4.get("profiles") == profiles
+            and l4.get("expected_per_rank_on") == expected,
+            "Attribution differs from per-rank profiles",
+        )
         l4.update(
             call_count_expected=expected * config["world_size"],
             call_count_actual=expected * config["world_size"],
@@ -197,9 +230,15 @@ def validate(directory, entry, *, legacy_replay=False):
     )
     require(read("workload_pairing.json") == pairing, "Workload pairing mismatch")
     summaries = {}
+    concurrency = {}
     for workload, profile in WORKLOAD_CATALOG.items():
         paths = {"off": [], "on": []}
-        for i, arm in enumerate(("off", "on", "on", "off")):
+        concurrency[workload] = (
+            pairing["primary_concurrency"]
+            if workload == pairing["primary_workload"]
+            else profile.default_concurrency
+        )
+        for i, arm in enumerate(order):
             stage = directory / f"bench_{i}_{arm}"
             target = stage / f"{workload}.json"
             read(str(target.relative_to(directory)))
@@ -211,9 +250,7 @@ def validate(directory, entry, *, legacy_replay=False):
                 config["model_alias"],
                 str(stage),
                 target.name,
-                concurrency=pairing["primary_concurrency"]
-                if workload == pairing["primary_workload"]
-                else profile.default_concurrency,
+                concurrency=concurrency[workload],
                 dataset_path=config["sharegpt_path"]
                 if workload == "sharegpt"
                 else None,
@@ -250,6 +287,7 @@ def validate(directory, entry, *, legacy_replay=False):
         "l3_numerical_guard": l3,
         "l4_attribution": l4,
         "serving_end_to_end": primary,
+        "serving_cohort": timing_cohort(config, concurrency, order),
         "serving_sync": {
             "archive": directory.as_uri(),
             "files": files,
@@ -286,6 +324,11 @@ def sync(directory, operator, root=ROOT):
         result = validate(directory, entry)
         previous = evidence.get("serving_sync")
         if previous == result["serving_sync"]:
+            require(
+                all(evidence.get(k) == v for k, v in result.items())
+                and entry["serving_status"] == result["serving_end_to_end"]["status"],
+                "Stored evidence or index differs from archive replay",
+            )
             return "already_synced"
         if previous:
             require(
@@ -341,3 +384,72 @@ def sync(directory, operator, root=ROOT):
         # A hard interruption leaves the recovery journal in place.
         journal.unlink()
         return "synced"
+
+
+def main(argv=None, *, root=ROOT):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--run", type=Path, required=True, help="completed runner archive"
+    )
+    parser.add_argument("--operator", required=True, help="exact delivery index ID")
+    parser.add_argument(
+        "--apply", action="store_true", help="promote reviewed evidence"
+    )
+    args = parser.parse_args(argv)
+    try:
+        run = args.run.resolve(strict=True)
+        operator = args.operator
+        entry = next(
+            (
+                e
+                for e in load(root / "DELIVERY_INDEX.json")["operators"]
+                if e["id"] == operator
+            ),
+            None,
+        )
+        require(entry is not None, "Unknown operator")
+        directory = (run / operator).resolve(strict=True)
+        require(
+            directory.parent == run and not directory.is_relative_to(root),
+            "Expected external operator archive",
+        )
+        completion = load(run / "completion.json")
+        require(
+            completion["status"] == "complete"
+            and completion["items"][operator]["status"] == "done",
+            "Run or item incomplete",
+        )
+        plan = load(run / "plan.json")
+        configs = [
+            e.get("config")
+            for e in plan.get("items", plan.get("operators", []))
+            if e["id"] == operator
+        ]
+        require(
+            configs == [load(directory / "config.json")], "Collection differs from plan"
+        )
+        if args.apply:
+            action = sync(directory, operator, root)
+            evidence = load(root / entry["evidence"])
+        else:
+            action = "preview"
+            evidence = validate(directory, entry)
+        print(
+            json.dumps(
+                {
+                    "action": action,
+                    "operator": operator,
+                    "cohort": evidence["serving_cohort"],
+                    "workloads": evidence["serving_end_to_end"]["workloads"],
+                },
+                indent=2,
+            )
+        )
+    except (KeyError, OSError, ValueError, TypeError) as exc:
+        print(f"Backfill blocked: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
