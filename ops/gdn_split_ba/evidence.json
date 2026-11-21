@@ -54,9 +54,109 @@
     "rtol": 0.001
   },
   "l4_attribution": {
-    "status": "pending_outer_loop",
-    "call_count_expected": null,
-    "call_count_actual": null
+    "status": "completed",
+    "verified": true,
+    "passed": true,
+    "call_count_expected": 960,
+    "call_count_actual": 960,
+    "expected_per_rank_on": 480,
+    "kernel": "gdn_split_ba_2d_kernel",
+    "devices": {
+      "off": {
+        "0": 0,
+        "1": 0
+      },
+      "on": {
+        "0": 480,
+        "1": 480
+      }
+    },
+    "protocol": "single-request-16-tokens; fixed greedy prompts 128 tokens per arm",
+    "sources": [
+      {
+        "path": "gdn_split_ba/guard_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_786222_20261121073329893_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+        "sha256": "df30d3955442e8bbb7fe3a107255f21e0f0ef9c7bcdee72ee76b8b0c9e5804b0"
+      },
+      {
+        "path": "gdn_split_ba/guard_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_786223_20261121073329896_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+        "sha256": "b05029b9d741e9110d458ce53eb965c2eaad2868f830500b410d199bb693b025"
+      },
+      {
+        "path": "gdn_split_ba/guard_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_786222_20261121073329893_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+        "sha256": "431f0b1e07cd02990d7e05bc6a66348d545196c145c9807e24c7bf1f773ba483"
+      },
+      {
+        "path": "gdn_split_ba/guard_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_786223_20261121073329896_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+        "sha256": "5a7f4ad1dde1c69e58c1e162d512e3c7666d6a373ca1e2ad6fe5f917f93d5904"
+      },
+      {
+        "path": "gdn_split_ba/guard_on/profile/dp0_pp0_tp0_dcp0_ep0_rank0_809653_20261121074432239_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+        "sha256": "4fa0f3607fddeb83dfd7e4b9888e4f834f4ac458162bbf576a969b59b9e5fcc4"
+      },
+      {
+        "path": "gdn_split_ba/guard_on/profile/dp0_pp0_tp1_dcp0_ep1_rank1_809654_20261121074432237_ascend_pt/ASCEND_PROFILER_OUTPUT/op_statistic.csv",
+        "sha256": "8c914a32dcda3828ccd24a033e23ae2d6ab73a59ee7bd5c286ab725945eaa656"
+      },
+      {
+        "path": "gdn_split_ba/guard_on/profile/dp0_pp0_tp0_dcp0_ep0_rank0_809653_20261121074432239_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+        "sha256": "0236ee56666db107a339827a29fd90ef053ae2479c93000d10a987c5b72a075b"
+      },
+      {
+        "path": "gdn_split_ba/guard_on/profile/dp0_pp0_tp1_dcp0_ep1_rank1_809654_20261121074432237_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+        "sha256": "52fb491ca348dd74bbd9bdeaa61157a5f4b1f8d9449795642ab9d6d4949ca1b1"
+      }
+    ],
+    "cross_check": [
+      "op_statistic.csv",
+      "kernel_details.csv"
+    ],
+    "context": {
+      "archive": "file:///root/vllm-workspace/benchmark-archives/gdn-split-ba-route-20261121T072441Z",
+      "review_packet": "file:///root/vllm-workspace/benchmark-archives/gdn-split-ba-route-20261121T072441Z/review_packet.json",
+      "host_commits": {
+        "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+        "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+      },
+      "plugin_commit": "3cb0a11660c056be6c01ddfa29d48a1d397317d7",
+      "layer": "host_fork",
+      "gate_env": "VLLM_HUST_GDN_SPLIT_BA=1",
+      "service_route": {
+        "identity": {
+          "reader": "vllm_ascend/ops/gdn_input_norm_host.py",
+          "consumer": "vllm_ascend/ops/gdn.py",
+          "scope": "AscendGatedDeltaNetAttention._split_ba_for_tp",
+          "expression": "gdn_split_ba(ba)",
+          "operator": "gdn_split_ba",
+          "layer": "host_fork",
+          "gate_env": "VLLM_HUST_GDN_SPLIT_BA=1"
+        },
+        "sha256": {
+          "vllm_ascend/ops/gdn_input_norm_host.py": "a6a8c4da3dc63a1c7bd7a124e6493ee4925271d85bae5dcdf2600ffa45d1905a",
+          "vllm_ascend/ops/gdn.py": "a32bf3d9ac16d4d89c87af1182475ca9142e755d78a38ef715bfaebb6d790780"
+        }
+      },
+      "cohort": {
+        "model": "/models/Qwen3.5-35B-A3B",
+        "world_size": 2,
+        "max_model_len": 4096,
+        "server_mode": "eager",
+        "prefix_caching": false,
+        "physical_npus": [
+          6,
+          7
+        ]
+      },
+      "l3": {
+        "passed": true,
+        "matched": 8,
+        "total": 8,
+        "match_summary": "8/8",
+        "mismatched_indices": []
+      },
+      "tokens_per_guard_prompt": 128,
+      "profile_generation_tokens": 16,
+      "scope": "L3 与逐卡 L4 only; 没有服务吞吐配对，不构成服务收益结论"
+    }
   },
   "serving_end_to_end": {
     "tested": false,
