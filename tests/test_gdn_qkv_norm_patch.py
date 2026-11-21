@@ -2,7 +2,9 @@
 # Copyright (c) 2026 vLLM-HUST contributors.
 
 import ast
+import hashlib
 import importlib.util
+import json
 import os
 import subprocess
 import textwrap
@@ -103,7 +105,6 @@ def test_callsite_guards_and_no_double_norm(monkeypatch, reject):
         head_k_dim=128,
         head_v_dim=128,
         num_spec=0,
-        rearrange_mixed_qkv=lambda x: calls.append("unpack") or ("q", "k", "v"),
     )
     x = SimpleNamespace(
         shape=(16, 4096),
@@ -121,6 +122,7 @@ def test_callsite_guards_and_no_double_norm(monkeypatch, reject):
         mixed_qkv_non_spec=x,
         torch=SimpleNamespace(bfloat16="bf16"),
         get_pcp_group=lambda: SimpleNamespace(world_size=1),
+        _rearrange_mixed_qkv=lambda layer, x: calls.append("unpack") or ("q", "k", "v"),
         l2norm_fwd=lambda t: calls.append("norm") or "norm_" + t,
     )
     if reject == "disabled":
@@ -179,3 +181,13 @@ def test_only_pure_decode_norm_pair_changed():
         "use_qk_l2norm_in_kernel=True",
     ]:
         assert source.count(line) == patched.count(line) == 1
+
+
+def test_proposal_artifact_hashes_match_rebased_sources():
+    meta = json.loads((PROPOSAL / "proposal_meta.json").read_text())
+    assert meta["host"]["sha256"] == meta["artifacts"]["host_orig/gdn.py.orig"]
+    for name in ("host_orig/gdn.py.orig", "patch.diff", "gen_patch.py"):
+        assert (
+            hashlib.sha256((PROPOSAL / name).read_bytes()).hexdigest()
+            == meta["artifacts"][name]
+        )

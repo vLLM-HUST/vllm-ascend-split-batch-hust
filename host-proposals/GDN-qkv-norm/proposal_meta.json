@@ -2,12 +2,12 @@
   "schema": "vllm-hust-host-proposal.v1",
   "id": "GDN-qkv-norm",
   "kind": "local tier-2 default-off host proposal; not deployed",
-  "owner": "028/D3-gdn-high-concurrency-longctx main session",
-  "upstream_status": "not submitted; no upstream action planned",
+  "owner": "vLLM-HUST/vllm-ascend-hust (host integration)",
+  "upstream_status": "Submitted to the host fork: https://github.com/vLLM-HUST/vllm-ascend-hust/pull/82 ; not deployed on 320eced8c",
   "host": {
     "file": "vllm_ascend/ops/gdn.py",
-    "sha256": "1081d19738da1130cf85beb7c1bcb4d061a0ca83f0edd4f3a7f2b30bd185e35d",
-    "revision": "installed runtime snapshot; no .git available; exact full-file hash is mandatory"
+    "sha256": "a32bf3d9ac16d4d89c87af1182475ca9142e755d78a38ef715bfaebb6d790780",
+    "revision": "based/split-batch-baseline@320eced8c (rebased from pre-PR#81 runtime snapshot 1081d197)"
   },
   "env": {
     "name": "VLLM_HUST_GDN_QKV_NORM",
@@ -34,9 +34,9 @@
     "tests/test_bench_gdn_qkv_norm.py"
   ],
   "artifacts": {
-    "gen_patch.py": "e1933b2c3611be83216bdfcb2c16cc9770e9dac92cfebe81b8fad823326b7400",
-    "patch.diff": "f5493d62cc0c5b5e6056a92fe518d04949f82d619d8b13c6ce7b3c38b84e54c4",
-    "host_orig/gdn.py.orig": "1081d19738da1130cf85beb7c1bcb4d061a0ca83f0edd4f3a7f2b30bd185e35d"
+    "gen_patch.py": "d79802d84b6ec49687d85a3e96ff5c211b0573bc8be20b3004ab11b9c16a54c6",
+    "patch.diff": "ef99a74a9a6534336ad833ab9a87ea9ed0e59653f2388e2035b12d7c07345da2",
+    "host_orig/gdn.py.orig": "a32bf3d9ac16d4d89c87af1182475ca9142e755d78a38ef715bfaebb6d790780"
   },
   "evidence": [
     "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/4bf3c6b7af6ddb4cdcf193e348302758386f8a2f/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/l0-fused-norm.json",
@@ -45,10 +45,9 @@
     "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022/split-current-git/snapshot/host-proposals/GDN-qkv-norm/validation/l4-multibuffer-20261019/receipt.json"
   ],
   "deployment_gate": [
-    "Exact source hash, forward and reverse patch checks",
-    "Fullgraph capture/replay correctness: PASS (isolated 8/8; in-model FULL windows captured and L3-identical)",
-    "Full-model L3 and opt bench compare PASS: 16/16 fixed batch, 8/8 standard (production cohort, multibuffer=True)",
-    "Matched model L4 target counts/durations and all-kernel denominator: PASS, both ranks (validation/l4-multibuffer-20261019/receipt.json)"
+    "Verify the pinned host and reversible patch against the submitted change",
+    "Historical checks do not qualify this rebase; repeat L3 and graph replay on the deployed revision",
+    "Require per-rank L4 attribution before a paired service A/B"
   ],
   "rollback": "patch -R -p1 < host-proposals/GDN-qkv-norm/patch.diff; verified on a temporary copy only",
   "decision": "Historical kernel acceptance is separate from the withdrawn bundle registration. Default-off tier-2 boundary unchanged; measurements and exact acceptance history are in the archived document.",
