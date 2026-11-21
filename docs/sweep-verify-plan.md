@@ -1,0 +1,75 @@
+# 遍测遍验模式（NPU 持卡保活循环）
+
+本文件定义一个持续运转的测试-验证队列模式：目标是让持有的 NPU 卡始终在跑**有交付价值的下一件事**，而不是闲等到被回收。规则稳定放本文件；队列的实时状态放 `.openbitfun/sweep-verify-queue.json`（不进 git，每轮就地更新）。
+
+## 1. 触发与节奏
+
+| 规则 | 内容 |
+|---|---|
+| 触发 | 卡在手且空闲即启动下一轮；每轮从队列取第一个合格项开跑，不挑活 |
+| 单轮预算 | 默认一轮不超过一个自然日；被打断时依赖 `serving_e2e_auto.py` 的 checkpoint 续跑 |
+| 串行 | 同一时刻只跑一个队列项，NPU 独占；不并发起两个服务 |
+| 停机 | 队列取空、卡被收回或连续两项失败时停下，失败原因写回队列 |
+
+## 2. 队列分层与准入
+
+| 层 | 内容 | 准入判据 |
+|---|---|---|
+| P0 资格 | 离线门禁 + `repo_audit.py`；验收形态起服冒烟 | 每轮开工必跑；冒烟失败时本轮只做排障，不动其他项 |
+| P1 复测 | 冻结形态热点重采；六算子服务 A/B；pending 长测队列 | 冒烟通过；A/B 只跑 `sync_mode: none`，结论不自动回填 |
+| P2 探索 | 专家分布、长前缀新热点确认、内存安全检查 | P1 无合格项时才跑；产物只做方向记录，不产服务标签 |
+
+准入统一判据：没有可核对的调用点或归因规则的算子只允许 guard_only 或 skip（同 `pending_longrun.py` 的既有规则）；数值失败一票否决。
+
+## 3. 循环步骤（每轮）
+
+1. 取 `.openbitfun/sweep-verify-queue.json` 第一个 `status: pending` 且满足准入的项。
+2. 核对该项 preconditions（模板 plan 存在、环境变量、上轮冒烟结果）。
+3. 按该项 `command` 原样执行；产物落该项 `archive` 指定的仓外目录，manifest 由采集脚本自动写。
+4. 跑完把 `status` 改成 `done` / `failed`，`last_result` 写一句事实（不写结论），`updated_at` 打时间戳。
+5. `failed` 的项写明原因并回炉到队尾；同因二次失败降级或转人工。
+6. 有结构化结论需要落仓时（A/B 结果、指纹刷新），走正常 PR 与一致性门禁；值守会话不得直接改证据标签。
+
+## 4. 无人值守边界
+
+- 不 push main、不合 PR、不 approve；落仓走既有 PR 流程。
+- 不动宿主 fork；`host_commits` 缺失或不匹配时停止（`host_runtime.py` 会拦）。
+- 原始采集只在仓外归档目录；仓内只允许结构化登记。
+- 服务收益标签只能由回填 PR 写入，值守会话只能产出待回填的归档与摘要。
+- 队列文件本身不进 git；它的更新不需要任何 git 操作。
+
+## 5. 队列文件 schema
+
+`.openbitfun/sweep-verify-queue.json` 按下面的结构维护；缺字段的项视为非法，本轮跳过并记录：
+
+```json
+{
+  "schema": "sweep-verify-queue/v1",
+  "updated_at": "<UTC 时间戳>",
+  "jobs": [
+    {
+      "id": "P0-SMOKE",
+      "tier": "P0",
+      "title": "<一句话>",
+      "command": "<可直接执行的完整命令>",
+      "preconditions": ["<事实条件>"],
+      "postconditions": ["<完成后必须为真的事实>"],
+      "archive": "<仓外归档目录>",
+      "status": "pending | running | done | failed | blocked",
+      "last_result": "<一句话事实，不写结论>"
+    }
+  ]
+}
+```
+
+## 6. 初始队列内容
+
+初始队列随本文件一次生成（见队列文件的首次提交内容），条目来源全部是仓内已登记的待办：
+
+- 验收形态起服冒烟（关闭 `docs/acceptance-shape.json` 的 `unverified_risks`）；
+- 冻结形态热点重采（排序精化，与旧 4096/eager 表只比方向）；
+- 六个已测算子在冻结形态下的 A/B 复测（前置：用 `profile_hotspot_longrun.sh` 的同套 guard 参数构造冻结形态 base plan）；
+- `pending_longrun.py` 默认待办（`gdn_split_ba` full、两个 guard_only、`gdn_qkv_norm` skip）；
+- 富余时间：GroupedMatmul 专家分布验证、新热点表确认、内存安全检查。
+
+队列内容会消耗也会新增；新增项必须有 `id`、可执行 `command` 和仓外 `archive`，否则不许入队。

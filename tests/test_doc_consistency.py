@@ -41,6 +41,7 @@ PROSE_SURFACE = (
     "docs/operator-benchmark-standard.md",
     "docs/hotspot-profile-method.md",
     "docs/acceptance-shape-alignment.md",
+    "docs/sweep-verify-plan.md",
     "docs/mod-acceptance-standard.md",
     "docs/mod-acceptance-audit.md",
     ".openbitfun/skills/mod-acceptance/SKILL.md",
