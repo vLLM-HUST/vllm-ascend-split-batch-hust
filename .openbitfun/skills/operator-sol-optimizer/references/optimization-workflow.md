@@ -1,6 +1,6 @@
 # 算子优化执行工作流
 
-本文件补充 [SKILL.md](../SKILL.md) 的执行顺序。术语和状态标签按 [GLOSSARY.md](../../../GLOSSARY.md)、`DELIVERY_INDEX.json` 和 `ops/<operator>/evidence.json`。本文件不改变验收判据。
+本文件补充 [SKILL.md](../SKILL.md) 的执行顺序。术语和状态标签按 [GLOSSARY.md](../../../../GLOSSARY.md)、`DELIVERY_INDEX.json` 和 `ops/<operator>/evidence.json`。本文件不改变验收判据。
 
 ## 1. 状态分层
 
@@ -64,7 +64,7 @@
 
 1. 在干净分支跑 `pytest @tests/offline-checks.args` 和 `repo_audit.py`。
 2. 确认计划只含未完成端侧验证、且具备可验证门控的算子。已测、失败未修、已替代和方向记录不得混入。
-3. 使用 `tools/operator_tools/pending_longrun.py` 生成计划。无调用规则的算子只能 guard-only 或 skip。
+3. 使用 `tools/operator_tools/pending_longrun.py` 生成计划。没有服务调用点或门控读者时必须 skip；已有接入但缺归因规则时可只做数值护栏。
 4. 使用 `workloads/run_pending_longrun.sh` 后台启动。原始归档放仓外，日志和 checkpoint 放 `.openbitfun/`。
 5. 长测计划必须使用 `sync_mode: none`。结果不自动写回正式证据。
 6. 人工核对 host preflight、贪心对拍、逐卡归因、请求完整性和噪声记录后，才能调用同步工具。

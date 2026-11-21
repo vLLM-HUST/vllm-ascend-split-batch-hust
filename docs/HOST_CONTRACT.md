@@ -45,7 +45,7 @@ Registration and release gates are defined in `docs/release.md`.
 | rope-fix | occupied OOT entries plus registration wrapper/rebinding | Missing Llama3 key may use registration independently; replacing existing Ascend providers cannot use duplicate-rejecting `register_oot` directly |
 | mlp-chunk | model-specific MLP forward | Not a narrow registered CustomOp; whole-model registration is not an equivalent adapter |
 | gate-fp32 | Runner load_model wrapper and weight cache | Load lifecycle, not operator dispatch; a worker subclass needs explicit deployment/composition and callsite validation |
-| gdn-merge-inproj | Runner load_model wrapper | No proven merged-weight forward consumer; retain fail-closed behavior, registration alone cannot repair reachability |
+| gdn-merge-inproj | Runner load_model wrapper | Host owns the merged-weight consumer; the import-only plugin does not rewrite weights |
 | aot-cache-guard | compiler method wrapper | Compiler-cache repair, not a compute backend; retain its existing default-on semantics |
 | zerocost-wiring | AST-rewritten forward, FIA adaptor and RoPE cache helpers | Multiple callsites and side effects; no one-to-one narrow registry migration demonstrated |
 
@@ -109,87 +109,11 @@ and logs nothing. Fail-open: a missing/renamed seam, a foreign registry entry
 implementation in place; a failure *after* the wrapper was installed rolls it back
 so `stats()` matches the log.
 
-## GDN in_proj merge component (implemented, default-off, fail-closed)
+## GDN in_proj 输入投影合并（宿主实现，默认关闭）
 
-`gdn_merge_inproj_plugin.py` is the plugin-library home of the accepted in_proj weight merge
-mechanism (load-time `in_proj_ba` -> `in_proj_qkvz` weight merge, one
-`[6176, 2048]` `MatMulV2` per GDN layer instead of two). It rides ONLY:
+在 [宿主基线 `320eced8c`](https://github.com/vLLM-HUST/vllm-ascend-hust/blob/320eced8c1bba71c0329bf59caa721a2382e7499/vllm_ascend/ops/gdn.py) 上，`VLLM_HUST_GDN_MERGE_INPROJ=1` 控制权重合并。宿主 `forward` 在 `_MERGE_GDN_INPROJ` 开启、权重已合并且布局受支持时消费合并权重，否则走原生分支。
 
-- `vllm.general_plugins` entry point `gdn-merge-inproj` (`load()`), plus the
-  descriptor-only bundle `org.vllm-hust.gdn-merge-inproj`
-  (`src/vllm_ascend_split_batch/gdn_merge_inproj/`, `implementation[].status =
-  import_only`, injection key `VLLM_HUST_GDN_MERGE_INPROJ=1`). The status is
-  deliberately **not** `active`: the extension manager must refuse to enable a
-  carrier that is fail-closed on this host (same ladder as `rope-fix`).
-- the active model runner's `load_model` method, wrapped exactly like
-  `gate_fp32_plugin` (same probe list and order, `vllm_ascend.ops` warm-up,
-  fail-open on a missing seam). Both carriers wrap the same method; each checks
-  its own marker, calls through to whatever it wrapped (so the other hook still
-  runs) and is undone by its own `uninstall()`.
-- read-only resolution of
-  `vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn.QwenGatedDeltaNetAttention`
-  — the class the model's GDN layers are instances of, because `patch_qwen3_5`
-  rebinds the Ascend methods onto it — plus its `in_proj_qkvz` / `in_proj_ba`
-  `MergedColumnParallelLinear` shards and the `key_dim` / `value_dim` / `tp_size`
-  / `num_v_heads` attributes used to derive the F2 row counts.
-
-Host environment: vllm-ascend (Commit `74f0c0a27`), vllm `0.28.1.post1.dev143+gf18cf803c`, 2x910B2 TP=2, Qwen3.5-35B-A3B.
-
-### Current status: fail-closed on the missing forward-consumer seam
-
-The weight conversion is implemented and CPU-tested, but on this host the carrier
-rewrites **nothing** and logs one warning, because the merged weight has no safe
-consumer.
-
-`AscendGatedDeltaNetAttention.forward` computes `self.in_proj_qkvz(...)` and
-`self.in_proj_ba(...)` inline and then runs `torch.ops.vllm.qwen_gdn_attention_core`
-+ `RMSNormGated` + `out_proj` inside the same method body: there is no projection
-or custom-op seam. A plugin-side single-matmul consumer would need either
-
-1. per-call Python state inside the traced `forward` (a module attribute or
-   thread-local carrying the fused output to the second projection call) — the
-   dynamo-unsafe shape the F2 v1 carrier was rejected for, or
-2. a copy of the host `forward` body in this repository — host private source,
-   which would then drift silently.
-
-Merging without a consumer is not a fallback: it removes no kernel (the stock
-second `in_proj_ba` matmul still runs) and feeds a `[*, 6176]` tensor into the
-stock `mixed_qkvz.split([qkv_size, z_size])`. `FORWARD_CONSUMER_BLOCKER` in the
-carrier is the machine-readable form of this paragraph;
-`forward_consumer_available()` is the single gate, and the merge path behind it is
-exercised by `tests/test_gdn_merge_inproj_plugin.py` (the fail-closed path and
-the merge path are both pinned).
-
-Unblocking condition (any one): the host forward grows an env-gated
-merged-consumption branch for the flat `gqa_interleaved_layout=False` layout, or
-the projection step becomes its own bindable method / custom op.
-
-Default-off / fail-open semantics: with `VLLM_HUST_GDN_MERGE_INPROJ` unset (or
-anything other than the exact token `1`) `load()` returns before importing
-`torch` / `vllm` / `vllm_ascend`, touches no class and logs nothing. Enabled: a
-missing/renamed host class, a missing runner seam or any internal error warns and
-changes nothing; the post-load hook never raises into `load_model`, and a
-`load_model` that raises is never post-processed.
-
-Coexistence with the runtime-tree F2 patch (read before reading any serve log):
-the accepted F2 measurement came from the runtime-tree patch, which consumes the
-**same** env key `VLLM_HUST_GDN_MERGE_INPROJ=1` (the validation ladder exports it
-by default, `tools/bench-ladder.sh`). On a host where the patch is applied, a
-`=1` run therefore shows the patch's merge *and* this carrier's fail-closed
-warning in the same log; with the plugin carrier alone the key has the visible
-effect of that one warning and nothing else. The two cannot double-merge even if
-the seam appears later: the patch leaves a `[6176, 2048]` weight, which
-`plan_merge` refuses on the row-count guard (`layer dims imply (6144, 32)`).
-
-Host-upgrade checklist item — re-audit when the host moves: (a) the
-`QwenGatedDeltaNetAttention` name and its `in_proj_qkvz` / `in_proj_ba`
-attributes; (b) that GDN layers are still instances of the core class rather than
-of a fork subclass; (c) `gqa_interleaved_layout` and the four dim attributes;
-(d) the runner probe list and the `load_model` signature; (e) **whether a
-merged-consumption seam now exists** — if it does, delete this blocker and run the
-L3/L4 acceptance.
-
-Statistics scope: 早期历史评估记录曾参考过部分特定测试流量，但属于历史已废弃的口径，且绑定于旧运行时补丁。当前仓内已废弃该类历史流量。任何现行性能数字必须严格依据 docs/npu-benchmark-execution-guide.md 规定的标准受控评测负载重新采集，严禁跨条件混用。
+插件入口 `gdn-merge-inproj` 仍为 `import_only`。插件不替宿主改写权重，不得把宿主结果算到插件上。宿主升级时分别核对加载逻辑和 `forward` 消费分支；所测工况与服务结论见[算子证据](../ops/gdn_merge_inproj/evidence.json)。
 
 ## GMM `tuning_config` 调优配置注入与 counts dump 宿主侧提案 (default-off)
 

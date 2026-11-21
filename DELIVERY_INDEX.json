@@ -29,7 +29,7 @@
     "status": "推进阶段标签：记录该算子属哪一层、走到哪一步（例如 integrated_host_fork_measured / l0_measured_pending_outer_loop / default_off_negative_speedup）。它不是服务结论；服务端有没有收益只看 serving_status。",
     "serving_status": "唯一的服务结论标签：只能由同一算子 ops/<operator>/evidence.json 的 serving_end_to_end 与 l4_attribution 支撑。pending_outer_loop / negative_or_pending 表示当前还没有服务结论；L3 失败时禁止任何收益类标签。",
     "l3_numerical_guard": "当前实现的数值护栏方向：passed 或 failed，必须与同一算子 evidence.json 的 l3_numerical_guard.passed 同向；failed 一票否决，不接受任何服务收益结论。",
-    "gate_env": "门控变量的赋值写法，形如 VLLM_HUST_GATE_FP32=1（变量名=启用值）；尚未在 src/ 里接线的算子写 unexposed。"
+    "gate_env": "门控变量的赋值写法，如 VLLM_HUST_GATE_FP32=1。当前宿主或插件服务路径无读者时写 unexposed。"
   },
   "operators": [
     {
@@ -44,7 +44,13 @@
       "default_enabled": false,
       "gate_env": "VLLM_HUST_D4_CONV_PACK=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "within_noise"
+      "serving_status": "within_noise",
+      "service_route": {
+        "reader": "vllm_ascend/ops/gdn.py",
+        "consumer": "vllm_ascend/ops/gdn.py",
+        "scope": "AscendGatedDeltaNetAttention._forward_core",
+        "expression": "getattr(self.conv1d, _PACKED_CONV_WEIGHT_NAME, None)"
+      }
     },
     {
       "id": "gate_fp32",
@@ -58,7 +64,14 @@
       "default_enabled": false,
       "gate_env": "VLLM_HUST_GATE_FP32=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "within_noise"
+      "serving_status": "within_noise",
+      "service_route": {
+        "reader": "vllm_ascend_split_batch/gate_fp32_plugin.py",
+        "consumer": "vllm_ascend/ops/fused_moe/fused_moe.py",
+        "scope": "AscendMoERunner._forward_impl",
+        "expression": "gate.weight_fp32 if hasattr(gate, \"weight_fp32\") else gate.weight.to(torch.float32)",
+        "entry_point": "gate-fp32"
+      }
     },
     {
       "id": "gdn_split_fusion",
@@ -72,7 +85,13 @@
       "default_enabled": false,
       "gate_env": "VLLM_HUST_GDN_UNPACK_FUSED=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "within_noise"
+      "serving_status": "within_noise",
+      "service_route": {
+        "reader": "vllm_ascend/ops/gdn.py",
+        "consumer": "vllm_ascend/ops/gdn.py",
+        "scope": "AscendGatedDeltaNetAttention.forward",
+        "expression": "gdn_unpack(mixed_qkvz, ba, qkv_size, half)"
+      }
     },
     {
       "id": "moe_epilogue",
@@ -86,7 +105,13 @@
       "default_enabled": false,
       "gate_env": "VLLM_HUST_MOE_EPILOGUE=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "within_noise"
+      "serving_status": "within_noise",
+      "service_route": {
+        "reader": "vllm_ascend/ops/fused_moe/shared_experts.py",
+        "consumer": "vllm_ascend/ops/fused_moe/shared_experts.py",
+        "scope": "AscendSharedExperts.part2",
+        "expression": "torch.ops.vllm.moe_gate_mul(gate, shared_out)"
+      }
     },
     {
       "id": "gdn_merge_inproj",
@@ -105,17 +130,23 @@
         "host_operator": "AscendGatedDeltaNetAttention.process_weights_after_loading",
         "host_gate_env": "VLLM_HUST_GDN_MERGE_INPROJ",
         "host_branch": "based/split-batch-baseline"
+      },
+      "service_route": {
+        "reader": "vllm_ascend/ops/gdn.py",
+        "consumer": "vllm_ascend/ops/gdn.py",
+        "scope": "AscendGatedDeltaNetAttention.forward",
+        "expression": "torch.nn.functional.linear(hidden_states, self.in_proj_qkvz.weight)"
       }
     },
     {
       "id": "gdn_qkv_norm",
-      "display_name": "gdn_qkv_norm (vllm_ascend/ops/gdn.py:552-553,692-693)",
-      "layer": "plugin_carrier",
+      "display_name": "gdn_qkv_norm",
+      "layer": "host_fork",
       "directory": "ops/gdn_qkv_norm",
       "readme": "ops/gdn_qkv_norm/README.md",
       "report": "ops/gdn_qkv_norm/REPORT.md",
       "evidence": "ops/gdn_qkv_norm/evidence.json",
-      "status": "l0_measured_pending_outer_loop",
+      "status": "host_proposal_pending",
       "default_enabled": false,
       "gate_env": "unexposed",
       "l3_numerical_guard": "passed",
@@ -131,7 +162,7 @@
       "evidence": "ops/gdn_norm_gate/evidence.json",
       "status": "superseded_by_host_fork",
       "default_enabled": false,
-      "gate_env": "VLLM_HUST_GDN_NORM_GATE=1",
+      "gate_env": "unexposed",
       "l3_numerical_guard": "passed",
       "serving_status": "superseded_by_host_fork",
       "superseded_by_host_fork": {
@@ -142,17 +173,23 @@
     },
     {
       "id": "gdn_split_ba",
-      "display_name": "gdn_split_ba (vllm_ascend/ops/gdn.py:210)",
-      "layer": "plugin_carrier",
+      "display_name": "GDN TP split_ba",
+      "layer": "host_fork",
       "directory": "ops/gdn_split_ba",
       "readme": "ops/gdn_split_ba/README.md",
       "report": "ops/gdn_split_ba/REPORT.md",
       "evidence": "ops/gdn_split_ba/evidence.json",
       "status": "l0_measured_pending_outer_loop",
       "default_enabled": false,
-      "gate_env": "unexposed",
+      "gate_env": "VLLM_HUST_GDN_SPLIT_BA=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "pending_outer_loop"
+      "serving_status": "pending_outer_loop",
+      "service_route": {
+        "reader": "vllm_ascend/ops/gdn_input_norm_host.py",
+        "consumer": "vllm_ascend/ops/gdn.py",
+        "scope": "AscendGatedDeltaNetAttention._split_ba_for_tp",
+        "expression": "gdn_split_ba(ba)"
+      }
     },
     {
       "id": "moe_gate_merge",
@@ -194,35 +231,41 @@
       "default_enabled": false,
       "gate_env": "VLLM_HUST_GDN_OUTPUT_NORM_FUSED=1",
       "l3_numerical_guard": "passed",
-      "serving_status": "within_noise"
+      "serving_status": "within_noise",
+      "service_route": {
+        "reader": "vllm_ascend/ops/gdn_epilogue.py",
+        "consumer": "vllm_ascend/ops/gdn.py",
+        "scope": "AscendGatedDeltaNetAttention.forward",
+        "expression": "gdn_output_norm_rearrange(core_attn_out, z, self.norm.weight, getattr(self.norm, \"eps\", 1e-6))"
+      }
     },
     {
       "id": "moe_down_residual_norm",
-      "display_name": "moe_down_residual_norm (vllm_ascend/ops/fused_moe/shared_experts.py:down_residual_norm)",
-      "layer": "plugin_carrier",
+      "display_name": "moe_down_residual_norm",
+      "layer": "rejected_exploration",
       "directory": "ops/moe_down_residual_norm",
       "readme": "ops/moe_down_residual_norm/README.md",
       "report": "ops/moe_down_residual_norm/REPORT.md",
       "evidence": "ops/moe_down_residual_norm/evidence.json",
-      "status": "l0_measured_pending_outer_loop",
+      "status": "historical_only",
       "default_enabled": false,
       "gate_env": "unexposed",
       "l3_numerical_guard": "passed",
-      "serving_status": "pending_outer_loop"
+      "serving_status": "not_applicable"
     },
     {
       "id": "ffn_activation",
-      "display_name": "ffn_activation (vllm_ascend/ops/fused_moe/fused_moe.py:ffn_activation)",
-      "layer": "plugin_carrier",
+      "display_name": "ffn_activation",
+      "layer": "rejected_exploration",
       "directory": "ops/ffn_activation",
       "readme": "ops/ffn_activation/README.md",
       "report": "ops/ffn_activation/REPORT.md",
       "evidence": "ops/ffn_activation/evidence.json",
-      "status": "l0_measured_pending_outer_loop",
+      "status": "historical_only",
       "default_enabled": false,
       "gate_env": "unexposed",
       "l3_numerical_guard": "passed",
-      "serving_status": "pending_outer_loop"
+      "serving_status": "not_applicable"
     }
   ]
 }

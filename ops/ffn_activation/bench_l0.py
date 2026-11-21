@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """L0 microbenchmark for ffn_activation.
 
-Callsite: vllm_ascend/ops/fused_moe/fused_moe.py:ffn_activation.
+Isolated implementation; no service callsite.
 """
 
 if __name__ == "__main__":

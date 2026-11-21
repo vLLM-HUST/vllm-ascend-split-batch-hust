@@ -1,12 +1,5 @@
-# 算子验收报告: gdn_split_ba (vllm_ascend/ops/gdn.py:210)
+# GDN TP split_ba 验证范围
 
-## 1. 形状事实与单变量上下文
-- 模型: Qwen3.5-35B-A3B (TP=2)
-- 精度: torch.bfloat16
-- Callsite: `vllm_ascend/ops/gdn.py:210`
-- 形状与分桶事实: 详见 `evidence.json`
+在宿主基线 `320eced8c` 上，`AscendGatedDeltaNetAttention._split_ba_for_tp` 读取门控并调用 `vllm_ascend.ops.gdn_input_norm_host.gdn_split_ba`。该服务路径不导入插件库的同名 kernel。
 
-## 2. 验证阶梯结论
-- L0 纯算子基准: 已通过 NPUGraph 多桶重放验证，详细指标见 `evidence.json`。
-- L3 数值正确性: PASS（含未见动态行数零重编译护栏检查）。
-- 状态: 达标交付
+[evidence.json](evidence.json) 保留独立实现的历史 L0 与数值记录，它们不是该宿主实现的重测。宿主接入不等于已有经评审的服务配对，不主张服务收益。

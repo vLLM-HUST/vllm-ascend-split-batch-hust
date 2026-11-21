@@ -12,11 +12,12 @@ if [[ ! -x "$PY" ]]; then
   exit 1
 fi
 
+TEMPLATE=$(realpath -e -- "${SERVING_BASE_PLAN:?请指定已核对宿主身份的模板计划}")
 mkdir -p "$RUN_DIR"
 cd "$RUN_DIR"
 
 env -u PYTHONPATH "$PY" "$ROOT/tools/operator_tools/pending_longrun.py" \
-  --plan "$RUN_DIR/plan.json" --report "$RUN_DIR/readiness.json" \
+  --template "$TEMPLATE" --plan "$RUN_DIR/plan.json" --report "$RUN_DIR/readiness.json" \
   | tee "$RUN_DIR/plan-generation.log"
 
 nohup env -u PYTHONPATH PYTHONUNBUFFERED=1 "$PY" \

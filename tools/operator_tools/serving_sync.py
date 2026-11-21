@@ -10,7 +10,12 @@ import json
 import re
 from pathlib import Path
 
-from tools.operator_tools import custody, serving_attribution, serving_collect
+from tools.operator_tools import (
+    custody,
+    host_runtime,
+    serving_attribution,
+    serving_collect,
+)
 from tools.operator_tools.serving_loop import (
     FIXED_L3_PROMPTS,
     compare_greedy_outputs,
@@ -41,7 +46,27 @@ def atomic(path, value):
     temp.replace(path)
 
 
-def validate(directory, entry):
+def validate_route(entry, observed):
+    require(entry.get("service_route"), "Operator has no reviewed service route")
+    receipt = observed.get("service_routes", {}).get(entry["id"], {})
+    expected = host_runtime.route_identity(entry)
+    identity = dict(receipt.get("identity", {}))
+    plugin_hash = identity.pop("reviewed_plugin_sha256", None)
+    require(identity == expected, "Implementation owner or consumer mismatch")
+    hashes = receipt.get("sha256", {})
+    require(
+        set(hashes) == {expected["reader"], expected["consumer"]}
+        and all(re.fullmatch(r"[a-f0-9]{64}", h) for h in hashes.values()),
+        "Missing source fingerprints",
+    )
+    if expected["layer"] == "plugin_carrier":
+        require(
+            plugin_hash == hashes[expected["reader"]], "Plugin fingerprint mismatch"
+        )
+    return receipt
+
+
+def validate(directory, entry, *, legacy_replay=False):
     files = {}
 
     def read(relative):
@@ -51,7 +76,10 @@ def validate(directory, entry):
 
     require(not (directory / "failure.json").exists(), "Collection failed")
     config = read("config.json")
-    require(entry["gate_env"] == config["gate"] + "=1", "Gate mismatch")
+    require(
+        entry["gate_env"] == config["gate"] + "=1",
+        f"Gate mismatch: index={entry['gate_env']!r}, collection={config['gate']}=1",
+    )
     require(entry["default_enabled"] is False, "Expected default-off")
     require(entry["layer"] != "rejected_exploration", "Rejected operator")
     require(not config.get("guard_only"), "Guard-only collection")
@@ -71,6 +99,9 @@ def validate(directory, entry):
         preflight["argv"][0] == config["python"] == config["server_command"][0],
         "Interpreter mismatch",
     )
+    receipt = None
+    if not legacy_replay or "service_routes" in observed:
+        receipt = validate_route(entry, observed)
     texts = {}
     for stage, arm in [("guard_off", "off"), ("guard_on", "on")] + [
         (f"bench_{i}_{arm}", arm) for i, arm in enumerate(("off", "on", "on", "off"))
@@ -123,6 +154,7 @@ def validate(directory, entry):
         audited = {
             "gdn_output_norm_fusion": ("_output_norm_kernel", 30),
             "moe_epilogue": ("_gate_mul_kernel", 40),
+            "gdn_split_ba": ("gdn_split_ba_2d_kernel", 30),
         }
         require(
             (config.get("kernel"), config.get("attention_layers"))
@@ -222,6 +254,7 @@ def validate(directory, entry):
             "archive": directory.as_uri(),
             "files": files,
             "host_commits": hosts,
+            **({"service_route": receipt} if receipt is not None else {}),
             "completed_ns": (directory / "summary.json").stat().st_mtime_ns,
         },
     }

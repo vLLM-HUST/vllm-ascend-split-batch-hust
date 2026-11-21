@@ -25,7 +25,7 @@ MEASURED = {
     "within_noise",
     "verified_on_par_with_baseline",
 }
-NO_CLAIM = {"pending_outer_loop", "negative_or_pending"}
+NO_CLAIM = {"pending_outer_loop", "negative_or_pending", "not_applicable"}
 ATTR_PENDING = {
     "pending_outer_loop",
     "negative_or_pending",
@@ -88,6 +88,13 @@ def check_index(problems: list[str]) -> dict[str, dict]:
             problems.append(
                 f"{op_id}: serving_status={status} 但 tested={serving.get('tested')!r}"
             )
+        if status == "not_applicable" and not (
+            entry.get("gate_env") == "unexposed"
+            and serving.get("tested") is False
+            and serving.get("status") == status
+            and (evidence.get("l4_attribution") or {}).get("status") == status
+        ):
+            problems.append(f"{op_id}: 已关闭的外环与门控或证据不一致")
         if status in NO_CLAIM and serving.get("tested") is True:
             problems.append(f"{op_id}: serving_status={status} 但 tested=true")
         if (l3 is not True) and status in MEASURED:
@@ -140,7 +147,9 @@ def check_archives(entries: dict[str, dict], problems: list[str]) -> int:
             problems.append(f"{op_id}: 归档目录不存在: {sync.get('archive')}")
             continue
         try:
-            result = serving_sync.validate(directory, entry)
+            result = serving_sync.validate(
+                directory, entry, legacy_replay="service_route" not in sync
+            )
             checked += 1
         except Exception as exc:
             problems.append(f"{op_id}: 归档重放校验失败: {type(exc).__name__}: {exc}")

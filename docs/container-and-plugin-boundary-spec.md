@@ -180,7 +180,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 ## 4. 证据文档规范与数据流转契约 (Evidence & Delivery Spec)
 
 ### 4.1 仓内算子模块化目录规范
-每个受控算子在 [ops/](ops/) 目录下建立独立子目录，包含四个必备文件，外加一枚由 `tools/operator_tools/custody.py` 生成的 `checksum.sha256` 目录指纹：
+每个受控算子在 [ops/](../ops/) 目录下建立独立子目录，包含四个必备文件，外加一枚由 `tools/operator_tools/custody.py` 生成的 `checksum.sha256` 目录指纹：
 
 1. **`README.md`**：技术原理与边界说明
    - 登记 entry point、开关环境变量、优化机制、理论预期与适用边界。
@@ -196,7 +196,7 @@ vLLM / vLLM-Ascend 官方采用模块化架构，但并非所有优化都能通�
 必备文件由 `tests/test_doc_consistency.py` 逐个目录断言。目录内任何文件改动后必须用 `tools/operator_tools/custody.py` 重新生成 `checksum.sha256`，指纹与内容不符由 `tests/test_ops_delivery_policy.py` 拦下。
 
 ### 4.2 根目录索引 `DELIVERY_INDEX.json` 单一事实源
-- 根目录 [DELIVERY_INDEX.json](DELIVERY_INDEX.json) 是全仓算子交付的权威事实清单；
+- 根目录 [DELIVERY_INDEX.json](../DELIVERY_INDEX.json) 是全仓算子交付的权威事实清单；
 - 记录基线环境（2×910B2 TP2, Qwen3.5-35B-A3B）、所有算子元数据及其当前实测状态；
 - 新增或调整算子状态时，必须同步更新该索引并通过测试校验。
 

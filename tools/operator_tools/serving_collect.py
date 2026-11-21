@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -22,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from tools.operator_tools import host_runtime  # noqa: E402
 from tools.operator_tools.serving_loop import (  # noqa: E402
     FIXED_L3_PROMPTS,
     compare_greedy_outputs,
@@ -330,7 +332,50 @@ def validate_benchmark(path, expected):
             raise ValueError(f"Invalid benchmark metrics: {path}")
 
 
-def verify_host(config, output):
+def service_routes(config):
+    single = gate_env_name(config)
+    if single:
+        gates = {single}
+    elif "gates" in config:
+        off, on = (config["gates"][arm] for arm in ("off", "on"))
+        if (
+            off.keys() != on.keys()
+            or any(str(v) != "0" for v in off.values())
+            or any(str(v) not in ("0", "1") for v in on.values())
+        ):
+            raise ValueError("Combination must compare matching OFF/ON gates")
+        gates = {k for k, v in on.items() if str(v) == "1"}
+        if not gates:
+            raise ValueError("Combination has no enabled gate")
+    else:
+        return []  # Identity-only probe.
+    index = json.loads((ROOT / "DELIVERY_INDEX.json").read_text())
+    rows = [
+        e
+        for e in index["operators"]
+        if e.get("service_route") and e["gate_env"] in {g + "=1" for g in gates}
+    ]
+    if (
+        len(rows) != len(gates)
+        or {e["gate_env"].removesuffix("=1") for e in rows} != gates
+    ):
+        raise ValueError(f"Unknown, ambiguous or inactive service gate: {gates}")
+    if (
+        "gates" in config
+        and not config.get("guard_only")
+        and set(config.get("attributions", {})) != {e["id"] for e in rows}
+    ):
+        raise ValueError("Combination requires attribution for every enabled operator")
+    routes = [host_runtime.route_identity(e) for e in rows]
+    for route in routes:
+        if route["layer"] == "plugin_carrier":
+            route["reviewed_plugin_sha256"] = hashlib.sha256(
+                (ROOT / "src" / route["reader"]).read_bytes()
+            ).hexdigest()
+    return routes
+
+
+def verify_host(config, output, *, reuse=False):
     if config["server_command"][0] != config["python"]:
         raise ValueError("server_command must use the configured Python interpreter")
     # Use the same explicit dependency environment as the server.
@@ -347,9 +392,14 @@ def verify_host(config, output):
             "import importlib.util,json,sys; "
             "s=importlib.util.spec_from_file_location('host_runtime',sys.argv[1]); "
             "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
-            "print(json.dumps(m.check_host_runtime(json.loads(sys.argv[2]))))",
+            "print(json.dumps(m.check_host_runtime(*json.loads(sys.argv[2]))))",
             str(ROOT / "tools/operator_tools/host_runtime.py"),
-            json.dumps(config.get("host_commits", {})),
+            json.dumps(
+                [
+                    config.get("host_commits", {}),
+                    service_routes(config),
+                ]
+            ),
         ],
         env=env,
         cwd=output,
@@ -357,6 +407,16 @@ def verify_host(config, output):
         text=True,
         timeout=60,
     )
+    if reuse:
+        probe.check_returncode()
+        previous = json.loads((output / "host_preflight.json").read_text())
+        if previous["returncode"] or json.loads(previous["stdout"]) != json.loads(
+            probe.stdout
+        ):
+            raise ValueError(
+                "Runtime identity or service route changed; use a new archive"
+            )
+        return  # Keep the receipt that actually preceded the original stages.
     save(
         output / "host_preflight.json",
         {

@@ -56,7 +56,7 @@ NUMERIC_CLAIMS = {
 }
 
 #: 明确表示"还没有服务结论"的标签。
-NO_CLAIM = {"pending_outer_loop", "negative_or_pending"}
+NO_CLAIM = {"pending_outer_loop", "negative_or_pending", "not_applicable"}
 
 #: L4 未归因时允许出现（且只允许出现）的无结论标签。
 ATTR_PENDING_ALLOWED = {

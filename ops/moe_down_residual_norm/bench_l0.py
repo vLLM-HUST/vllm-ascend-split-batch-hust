@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """L0 microbenchmark for moe_down_residual_norm.
 
-Callsite: vllm_ascend/ops/fused_moe/shared_experts.py:down_residual_norm.
+Isolated implementation; no service callsite.
 """
 
 if __name__ == "__main__":

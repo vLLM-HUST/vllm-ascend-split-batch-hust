@@ -19,7 +19,7 @@
 | P1 复测 | 冻结形态热点重采；六算子服务 A/B；pending 长测队列 | 冒烟通过；A/B 只跑 `sync_mode: none`，结论不自动回填 |
 | P2 探索 | 专家分布、长前缀新热点确认、内存安全检查 | P1 无合格项时才跑；产物只做方向记录，不产服务标签 |
 
-准入统一判据：没有可核对的调用点或归因规则的算子只允许 guard_only 或 skip（同 `pending_longrun.py` 的既有规则）；数值失败一票否决。
+准入统一判据：没有服务调用点或门控读者时必须 skip；只有已接入但缺归因规则时才可只做数值护栏；数值失败一票否决。
 
 ## 3. 循环步骤（每轮）
 
@@ -64,12 +64,12 @@
 
 ## 6. 初始队列内容
 
-初始队列随本文件一次生成（见队列文件的首次提交内容），条目来源全部是仓内已登记的待办：
+队列不进 Git。新建队列时从以下来源选取已满足前置条件的任务：
 
 - 验收形态起服冒烟（关闭 `docs/acceptance-shape.json` 的 `unverified_risks`）；
 - 冻结形态热点重采（排序精化，与旧 4096/eager 表只比方向）；
 - 六个已测算子在冻结形态下的 A/B 复测（前置：用 `profile_hotspot_longrun.sh` 的同套 guard 参数构造冻结形态 base plan）；
-- `pending_longrun.py` 默认待办（`gdn_split_ba` full、两个 guard_only、`gdn_qkv_norm` skip）；
+- [pending_longrun.py](../tools/operator_tools/pending_longrun.py) 生成的计划和跳过原因。用 `SERVING_BASE_PLAN` 指定已核对宿主提交的模板；不得改写历史计划来通过身份核验；
 - 富余时间：GroupedMatmul 专家分布验证、新热点表确认、内存安全检查。
 
 队列内容会消耗也会新增；新增项必须有 `id`、可执行 `command` 和仓外 `archive`，否则不许入队。

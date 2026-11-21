@@ -50,6 +50,7 @@ PROSE_SURFACE = (
     ".openbitfun/skills/github-env-auth/SKILL.md",
     "docs/container-and-plugin-boundary-spec.md",
     "docs/HOST_CONTRACT.md",
+    "host-proposals/GDN-qkv-norm/OWNERSHIP.md",
     "docs/cohort-and-ownership.md",
     "docs/release.md",
     "docs/delivery-inventory.md",

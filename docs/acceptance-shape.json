@@ -169,7 +169,7 @@
     }
   },
   "unverified_risks": [
-    "新接的 --compilation-config/--enable-chunked-prefill/--scheduling-policy/--disable-custom-all-reduce 是否被宿主构建接受，未经真机验证；启动失败会 fail-closed 落进 status.json，不产生假采集。",
+    "不同宿主构建对 --compilation-config/--enable-chunked-prefill/--scheduling-policy/--disable-custom-all-reduce 的支持不能互推。换构建时须重新冒烟并核对启动参数。",
     "MMLU 客户端走 /v1/completions 冻结 token id，本仓采集脚本用文本合成请求；请求构造路径不同，热点对比只能比方向。",
     "trace 输入上限 16384 与 MMLU 的 200 同时到达尚未在本仓负载中复刻。"
   ],
