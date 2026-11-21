@@ -7,9 +7,12 @@ or importing vllm.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import py_compile
 import subprocess
+
+import pytest
 
 HERE = pathlib.Path(__file__).resolve().parent
 RT = HERE.parent / "tools" / "runtime-tree"
@@ -17,6 +20,24 @@ RT = HERE.parent / "tools" / "runtime-tree"
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+
+@pytest.mark.host_tree
+def test_indexed_service_routes_resolve_on_the_target_host():
+    from tools.operator_tools import host_runtime, serving_collect
+
+    package = (
+        pathlib.Path(os.environ["VLLM_ASCEND_HUST_ROOT"]).resolve() / "vllm_ascend"
+    )
+    entries = json.loads((HERE.parent / "DELIVERY_INDEX.json").read_text())["operators"]
+    for entry in entries:
+        if entry["gate_env"] == "unexposed":
+            assert "service_route" not in entry
+            continue
+        (route,) = serving_collect.service_routes(
+            {"gate": entry["gate_env"].split("=")[0]}
+        )
+        assert host_runtime.check_service_route(route, package)["identity"] == route
 
 
 def test_seam_checker_compiles_and_selftests():

@@ -19,8 +19,8 @@
 
 | 提案子目录 | 涉及功能 | 当前状态与归宿 |
 |---|---|---|
-| `GDN-qkv-norm/` | GDN 算子的 Q/K/V 融合归一化（default-off） | 算子本身在仓内保留；宿主修改已撤回公开入口，仅作为技术参考与原型记录 |
-| `comm-trace-stop-gil/` | 修复 torch_npu 性能分析工具中 GIL 释放导致的崩溃 | C++ 底层缺陷定位与补丁验证；待上游修复或在自定义构建中合入 |
+| [GDN-qkv-norm](GDN-qkv-norm/OWNERSHIP.md) | GDN 算子的 Q/K/V 融合归一化（default-off） | 插件注册已撤回；宿主接入已提 PR，未部署到所测基线 |
+| `comm-trace-stop-gil/` | 修复 torch_npu 性能分析工具中 GIL 释放导致的崩溃 | 保留提案和源码快照；本机没有对应 torch_npu 源树，不能验证部署版本是否漂移 |
 | `W1R-gmm-tuning-config/` | GMM 算子参数调优与频次采样 | 方案冻结（因在计算图解码模式下无法通过 Python 层统计真实频次） |
 
 已下沉或撤回的历史提案不再保留子目录：D4 连续打包与 GDN in_proj 合并已下沉至宿主 Fork，见 `ops/gdn_conv_pack/` 与 `ops/gdn_merge_inproj/`；通信机制历史证据已按 custody 政策归档，不再作为本地提案目录保留；ConcatD 零拷贝视图为早期探索，已由 D4 连续打包路径替代。

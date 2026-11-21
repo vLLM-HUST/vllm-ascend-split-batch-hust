@@ -82,7 +82,7 @@ python -m venv <新的仓外venv>
 
 - [ ] 按 [HOST_CONTRACT.md](HOST_CONTRACT.md) 核对当前组件实际消费的 seam。
 - [ ] `vllm.general_plugins` 加载顺序、冲突处理及关闭态零修改。
-- [ ] rope-fix 与 AOT guard：运行 `host_tree` 漂移测试，缺源码树即失败；宿主已修复时不得继续覆盖。
+- [ ] rope-fix 与 AOT guard：运行 `host_tree` 漂移测试，缺源码树即失败；宿主已修复时不得继续覆盖。RoPE 测试须用能导入 vLLM 的服务解释器，并设置 `VLLM_ASCEND_HUST_ROOT` 指向所测宿主源码根目录。离线 venv 的导入错误不是宿主漂移。
 - [ ] 宿主提案补丁：基线/补丁/产物 SHA256、依赖顺序、完整回滚；漂移拒绝，不模糊套补丁。
 - [ ] 实际设备数值、dispatch、graph 与性能，缺一项即保留缺口。
 

@@ -1,7 +1,7 @@
 # Provenance
 
 > **核对状态（2026-09-26）**：逐条核对结论见
-> [`docs/provenance-verification.md`](docs/provenance-verification.md)（含命令与原始输出）。
+> [`docs/provenance-verification.md`](provenance-verification.md)（含命令与原始输出）。
 > 机械守卫：`tests/test_provenance_hashes.py`（vendored hash / `api.py` 逆变换复核 / 许可声明 /
 > 本文件的 commit 引用）。一句话：**14 个归档提交全部可复核**（sha 存在于源仓、作者唯一、
 > PR 状态与本文一致）；**vendored 4 个文件全部可复核**（其中 `api.py` 用逆变换复核，见 §4.1）；

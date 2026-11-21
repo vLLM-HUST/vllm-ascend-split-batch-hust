@@ -42,10 +42,11 @@
 - **GDN in_proj 输入投影权重加载期合并 (GDN 输入投影两次 MatMul 合一)**：专属报告与证据结构见 [ops/gdn_merge_inproj](../ops/gdn_merge_inproj/REPORT.md)。宿主分支 `work/w3f2-inproj-merge`（宿主 PR #63）。已有数值护栏、逐卡调用归因和当前服务配对，主测结论为 `within_noise`，不主张服务收益。
 - **MoE 共享专家后置门控乘融合 (`moe_epilogue`)**：把 `AscendSharedExperts.part2` 里的广播乘换成单 kernel，保留宿主 `sigmoid`。算子层单次 3.64 → 1.34 µs，输出逐字一致；全链路 Mul 家族 −37.0 ms；端到端不可判定，不主张服务收益。见 [ops/moe_epilogue](../ops/moe_epilogue/REPORT.md)。
 - **GDN 投影解包 / 混合 qkv 重排融合 (`gdn_split_fusion`)**：把投影分支的 split + reshape + chunk + 2×contiguous，以及 `rearrange_mixed_qkv` 的 split + 3×reshape + cat，各合成单 kernel；单仓库、单开关，prefill 全形状正收益。微基准 M=8 省 6.36 µs/层·step；图内归因两档负载目标组自比分别省 53.5%（66k KV）与 **39.7%（263k KV，对外引用口径）**，同窗口全 kernel 分母为 5.00% / 5.05%，不作对外数字；端到端 8/8 一致；服务端 8 / 12 轮的差异均落在同配置组间极差内，不主张收益。见 [ops/gdn_split_fusion](../ops/gdn_split_fusion/REPORT.md)。
+- **GDN 张量并行拆分 (`gdn_split_ba`)**：宿主已接入，服务结论尚未回填，见[算子报告](../ops/gdn_split_ba/REPORT.md)。
 - **GDN Part 3 Output Norm 与 Rearrange 融合 (`gdn_output_norm_fusion`)**：在 GDN 输出端将 RMSNormGated 与 einops rearrange 融合为单步 Triton 算子，直接写入连续 2D 张量直通投影层。见 [ops/gdn_output_norm_fusion](../ops/gdn_output_norm_fusion/REPORT.md)。宿主分支 `work/gdn-output-norm-fusion`。
 
 探索、负性能留存与待外环算子索引：
-- **GDN QKV 解包与 L2Norm 融合 (`gdn_qkv_norm`)**：专属报告与证据结构见 [ops/gdn_qkv_norm](../ops/gdn_qkv_norm/REPORT.md)。单算子微基准与数值护栏已有测量；注册已撤回、当前无公开接入（`gate_env=unexposed`），调用归因与服务结论待外环，不得据单算子结果主张收益。
+- **GDN QKV 解包与 L2Norm 融合 (`gdn_qkv_norm`)**：专属报告与证据结构见 [ops/gdn_qkv_norm](../ops/gdn_qkv_norm/REPORT.md)。单算子微基准与数值护栏已有测量；注册已撤回、当前无公开接入（`gate_env=unexposed`），[宿主提案](../host-proposals/GDN-qkv-norm/OWNERSHIP.md)部署前不排服务验证，不得据单算子结果主张收益。
 - **MoE 双门合并 (`moe_gate_merge`)**：专属报告与证据结构见 [ops/moe_gate_merge](../ops/moe_gate_merge/REPORT.md)。虽然纯 MatMul 有微弱加速，但非对齐切片搬运带来额外开销，流水线跑输原生分离方案，按规范留存负性能事实，不予集成。
 - **MoE Gating 与 Token Routing 融合 (`moe_gating_routing`)**：专属报告与证据结构见 [ops/moe_gating_routing](../ops/moe_gating_routing/REPORT.md)。宿主底层深度集成 CANN 专用硬件指令（`npu_moe_gating_top_k` 与 `npu_moe_init_routing_v2`），纯软件级分箱与散布搬运跑输专用硬件指令，按规范留存负性能事实，不予集成。
 
@@ -60,7 +61,7 @@ Cascade 不属于当前发布组件：没有源码、注册入口或可执行路
 由于社区 `main` 分支走在非常靠前的上游（已领先本地镜像 260+ commits），底层依赖已与当前 910B2 镜像运行时脱节。因此两个宿主仓库**定死以 `based/split-batch-baseline` 为基线与 PR 目标**：
 1. **昇腾适配宿主 (`vllm-ascend-hust`)**：
    - 仓库：`git@github.com:vLLM-HUST/vllm-ascend-hust.git`
-   - **基线分支**：`based/split-batch-baseline`（分支头 `ad82d77cb`，内容为镜像 `74f0c0a27` 的宿主源码 + 3 个构建文件修复）
+   - **基线分支**：`based/split-batch-baseline`（建分支时的镜像基线 `ad82d77cb`，内容为镜像 `74f0c0a27` 的宿主源码 + 3 个构建文件修复）
    - **PR 铁律**：所有特性分支从 `based/split-batch-baseline` 切出，发起 PR 的 Target 分支必须指定为 `based/split-batch-baseline`，严禁向 `main` 或旧基线 `based/image-baseline` 提 PR。
 2. **vLLM 核心宿主 (`vllm-hust`)**：
    - 仓库：`git@github.com:vLLM-HUST/vllm-hust.git`

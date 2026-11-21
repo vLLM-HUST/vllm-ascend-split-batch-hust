@@ -1,9 +1,9 @@
 --- a/vllm_ascend/ops/gdn.py
 +++ b/vllm_ascend/ops/gdn.py
-@@ -49,6 +49,12 @@
- # 一次性完成并替换 weight —— v1 的 forward 内 lazy 实例缓存在 dynamo 下失效
- # (每步重 cat, 1015-175721 窗实测 ConcatD +2636ms 净回归)。
- _MERGE_GDN_INPROJ = os.environ.get("VLLM_HUST_GDN_MERGE_INPROJ", "0") == "1"
+@@ -106,6 +106,12 @@
+         k.view(1, rows, k_dim // layer.head_k_dim, layer.head_k_dim),
+         v.view(1, rows, v_dim // layer.head_v_dim, layer.head_v_dim),
+     )
 +
 +
 +_FUSE_GDN_QKV_NORM = (
@@ -13,11 +13,11 @@
  
  
  class AscendGatedDeltaNetAttention(GatedDeltaNetAttention, HpcModule):
-@@ -477,7 +483,36 @@
+@@ -554,7 +560,36 @@
              mixed_qkv_non_spec = None
  
-         query_spec, key_spec, value_spec = self.rearrange_mixed_qkv(mixed_qkv_spec)
--        query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(mixed_qkv_non_spec)
+         query_spec, key_spec, value_spec = _rearrange_mixed_qkv(self, mixed_qkv_spec)
+-        query_non_spec, key_non_spec, value_non_spec = _rearrange_mixed_qkv(self, mixed_qkv_non_spec)
 +        qk_non_spec_normalized = False
 +        if (
 +            _FUSE_GDN_QKV_NORM
@@ -45,13 +45,13 @@
 +            )
 +            qk_non_spec_normalized = True
 +        else:
-+            query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(
-+                mixed_qkv_non_spec
++            query_non_spec, key_non_spec, value_non_spec = _rearrange_mixed_qkv(
++                self, mixed_qkv_non_spec
 +            )
  
          # 2. Recurrent attention
          g, beta = DeviceOperator.fused_gdn_gating(self.A_log, a, b, self.dt_bias)
-@@ -616,8 +651,9 @@
+@@ -693,8 +728,9 @@
                  )
          elif attn_metadata.num_decodes > 0:
              actual_seq_lengths = attn_metadata.non_spec_decode_metadata.actual_seq_lengths

@@ -13,8 +13,7 @@ $y = \text{RMSNorm}(x, \text{weight}) \times \text{SiLU}(z)$
 ## 2. 硬件环境与内环验证结论
 - 已通过内环多桶形状与未见动态行数（`do_not_specialize`）零重编译护栏；
 - 各批大小分桶耗时与加速比详见 `evidence.json`；
-- 外环主测负载：`random`，压力负载：`sharegpt`。
 
-## 3. 开关与控制
-- 环境变量门控：`VLLM_HUST_GDN_NORM_GATE=1`（默认关闭）
-- 未启用时回退原生路径，零开销零副作用。
+## 3. 服务接入
+
+独立插件路线已被[宿主输出归一化](../gdn_output_norm_fusion/README.md)替代。旧开关不是服务入口，不再为此项排期。

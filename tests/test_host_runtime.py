@@ -84,3 +84,62 @@ def test_editable_host_uses_checkout_and_actual_module(tmp_path, monkeypatch, di
 def test_reject_missing_or_ambiguous_identity(expected):
     with pytest.raises(ValueError):
         host.check_host_runtime(expected)
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        'os.environ.get("VLLM_HUST_TEST", "0")',
+        "os.getenv(NAME)",
+        '"VLLM_HUST_TEST"',
+        "other.get(NAME)",
+    ],
+)
+def test_gate_must_have_an_environment_reader(tmp_path, expr):
+    (tmp_path / "reader.py").write_text(f'NAME = "VLLM_HUST_TEST"\nvalue = {expr}\n')
+    if expr.startswith("os."):
+        host.check_gate_reader(tmp_path, "reader.py", "VLLM_HUST_TEST")
+    else:
+        with pytest.raises(ValueError, match="No environment reader"):
+            host.check_gate_reader(tmp_path, "reader.py", "VLLM_HUST_TEST")
+
+
+def test_gate_with_removed_consumer_or_wrong_owner_is_not_a_service_route(tmp_path):
+    module = tmp_path / "ops.py"
+    module.write_text(
+        'import os\nFLAG = os.getenv("GATE")\ndef forward(x):\n    return native(x)\n'
+    )
+    route = dict(
+        operator="demo",
+        layer="host_fork",
+        gate_env="GATE=1",
+        reader="vllm_ascend/ops.py",
+        consumer="vllm_ascend/ops.py",
+        scope="forward",
+        expression="fused(x)",
+    )
+    host.check_gate_reader(tmp_path, "ops.py", "GATE")
+    with pytest.raises(ValueError, match="Consumer no longer uses"):
+        host.check_service_route(route, tmp_path)
+    module.write_text(module.read_text().replace("return native(x)", "return fused(x)"))
+    receipt = host.check_service_route(route, tmp_path)
+    assert set(receipt["sha256"]) == {"vllm_ascend/ops.py"}
+    from tools.operator_tools.serving_sync import validate_route
+
+    entry = {
+        "id": "demo",
+        "layer": route["layer"],
+        "gate_env": route["gate_env"],
+        "service_route": {
+            k: route[k] for k in ("reader", "consumer", "scope", "expression")
+        },
+    }
+    observed = {"service_routes": {"demo": receipt}}
+    assert validate_route(entry, observed) == receipt
+    with pytest.raises(ValueError, match="owner or consumer"):
+        validate_route(entry, {})
+    entry["layer"] = "plugin_carrier"
+    with pytest.raises(ValueError, match="owner or consumer"):
+        validate_route(entry, observed)
+    with pytest.raises(ValueError, match="Invalid provider"):
+        host.check_service_route(dict(route, layer="plugin_carrier"), tmp_path)

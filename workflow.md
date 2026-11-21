@@ -47,13 +47,13 @@
 2. 一键启动命令：
 
 ```bash
-bash workloads/run_pending_longrun.sh
+SERVING_BASE_PLAN=/path/to/reviewed-plan.json bash workloads/run_pending_longrun.sh
 ```
 
 3. 脚本会生成计划，并用 nohup 启动 `serving_e2e_auto.py`。
 4. 仓外目录保存原始归档。`.openbitfun/` 保存日志和 checkpoint。
-5. 计划使用 `sync_mode: none`。采集结果不自动写回正式证据。
-6. 无法核对调用规则的算子只做 guard-only 或明确 skip。
+5. 值守计划使用 `sync_mode: none`，不写单算子或组合证据。通用采集器未指定模式时也只归档。已评审的回填计划须显式指定 `auto`；任一层指定 `none` 均禁止写回。
+6. 没有调用点或门控读者时必须 skip。调用点已接入但缺少归因规则时才可只做数值护栏。
 7. 服务结论按主测负载判定。默认噪声底线为 `1.5%`。
 8. 有效噪声取底线、关闭组波动、启用组波动中的最大值。
 9. 差异不超过有效噪声时记 `within_noise`。记录组内波动和原始结果。

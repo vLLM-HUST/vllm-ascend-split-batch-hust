@@ -45,7 +45,8 @@
       "8": 3.16,
       "16": 2.86,
       "32": 2.89
-    }
+    },
+    "scope": "historical_only; isolated implementation, not a retest of the host kernel introduced by PR #81"
   },
   "l3_numerical_guard": {
     "passed": true,

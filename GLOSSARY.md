@@ -81,6 +81,9 @@
 | all-kernel 分母 | 模型整体算子耗时，用来判断单算子净省时能否被服务观测到。 | `tools/operator_tools/serving_loop.py` 的 `parse-l4` | 不等于服务墙钟时间 |
 | `within_noise` | 服务结论标签：同条件配对测量的组间差异落在组内波动之内（散文里也写作 "within noise"）。不构成收益。 | `DELIVERY_INDEX.json` 的 `serving_status` | 不构成收益 |
 | 负结果 | 优化后更慢或无效的结论。必须保留并入索引，不得删除。 | `DELIVERY_INDEX.json` 的 `status` | 不能用待复测掩盖已有负结果 |
+| `not_applicable` | 无服务调用点，外环关闭，不安排服务测试。 | `DELIVERY_INDEX.json` 的 `serving_status`；`tests/test_delivery_status_consistency.py` | 不是测过无收益，也不是历史服务测量 |
+| `service_route` | 所测服务路径的静态合同：实现方的门控读者、宿主消费位置与表达式；插件还须登记加载入口。 | `DELIVERY_INDEX.json`；`tools/operator_tools/host_runtime.py` | 源码核对通过不是逐卡命中证据 |
+| `host_proposal_pending` | 宿主提案尚未进入所测基线，不得起服验收。 | `DELIVERY_INDEX.json` 的 `status`；`host-proposals/GDN-qkv-norm/OWNERSHIP.md` | 提案提交不等于部署 |
 | `pending_outer_loop` | 无结论标签：外环还没跑完，服务侧没有可主张的结论。写它时证据里不得出现 `tested: true`，也不得同时给出服务收益。 | `DELIVERY_INDEX.json` 的 `serving_status`、`l4_attribution`；`tests/test_delivery_status_consistency.py` | L4 未完成时只能挂无结论标签 |
 | `integrated_plugin_measured` | 归属加测量标签（索引 `status`）：能力由插件层承载、已公开接入且已有当前测量；收益结论仍只看 `serving_status`。 | `DELIVERY_INDEX.json` 的 `status` | 与 `layer: plugin_carrier` 配套，不与 `host_fork` 混用 |
 | `integrated_host_fork_measured` | 归属加测量标签（索引 `status`）：能力已下沉到宿主 Fork 源码承载，插件侧只留交付目录与证据。 | `DELIVERY_INDEX.json` 的 `status` | 与 `layer: host_fork` 配套；不得把宿主实现归因给插件 |

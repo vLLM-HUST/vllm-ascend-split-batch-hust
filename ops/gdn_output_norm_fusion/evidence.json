@@ -94,7 +94,8 @@
         "candidate_us": 5.78,
         "speedup": 15.22
       }
-    }
+    },
+    "scope": "historical_only; the in-repo H4 probe used a plugin surrogate and a hand-written reference; it is not a replay of the host H16 strided measurements"
   },
   "l3_numerical_guard": {
     "passed": true,
@@ -252,7 +253,7 @@
   "status": "integrated_host_fork_measured",
   "default_enabled": false,
   "evidence_fingerprint": {
-    "benchmark_script": "ops/gdn_output_norm_fusion/bench_l0.py",
+    "benchmark_script": "https://github.com/vLLM-HUST/vllm-ascend-split-batch-hust/blob/d90bad49db43a26d4727e107e7b62f367f92d623/ops/gdn_output_norm_fusion/bench_l0.py",
     "host_fork_repo": "git@github.com:vLLM-HUST/vllm-ascend-hust.git",
     "host_fork_base_branch": "based/split-batch-baseline",
     "host_fork_base_commit": "0ee020516",

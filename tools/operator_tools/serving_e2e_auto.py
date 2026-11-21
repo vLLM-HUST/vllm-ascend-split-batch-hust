@@ -1,5 +1,8 @@
 """Resumable nohup runner for single-operator and multi-gate serving E2E runs.
 
+Archive-only by default. Repository writes require explicit sync_mode="auto";
+"none" at either item or config level vetoes all writes.
+
 Supports stage-level checkpoint/resume across server restarts:
   - Reuses completed stages (`guard_off`, `guard_on`, `bench_0_off`, `bench_1_on`,
     `bench_2_on`, `bench_3_off`) when their exit/artifact checks pass; deletes and
@@ -141,6 +144,14 @@ def save_state(checkpoint_path: Path, status_path: Path, state: dict[str, Any]) 
     write_status_file(status_path, state)
 
 
+def evidence_sync_enabled(entry: dict[str, Any]) -> bool:
+    # Early plans stored sync_mode on the item; neither spelling may override a veto.
+    modes = [obj["sync_mode"] for obj in (entry, entry["config"]) if "sync_mode" in obj]
+    if any(mode not in ("auto", "none") for mode in modes):
+        raise ValueError(f"{entry['id']}: invalid sync_mode {modes!r}")
+    return "auto" in modes and "none" not in modes
+
+
 def validate_plan(plan: dict[str, Any]) -> None:
     items = plan.get("items") or plan.get("operators")
     if not isinstance(items, list) or not items:
@@ -161,12 +172,17 @@ def validate_plan(plan: dict[str, Any]) -> None:
         if "reason" in entry and not str(entry["reason"]).strip():
             raise ValueError(f"Item {item_id!r}: empty skip reason")
         if "config" in entry:
+            evidence_sync_enabled(entry)
             cfg = entry["config"]
             has_single = isinstance(cfg.get("gate"), str) and bool(cfg["gate"])
             has_multi = isinstance(cfg.get("gates"), dict) and set(cfg["gates"]) == {
                 "off",
                 "on",
             }
+            if has_single and [
+                r["operator"] for r in collector.service_routes(cfg)
+            ] != [item_id]:
+                raise ValueError(f"Item {item_id!r}: gate belongs to another operator")
             if has_single == has_multi:
                 raise ValueError(
                     f"Item {item_id!r}: config needs either 'gate' or "
@@ -578,7 +594,10 @@ def collect_item_resumable(
     pairing = select_workloads_for_operator(
         config.get("phase", "decode"), config.get("max_active_rows")
     )
-    collector.verify_host(config, item_dir)
+    reuse = any(item_dir.glob("guard_*")) or any(item_dir.glob("bench_*"))
+    if reuse and read_json(item_dir / "config.json") != config:
+        raise ValueError("Collection config changed; use a new archive")
+    collector.verify_host(config, item_dir, reuse=reuse)
     collector.save(item_dir / "config.json", config)
     with suppress(FileNotFoundError):
         (item_dir / "failure.json").unlink()
@@ -730,12 +749,9 @@ def sync_item_evidence(
 ) -> str:
     item_id = entry["id"]
     config = entry["config"]
-    sync_mode = entry.get("sync_mode", "auto")
-    if (
-        sync_mode == "none"
-        or config.get("guard_only")
-        or config.get("guard_and_l4_only")
-    ):
+    if not evidence_sync_enabled(entry):
+        return "not_applicable"
+    if config.get("guard_only") or config.get("guard_and_l4_only"):
         if entry.get("combination_evidence_target"):
             return write_combination_evidence(
                 item_id, config, item_dir, entry["combination_evidence_target"], logger
@@ -828,6 +844,8 @@ def main() -> None:
 
     if checkpoint_path.is_file():
         state = read_json(checkpoint_path)
+        if state.get("items") and state.get("output_root") != str(output_root):
+            parser.error("Checkpoint belongs to another output archive")
         if state.get("items") and not args.resume:
             parser.error(
                 f"Checkpoint already exists at {checkpoint_path}; "
@@ -857,9 +875,6 @@ def main() -> None:
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
 
-    atomic_write(output_root / "plan.json", plan)
-    atomic_write(output_root / "owner.json", {"pid": os.getpid(), "started": utc_now()})
-
     items = plan.get("items") or plan["operators"]
     timeout = int(plan.get("timeout_seconds", 14400))
     failed_items: list[str] = []
@@ -867,6 +882,15 @@ def main() -> None:
 
     with LOCKFILE.open("w") as lock_fh:
         fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        archived_plan = output_root / "plan.json"
+        if archived_plan.exists() and read_json(archived_plan) != plan:
+            raise ValueError("Archive belongs to another plan; use a new archive")
+        if state.get("items") and not archived_plan.exists():
+            raise ValueError("Checkpoint lacks its archived plan; use a new archive")
+        atomic_write(archived_plan, plan)
+        atomic_write(
+            output_root / "owner.json", {"pid": os.getpid(), "started": utc_now()}
+        )
         flush()
         for entry in items:
             item_id = entry["id"]

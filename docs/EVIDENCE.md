@@ -46,7 +46,7 @@ continues to check pull requests.
 Historical source-package evidence is archived under
 [split-history-release-*](https://github.com/vLLM-HUST/vllm-hust-benchmark/tree/67505eee3dc71fa3dbbc0fc365620f0a2e5658f4/archive/mod-git-20261022).
 Published distributions are not rewritten: the existing Release assets match
-PyPI and remain referenced by [release instructions](docs/release.md).
+PyPI and remain referenced by [release instructions](release.md).
 Archiving their evidence is not proof that their installation consumers have
 disappeared. The sdist allowlist and distribution verifier prevent evidence from
 entering future packages. No published installation asset is deleted here.
@@ -54,7 +54,7 @@ entering future packages. No published installation asset is deleted here.
 ## Mixed reports and local-only probes
 
 Historical prose and report-only JSON now link to immutable benchmark originals.
-See [EVIDENCE_AVAILABILITY.json](EVIDENCE_AVAILABILITY.json) for scope and the
+See [EVIDENCE_AVAILABILITY.json](../EVIDENCE_AVAILABILITY.json) for scope and the
 central availability audit. Six reference occurrences resolve to five archived
 originals: two aliases by declared SHA256 and four references by original-path
 provenance mappings plus SHA256. CI downloads and checks the recovery mappings

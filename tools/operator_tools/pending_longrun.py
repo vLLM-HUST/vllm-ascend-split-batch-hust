@@ -2,7 +2,7 @@
 
 The plan never promotes results into repository evidence: every runnable entry
 uses ``sync_mode: none``. Entries without a verified callsite or attribution
-rule stay skipped or guard-only instead of producing a false A/B conclusion.
+rule must not produce a service A/B conclusion.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,36 +32,33 @@ DEFAULT_PENDING_OPS = (
 SPECS: dict[str, dict[str, Any]] = {
     "moe_epilogue": {
         "mode": "full",
-        "gate": "VLLM_HUST_MOE_EPILOGUE",
         "kernel": "_gate_mul_kernel",
         "attention_layers": 40,
     },
     "gdn_qkv_norm": {
         "mode": "skip",
-        "reason": (
-            "索引 gate_env=unexposed，历史服务门控已撤回；缺公开调用点和归因规则，"
-            "不能安排有效服务 A/B"
-        ),
+        "reason": "宿主提案尚未部署到所测基线；合入并核对运行时身份后再做服务验证",
     },
     "gdn_split_ba": {
         "mode": "full",
-        "gate": "VLLM_HUST_GDN_SPLIT_BA",
         "kernel": "gdn_split_ba_2d_kernel",
         "attention_layers": 30,
     },
     "moe_down_residual_norm": {
-        "mode": "guard_only",
-        "gate": "VLLM_HUST_MOE_DOWN_RESIDUAL_NORM",
-        "reason": "缺可核对的逐卡归因规则，只做服务内数值护栏，不形成服务 A/B 结论",
+        "mode": "skip",
+        "reason": "仅有独立算子实现，没有服务调用点或门控；不启动服务",
     },
     "ffn_activation": {
-        "mode": "guard_only",
-        "gate": "VLLM_HUST_FFN_ACTIVATION",
-        "reason": "缺可核对的逐卡归因规则，只做服务内数值护栏，不形成服务 A/B 结论",
+        "mode": "skip",
+        "reason": "仅有独立算子实现，没有服务调用点或门控；不启动服务",
     },
 }
 
 RESET_KEYS = (
+    "host_gate_reader",
+    "gates",
+    "kernel",
+    "attention_layers",
     "attribution",
     "attributions",
     "guard_only",
@@ -86,18 +84,10 @@ def base_config(template: dict[str, Any]) -> dict[str, Any]:
 def find_template(explicit: Path | None) -> Path:
     if explicit is not None:
         return explicit
-    env = __import__("os").environ.get("SERVING_BASE_PLAN")
+    env = os.environ.get("SERVING_BASE_PLAN")
     if env:
         return Path(env)
-    candidates = sorted(
-        (ROOT / ".openbitfun").glob("npu-retest-*/attributed-serving-plan.json"),
-        reverse=True,
-    )
-    if not candidates:
-        raise FileNotFoundError(
-            "no base serving plan found; pass --template or set SERVING_BASE_PLAN"
-        )
-    return candidates[0]
+    raise ValueError("pass --template or set SERVING_BASE_PLAN to a reviewed plan")
 
 
 def parse_modes(values: list[str]) -> dict[str, str]:
@@ -118,6 +108,9 @@ def build_plan(
     modes: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     modes = dict(modes or {})
+    registered = {
+        row["id"]: row for row in load_plan(ROOT / "DELIVERY_INDEX.json")["operators"]
+    }
     config_template = base_config(template)
     for key in RESET_KEYS:
         config_template.pop(key, None)
@@ -144,8 +137,15 @@ def build_plan(
             items.append({"id": op, "reason": reason})
             report.append({"operator": op, "mode": "skip", "detail": reason})
             continue
+        registration = registered[op]
+        if (
+            mode not in {"full", "guard_only"}
+            or spec["mode"] == "skip"
+            or not registration.get("service_route")
+        ):
+            raise ValueError(f"{op}: no verified gate for mode {mode!r}")
         config = copy.deepcopy(config_template)
-        config["gate"] = spec["gate"]
+        config["gate"] = registration["gate_env"].removesuffix("=1")
         detail = spec.get("reason", "")
         if mode == "guard_only":
             config["guard_only"] = True

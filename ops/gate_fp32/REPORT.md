@@ -19,7 +19,7 @@
 - **核验结论**: PASS (完全等价，无数值漂移)。
 
 ## 4. L4 调用链路与图归因
-- **目标 Callsite**: `vllm_ascend_split_batch/gate_fp32_plugin.py` 中拦截的 `gate` 模块 forward。
+- **目标 Callsite**: 插件包装 runner 的 `load_model`，由 `_cache_gate_weights` 写入 `gate.weight_fp32`；实际读者是宿主 `AscendMoERunner._forward_impl`，插件没有替换 gate 的 forward。
 - **命中验证**: 40 层（30 层 GDN 线性注意力 + 10 层全注意力，均带 MoE gate）的 gate 权重全部正确填充并被命中；开关关闭时 100% 回退原生分支。
 - **整网消除核对**: 独立起服采集逐卡 `op_statistic.csv`，`Cast` 调用由 2164 次降至 1524 次，每卡减少 640 次，与 40 层乘以 16 个解码步完全吻合；两卡结果一致。
 

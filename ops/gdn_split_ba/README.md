@@ -13,6 +13,8 @@
 - 各批大小分桶耗时与加速比详见 `evidence.json`；
 - 外环主测负载：`random`，压力负载：`sharegpt`。
 
-## 3. 开关与控制
+## 3. 宿主接入
+
+[宿主 PR #81](https://github.com/vLLM-HUST/vllm-ascend-hust/pull/81) 将调用接到 `AscendGatedDeltaNetAttention._split_ba_for_tp`；不依赖插件注册。
 - 环境变量门控：`VLLM_HUST_GDN_SPLIT_BA=1`（默认关闭）
 - 未启用时回退原生路径，零开销零副作用。

@@ -1,6 +1,5 @@
 # ffn_activation
 
-- **调用位置**: `vllm_ascend/ops/fused_moe/fused_moe.py:ffn_activation`
-- **门控开关**: `VLLM_HUST_FFN_ACTIVATION=1`（默认关闭）
-- **外环主测负载**: `random`；动态形状压力负载: `sharegpt`
-- **详细度量数据**: 见 `evidence.json`
+独立的 SiLU 与乘法实现仅用于独立验证。当前宿主与插件均无服务调用点或门控，不安排服务 A/B。
+
+实现见 [bench_l0.py](bench_l0.py)，证据边界见 [REPORT.md](REPORT.md)。

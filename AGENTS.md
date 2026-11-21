@@ -21,6 +21,7 @@
 5. MOD 验收按 [MOD 最终验收规范](docs/mod-acceptance-standard.md) 执行。算子服务结论不能替代 MOD 验收。
 6. 修改 `ops/<operator>/` 被 `checksum.sha256` 覆盖的文件后，必须重新生成指纹。
 7. 任何正确性 / 性能声明必须带 cohort 边界；历史 cohort 的证据只作独立历史专项保留，严禁跨域外推（判定口径见 [docs/cohort-and-ownership.md](docs/cohort-and-ownership.md)）。
+8. 服务归属以 [交付索引](DELIVERY_INDEX.json) 的 `layer` 与 `service_route` 为准。排期前在服务解释器核对门控读者与宿主消费点，回填前核对逐卡归因。不得凭同名 kernel、变量或插件入口认定实际实现方。
 
 ## 3. 文档与行文
 

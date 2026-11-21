@@ -6,7 +6,7 @@ import difflib
 import hashlib
 from pathlib import Path
 
-HOST_SHA256 = "1081d19738da1130cf85beb7c1bcb4d061a0ca83f0edd4f3a7f2b30bd185e35d"
+HOST_SHA256 = "a32bf3d9ac16d4d89c87af1182475ca9142e755d78a38ef715bfaebb6d790780"
 TARGET = "vllm_ascend/ops/gdn.py"
 FLAG = """_FUSE_GDN_QKV_NORM = (
     os.environ.get("VLLM_HUST_GDN_QKV_NORM", "0") == "1"
@@ -15,7 +15,7 @@ FLAG = """_FUSE_GDN_QKV_NORM = (
 """
 UNPACK_OLD = (
     "        query_non_spec, key_non_spec, value_non_spec = "
-    "self.rearrange_mixed_qkv(mixed_qkv_non_spec)\n"
+    "_rearrange_mixed_qkv(self, mixed_qkv_non_spec)\n"
 )
 UNPACK_NEW = """        qk_non_spec_normalized = False
         if (
@@ -44,8 +44,8 @@ UNPACK_NEW = """        qk_non_spec_normalized = False
             )
             qk_non_spec_normalized = True
         else:
-            query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(
-                mixed_qkv_non_spec
+            query_non_spec, key_non_spec, value_non_spec = _rearrange_mixed_qkv(
+                self, mixed_qkv_non_spec
             )
 """
 NORM_OLD = """            query_non_spec = l2norm_fwd(query_non_spec)
