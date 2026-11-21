@@ -1,16 +1,16 @@
 {
-  "candidate": "GDN Recurrent：普通、非投机解码，1/2 行非填充桶",
-  "scope": "本机双卡宿主关闭组，借用 SWE 首批输入长度的合成探针；不是冻结请求重放、参考 r8、吞吐或 MOD 验收。",
-  "reason": "调度步、宿主调用范围和设备图回放在两张卡上分别对齐。两桶均有原生普通解码调用；混合步的更新不能计入。",
-  "next_step": "待设计：在宿主原生普通解码消费点设计 default-off 候选。先 L3，再做同形状、同卡的图回放 L0。",
+  "candidate": "GroupedMatmul：先核对现有计算热点和专家分布证据",
+  "scope": "新的选题只做静态筛选；整网热点来自本机 random 图模式长测，各轮和各 rank 分开读取。下方的长度探针回执用于核对上一项 Recurrent 的边界，不是 GroupedMatmul 的执行资格。",
+  "reason": "Recurrent 1/2 行逻辑头拆分已结案：局部数值通过，整段 L0 没有稳定收益，逐核负向，未测服务。整网长测各轮首位是 GroupedMatmul，但核名和排名不能证明可优化。",
+  "next_step": "先用背景热点归档定位 GroupedMatmul 的消费点和输入形状，再查同一窗口是否记录了真实 group_list / 专家 token 数；缺分布只记缺项，不自动重开历史调优方案或排服务 A/B。",
   "checks": [
-    "固定种子；原生和候选使用独立、内容相同的初态，比 BF16 输出、被写槽的完整 FP32 状态、未写槽不变和状态别名。覆盖乱序槽与多步复用，不预先替候选做连续拷贝。",
-    "活跃 5/6 行进入 8 行图桶时先走原生；另行证明填充行不会写状态再扩桶。混合步和投机解码均走原生。",
-    "宿主身份或消费点不符、数值不符、静默回退或逐卡计数无法解释即停止。无服务 A/B 不写服务标签。"
+    "逐轮、逐卡保留形状、专家分布与调用来源；不得把另一个负载的专家数配给本窗口。",
+    "没有同工况 shape、分布和可区分的候选时不占卡、不写收益标签。"
   ],
   "skip": {
     "Chunk": "本窗口两卡都没有命中已有形状桶；所测短提示 eager 准备段未改善，不用隔离图回放替代。保持默认关闭。",
-    "gdn_split_ba": "PR #81 已回填，三个负载均为 within_noise，保持默认关闭；不自动复测。"
+    "gdn_split_ba": "PR #81 已回填，三个负载均为 within_noise，保持默认关闭；不自动复测。",
+    "Recurrent V 行拆分整段复测": "已结案，不重跑；完整结论、原件指纹和重开条件见研发结案记录。"
   },
   "hotspot_archive": "/root/vllm-workspace/benchmark-archives/profile-hotspot-longrun-hotspot-20261121T031427Z",
   "reviewed_plan": null,
@@ -19,5 +19,6 @@
   "host_commits": {
     "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
     "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
-  }
+  },
+  "last_closed": "docs/optimization-history/gdn-recurrent-vrows.json"
 }

@@ -1,0 +1,131 @@
+{
+  "candidate": "Recurrent V 行拆分（通过改变逻辑头数分工）",
+  "status": "closed_default_off",
+  "scope": "本机合成、普通非投机、非填充 1/2 行。L3 和 L0 是单卡独立探针，不是服务；原生覆盖率预算来自另一个双卡长度探针，不混算两种采集的数据。",
+  "host_commits": {
+    "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+    "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+  },
+  "verdict": {
+    "isolated_l3": "pass",
+    "full_update_l0": "noise_no_clear_gain",
+    "main_kernel_trace": "negative",
+    "service": "not_measured",
+    "mod": "not_measured"
+  },
+  "criteria": {
+    "isolated_l3": "8 槽合成池，eager 与图回放的 BF16 输出、FP32 状态逐位一致，覆盖连续复用与换槽。不是模型级贪心对拍。",
+    "full_update_l0": "846 槽合成池，10 次预热后每桶 100 对交替顺序的图回放，包含 q/k 归一化和门值拷贝。两臂胜负交错，中位数没有一致改善；noise 是本轮描述，不是预注册的等效性检验，也不使用服务噪声门槛。",
+    "main_kernel_trace": "Device CSV names, timestamps and durations matched to graph model, stream, task order and execute windows. Device CSV has no shape fields; shapes follow the isolated fixture. ACL-to-NPU host flow unavailable; host gaps and service impact not attributed. Gate time is the median per-replay sum of two BroadcastTo and two RepeatInterleave kernel durations.",
+    "negative_basis": "每桶每臂 16 次独立图回放（同一窗口内），主核候选最小值仍高于原生最大值；四个新增扩展核是额外成本，不是主核收益被抵消。受插桩和窗口顺序限制，不用逐核时长反推未插桩的端到端差异。",
+    "window_budget": "逐卡分子只计原生普通解码非填充 1/2 行主核。完整窗口分母为本卡首个核开始到末个核结束；另列同批图内所有核时长之和（不是墙钟）。二者只作可省时间量级筛选，不是吞吐预测。"
+  },
+  "native_intra_head_review": {
+    "status": "unmeasured_not_scheduled",
+    "source_sha256": {
+      "csrc/attention/recurrent_gated_delta_rule/op_kernel/recurrent_gated_delta_rule.h": "96e6d9667af1e3457316ffce92a8a983fcb90096df08e3efd13ec0b35b8b1c5b",
+      "csrc/attention/recurrent_gated_delta_rule/op_host/recurrent_gated_delta_rule_tiling.cpp": "72bc53c4f46ffe3ff4d262098796ac878ae01364ba9dbaa519e417c8c0ce204e",
+      "csrc/attention/recurrent_gated_delta_rule/recurrent_gated_delta_rule_torch_adpt.h": "96cf511bedd953c0b332bf97d88f535663c759fc81235baeb3044e66605d6a0c"
+    },
+    "findings": [
+      "UpdateDynamicBlockDimByTaskUnits 以 min(B × NV, AIV 数) 选 block；RGDR::Process 按序列和头分配任务，ProcessHead 内部的 vStep 只是该 block 的本地循环。公开适配器没有传入头内行块分工的参数。",
+      "可以保持 16 个逻辑头，改宿主 tiling 和 kernel 的任务映射为 (序列, 头, 不相交的 V 行段)。g/beta 仍按原头寻址；FP32 状态行总读写量不必增加，但各 block 可能重复读 q/k、门值、元数据，若不改 CopyInQKV 还会重复读整个 V 头。必须限制预取不越分段，处理独占有效槽、图填充与回退。",
+      "这不是已测的逻辑头拆分，不把负向标签移给它。当前混合长输入窗口的合格主核时间份额不足以优先开发一个新宿主原生入口；本轮不修改或部署宿主。"
+    ],
+    "reopen_when": "出现目标解码负载的同宿主逐卡记录，证明合格普通步在目标关键路径上有足够可省时间，并能在宿主 Fork 隔离构建、识别原生/候选、验证槽位不冲突与全状态对拍。不同负载需重新估算，不把本窗口当硬件上限。"
+  },
+  "reproduce": {
+    "collect": "tools/analysis/gdn_recurrent_vrows.py",
+    "trace_flag": "--trace-only",
+    "trace_summary": "tools/analysis/gdn_recurrent_trace.py",
+    "check": "python -B -m tools.analysis.gdn_recurrent_closeout <archive-parent>"
+  },
+  "archives": {
+    "native": {
+      "directory": "gdn-native-shapes-20261121T120955Z",
+      "sha256": "9d515bf76d12e9fe797d133a00e9e73b9d2a93e603097af4cbca882738e87219"
+    },
+    "probe": {
+      "directory": "gdn-recurrent-vrows-20261121T130339Z",
+      "sha256": "96e7131e31f73136915d68d8d883a97760c2aa6ce15965f1857cd8a29341bde9"
+    },
+    "trace": {
+      "directory": "gdn-recurrent-trace-20261121T131031Z",
+      "sha256": "61088b065dd7fcadd0552341cc22ed7b67a456df295cad8609bfad8b726eff92"
+    }
+  },
+  "measurements": {
+    "local_ab": {
+      "1": {
+        "pairs": 100,
+        "on_faster": 51,
+        "off_median_us": 85.35,
+        "on_median_us": 85.78,
+        "paired_median_on_minus_off_us": -0.21,
+        "main_off_us": 11.93,
+        "main_on_us": 15.47,
+        "main_off_range_us": [
+          11.78,
+          12.48
+        ],
+        "main_on_range_us": [
+          15.24,
+          15.8
+        ],
+        "gate_expansion_on_us": 16.56,
+        "blocks_off": 16,
+        "blocks_on": 32
+      },
+      "2": {
+        "pairs": 100,
+        "on_faster": 46,
+        "off_median_us": 86.42,
+        "on_median_us": 86.96,
+        "paired_median_on_minus_off_us": 0.84,
+        "main_off_us": 17.17,
+        "main_on_us": 21.5,
+        "main_off_range_us": [
+          17.02,
+          17.54
+        ],
+        "main_on_range_us": [
+          21.12,
+          21.92
+        ],
+        "gate_expansion_on_us": 28.7,
+        "blocks_off": 32,
+        "blocks_on": 48
+      }
+    },
+    "native_window_by_rank": {
+      "0": {
+        "ordinary_calls": {
+          "1": 90,
+          "8": 90,
+          "2": 60
+        },
+        "eligible_main_us": 2163.12,
+        "observed_kernel_span_us": 4153197.38,
+        "eligible_main_over_span_pct": 0.0521,
+        "eligible_main_over_same_graph_kernel_sum_pct": {
+          "1": 3.426,
+          "2": 3.662
+        }
+      },
+      "1": {
+        "ordinary_calls": {
+          "1": 90,
+          "8": 90,
+          "2": 60
+        },
+        "eligible_main_us": 2232.38,
+        "observed_kernel_span_us": 4153649.82,
+        "eligible_main_over_span_pct": 0.0537,
+        "eligible_main_over_same_graph_kernel_sum_pct": {
+          "1": 3.379,
+          "2": 3.664
+        }
+      }
+    }
+  }
+}

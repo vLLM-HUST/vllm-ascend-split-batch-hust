@@ -67,6 +67,11 @@ def main(argv=None):
         print(
             f"下一项：{record['candidate']}\n范围：{record['scope']}\n依据：{record['reason']}\n{record['next_step']}"
         )
+        if "last_closed" in record:
+            closed = RECORD.parents[1] / record["last_closed"]
+            if not closed.is_file():
+                raise ValueError(f"缺研发结案记录：{closed}")
+            print(f"上一项结论与重开条件：{record['last_closed']}")
         for step in record["checks"]:
             print(f"判据：{step}")
         for name, reason in record["skip"].items():
