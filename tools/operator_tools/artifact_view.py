@@ -41,9 +41,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tools.operator_tools import hotspot_round
 from tools.operator_tools.serving_loop import evaluate_e2e_snr_gate
 
 NOISE_FLOOR_PCT = 1.5
@@ -119,9 +121,27 @@ class Archive:
 
     def hotspots(self) -> list[dict] | None:
         path = self._first("hotspots.json")
-        if path is None:
+        if path is not None:
+            summary = json.loads(path.read_bytes())
+            if isinstance(summary, list):
+                return summary
+            if summary["schema"] != hotspot_round.SCHEMA:
+                raise ValueError(f"unsupported hotspot summary: {path}")
+            hotspot_round.check_ranks(
+                summary["rank_sources"], hotspot_round.invocation_size(self.root)
+            )
+        elif self.is_round():
+            summary = hotspot_round.summarize(
+                self.root / "profile", hotspot_round.invocation_size(self.root)
+            )
+        else:
             return None
-        return json.loads(path.read_text())
+        for rank, source in summary["rank_sources"].items():
+            self.sources[f"rank{rank}"] = source
+        return summary["ops"]
+
+    def is_round(self) -> bool:
+        return self.root.match("round_*_off")
 
     def checklist(self) -> list[dict] | None:
         path = self._first("checklist.json")
@@ -201,7 +221,7 @@ def hotspot_view(archive: Archive) -> list[dict]:
     every call ran at the typical duration. The remainder is what the long calls
     added — in a mixed prefill/decode run, that is the prefill share.
     """
-    ops = archive.pipes()
+    ops = None if archive.is_round() else archive.pipes()
     if ops:
         rows = []
         for item in ops:
@@ -304,20 +324,49 @@ def main(argv: list[str] | None = None) -> int:
         print(f"archive not found: {archive.root}")
         return 1
 
-    # Touch each artifact once so the provenance report below is complete.
-    archive.wall_clock()
-    archive.pipes()
-    archive.hotspots()
-    archive.checklist()
-    archive.api()
-    archive.kernel_wait()
+    try:
+        rounds = sorted(p for p in archive.root.glob("round_*_off") if p.is_dir())
+        manifest = archive.root / "collection_manifest.json"
+        n = (
+            json.loads(manifest.read_bytes()).get("rounds")
+            if manifest.is_file()
+            else None
+        )
+        if n is not None and (
+            n < 1
+            or {p.name for p in rounds} != {f"round_{i:02d}_off" for i in range(n)}
+        ):
+            raise ValueError(f"expected {n} rounds, found {[p.name for p in rounds]}")
+        for root in rounds or [archive.root]:
+            if rounds:
+                print(f"== {root.name} ==")
+            rc = show(Archive(root), args.view, args.top)
+            if rc:
+                return rc
+        return 0
+    except (ValueError, OSError, TypeError, KeyError, IndexError) as exc:
+        print(f"invalid archive {archive.root}: {exc}", file=sys.stderr)
+        return 1
+
+
+def show(archive, view, top):
+    # Report the sources actually used by the requested views.
+    rows_hotspot = hotspot_view(archive) if view in ("hotspot", "all") else []
+    if view in ("wall", "e2e", "all"):
+        archive.wall_clock()
+    if view in ("sol", "e2e", "all"):
+        archive.checklist()
+    if view in ("api", "all"):
+        archive.api()
+    if view in ("wait", "all"):
+        archive.kernel_wait()
     if archive.sources:
         print("== artifacts read ==")
         for pattern, name in sorted(archive.sources.items()):
             print(f"  {pattern:<22} {name}")
         print()
 
-    if args.view in ("wall", "all"):
+    if view in ("wall", "all"):
         wall = archive.wall_clock()
         print("== wall clock ==")
         if wall is None:
@@ -335,17 +384,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {'overlapped':<14}{wall['overlapped_us']:>12.0f} us")
         print()
 
-    if args.view in ("hotspot", "all"):
-        rows = hotspot_view(archive)
+    if view in ("hotspot", "all"):
+        rows = rows_hotspot
         print("== hotspot ==")
         if not rows:
             print("  no pipes or hotspots artifact in this archive")
+            if view == "hotspot" or archive.is_round():
+                return 1
         else:
             print(
                 f"  {'op':<28}{'calls':>7}{'share%':>8}"
                 f"{'total_us':>11}{'long_us':>9}  form"
             )
-            for row in rows[: args.top]:
+            for row in rows[:top]:
                 long_call = (
                     "-" if row["long_call_us"] is None else f"{row['long_call_us']:.0f}"
                 )
@@ -355,13 +406,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
         print()
 
-    if args.view in ("sol", "all"):
+    if view in ("sol", "all"):
         verdicts = archive.checklist() or []
         print("== sol ==")
         if not verdicts:
             print("  no checklist artifact in this archive")
         else:
-            for item in verdicts[: args.top]:
+            for item in verdicts[:top]:
                 sol = item.get("sol_pct")
                 sol_text = "n/a" if sol is None else f"{float(sol):.1f}"
                 print(
@@ -370,14 +421,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
         print()
 
-    if args.view in ("e2e", "all"):
+    if view in ("e2e", "all"):
         rows = e2e_view(archive)
         print(f"== e2e potential (noise floor {NOISE_FLOOR_PCT}%) ==")
         if not rows:
             print("  needs both a step_trace artifact and a checklist artifact")
         else:
             print(f"  {'op':<28}{'share%':>8}{'sol%':>7}{'gap%':>8}{'e2e%':>8}  dec")
-            for row in rows[: args.top]:
+            for row in rows[:top]:
                 mark = "yes" if row["decidable"] else "no"
                 gap = row["device_gap_pct"]
                 e2e = row["e2e_upper_pct"]
@@ -392,7 +443,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         print()
 
-    if args.view in ("api", "all"):
+    if view in ("api", "all"):
         rows = archive.api()
         print("== host api ==")
         if not rows:
@@ -402,7 +453,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"  {'api':<40}{'time_ms':>10}{'count':>8}{'avg_us':>10}{'share%':>8}"
             )
-            for row in rows[: args.top]:
+            for row in rows[:top]:
                 print(
                     f"  {row['api'][:38]:<40}{row['total_us'] / 1000:>10.1f}"
                     f"{row['count']:>8}{row['avg_us']:>10.1f}"
@@ -410,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
         print()
 
-    if args.view in ("wait", "all"):
+    if view in ("wait", "all"):
         rows = archive.kernel_wait()
         print("== kernel wait ==")
         if not rows:
@@ -421,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"  {'kernel':<40}{'count':>8}{'dur_us':>11}"
                 f"{'wait_us':>10}{'wait/dur':>10}"
             )
-            for row in rows[: args.top]:
+            for row in rows[:top]:
                 print(
                     f"  {row['kernel'][:38]:<40}{row['count']:>8}"
                     f"{row['duration_us']:>11.0f}{row['wait_us']:>10.0f}"

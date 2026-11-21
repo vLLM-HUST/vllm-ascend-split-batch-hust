@@ -39,6 +39,7 @@
 | 主题 | 权威位置 |
 |---|---|
 | 术语唯一写法、定义判据、代码锚点、同名异义与废止词 | [../GLOSSARY.md](../GLOSSARY.md) |
+| 继续优化：当前候选、依据和停止条件 | [当前研发任务](optimization-next.json)；只读入口见 [workflow.md](../workflow.md) |
 | 参考性执行流程 | [../workflow.md](../workflow.md) |
 | 使用方法、env 开关、验证证据 | [../README.md](../README.md) |
 | **容器运行时分层、宿主Fork边界与证据隔离规范** | [container-and-plugin-boundary-spec.md](container-and-plugin-boundary-spec.md) |

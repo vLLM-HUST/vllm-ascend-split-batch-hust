@@ -16,8 +16,8 @@
 #   WARMUP_TOKENS / L3_TOKENS / PROFILE_TOKENS / WARMUP_REPEATS /
 #   PROFILE_REQUESTS / CONCURRENCY / SHARED_PREFIX_TOKENS
 # 产物落点: 仓内 $RUN_DIR（默认 <仓根>/.openbitfun/profile-hotspot-longrun-<RUN_ID>）落
-#   config.json / status.json / hotspots_NN.json / nohup.log / summary.txt；
-#   设备侧原始采集落仓外 $ARCHIVE_ROOT 下的 round_NN_off/。
+#   config.json / status.json / nohup.log / summary.txt；
+#   设备侧原始采集与逐轮 hotspots.json 同存于仓外 $ARCHIVE_ROOT/round_NN_off/。
 #
 # 换形态只改环境变量，不改脚本：SERVER_MODE=graph 时不传 --enforce-eager，
 # 采集落进 ACLGraph 形态，并按 CUDAGRAPH_CAPTURE_SIZES 捕获图。
@@ -172,6 +172,10 @@ else:
 PY
 )
 
+if [[ ! "$ROUNDS" =~ ^[1-9][0-9]*$ ]] || [[ -e "$ARCHIVE_ROOT/collection_manifest.json" ]] || compgen -G "$ARCHIVE_ROOT/round_*" >/dev/null; then
+  echo "positive PROFILE_ROUNDS and a fresh archive required: $ARCHIVE_ROOT" >&2
+  exit 1
+fi
 mkdir -p "$RUN_DIR" "$ARCHIVE_ROOT"
 cd "$RUN_DIR"
 
@@ -247,7 +251,6 @@ env -u PYTHONPATH PYTHONUNBUFFERED=1 "$PY" - \
   "$ROOT" "$RUN_DIR" "$ARCHIVE_ROOT" "$PORT_BASE" "$ROUNDS" "$SLEEP_SECONDS" \
   >> "$RUN_DIR/nohup.log" 2>&1 <<'PY' &
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -261,8 +264,29 @@ sleep_seconds = int(sys.argv[6])
 
 sys.path.insert(0, str(root))
 from tools.operator_tools import serving_collect
+from tools.operator_tools.hotspot_round import summarize
 
 template = json.loads((run_dir / "config.json").read_text())
+
+# 归档自述：strict 校验要求归档能说清自己是什么形态、由哪个宿主产生。
+manifest = {
+    "schema": "vllm-hust/collection/collection-manifest/v1",
+    "produced_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "host_commits": template.get("host_commits", {}),
+    "collection_shape": template.get("collection_shape", {}),
+    "rounds": rounds,
+    "artifacts": [
+        "hotspots.json",
+        "op_statistic.csv",
+        "kernel_details.csv",
+        "step_trace_time.csv",
+        "api_statistic.csv",
+        "communication_matrix.json",
+    ],
+}
+(archive_root / "collection_manifest.json").write_text(
+    json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+)
 
 for index in range(rounds):
     port = port_base + index
@@ -276,26 +300,8 @@ for index in range(rounds):
     )
     try:
         serving_collect.collect_guard(config, output, "off")
-        analysis_root = output / "profile"
-        totals = {}
-        for path in analysis_root.rglob("op_statistic.csv"):
-            import csv
-            with path.open(newline="") as handle:
-                for row in csv.DictReader(handle):
-                    op = row["OP Type"]
-                    slot = totals.setdefault(op, {"count": 0, "us": 0.0})
-                    slot["count"] += int(row["Count"])
-                    slot["us"] += float(row["Total Time(us)"])
-        grand = sum(v["us"] for v in totals.values()) or 1.0
-        hotspots = [
-            {"op": op, "count": v["count"], "total_us": round(v["us"], 3),
-             "share_pct": round(v["us"] * 100 / grand, 3)}
-            for op, v in totals.items()
-        ]
-        hotspots.sort(key=lambda x: x["total_us"], reverse=True)
-        (run_dir / f"hotspots_{index:02d}.json").write_text(
-            json.dumps(hotspots, indent=2) + "\n"
-        )
+        hotspots = summarize(output / "profile", config["world_size"])
+        (output / "hotspots.json").write_text(json.dumps(hotspots, indent=2) + "\n")
         (run_dir / "status.json").write_text(
             json.dumps({"round": index, "state": "done", "output": str(output)}, indent=2) + "\n"
         )
@@ -304,27 +310,9 @@ for index in range(rounds):
             json.dumps({"round": index, "state": "failed", "error": repr(exc),
                         "output": str(output)}, indent=2) + "\n"
         )
+        raise
     if index + 1 < rounds:
         time.sleep(sleep_seconds)
-
-# 归档自述：strict 校验要求归档能说清自己是什么形态、由哪个宿主产生。
-manifest = {
-    "schema": "vllm-hust/collection/collection-manifest/v1",
-    "produced_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    "host_commits": template.get("host_commits", {}),
-    "collection_shape": template.get("collection_shape", {}),
-    "rounds": rounds,
-    "artifacts": [
-        "op_statistic.csv",
-        "kernel_details.csv",
-        "step_trace_time.csv",
-        "api_statistic.csv",
-        "communication_matrix.json",
-    ],
-}
-(archive_root / "collection_manifest.json").write_text(
-    json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
-)
 
 from tools.operator_tools import artifact_contract
 
@@ -335,6 +323,9 @@ for strict in (False, True):
         json.dumps(report.as_dict(), indent=2, ensure_ascii=False) + "\n"
     )
     print(f"contract[{mode}]: ok={report.ok} findings={len(report.findings)}", flush=True)
+    if not report.ok:
+        (run_dir / "status.json").write_text(json.dumps({"state": "failed", "error": f"contract_{mode}.json"}) + "\n")
+        raise SystemExit(1)
 PY
 
 echo $! > "$RUN_DIR/runner.pid"

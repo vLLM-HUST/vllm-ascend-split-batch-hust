@@ -60,12 +60,12 @@
 
 ## 4. 端侧长测
 
-端侧统一使用长测工具，不按算子手写重复命令。
+新会话从仓根运行 `python -B -m tools.operator_tools.next` 选题。下列长测步骤只用于已评审的服务复测，不用于选题。
 
 1. 在干净分支跑 `pytest @tests/offline-checks.args` 和 `repo_audit.py`。
 2. 确认计划只含未完成端侧验证、且具备可验证门控的算子。已测、失败未修、已替代和方向记录不得混入。
 3. 使用 `tools/operator_tools/pending_longrun.py` 生成计划。没有服务调用点或门控读者时必须 skip；已有接入但缺归因规则时可只做数值护栏。
-4. 使用 `workloads/run_pending_longrun.sh` 后台启动。原始归档放仓外，日志和 checkpoint 放 `.openbitfun/`。
+4. 使用 `workloads/run_pending_longrun.sh "$OPERATOR"` 后台启动已点名的项。原始归档放仓外，日志和 checkpoint 放 `.openbitfun/`。
 5. 长测计划必须使用 `sync_mode: none`。结果不自动写回正式证据。
 6. 人工核对 host preflight、贪心对拍、逐卡归因、请求完整性和噪声记录后，才能调用同步工具。
 

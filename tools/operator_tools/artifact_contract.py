@@ -325,7 +325,14 @@ def check_file(path: Path, kind: Kind, strict: bool) -> list[Finding]:
             )
 
     if kind.item_required is not None:
-        if kind.item_field is None:
+        if kind.name == "hotspot-summary" and isinstance(data, dict):
+            rows = data.get("ops")
+            where = "ops"
+            if rows and not data.get("rank_sources"):
+                findings.append(
+                    Finding(str(path), kind.name, "error", "missing rank_sources")
+                )
+        elif kind.item_field is None:
             rows = data
             where = "body"
         else:

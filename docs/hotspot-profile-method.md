@@ -56,6 +56,8 @@
 | `tools/operator_tools/profile_pipes.py` | 把 `ASCEND_PROFILER_OUTPUT` 折算成 pipe 构成与形态标签 |
 | `.openbitfun/skills/operator-sol-optimizer/scripts/sol.py` | 在给定必要工作量与资源能力后计算 SOL% 与乐观上界 |
 
+从仓根运行 `python -B -m tools.operator_tools.artifact_view <归档目录> --view hotspot --top 5`。长测按 `round_NN_off` 分别排名，每轮列出参与的 rank 和来源；次数和设备时间是该轮各卡之和，不是墙钟。新归档的 `hotspots.json` 与本轮 `profile/` 同目录；旧归档从各卡原始 CSV 只读重建，不依赖 `.openbitfun/`。显式请求热点却没有有效数据时返回非零，不解释为空热点。
+
 `profile_pipes.py` 输出的是 pipe 占用，不是 SOL%。SOL% 还需要匹配的峰值能力与必要工作量两项输入，缺一不得出结论。
 
 ## 6. 交付约束

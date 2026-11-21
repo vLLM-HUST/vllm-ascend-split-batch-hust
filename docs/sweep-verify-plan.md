@@ -2,11 +2,13 @@
 
 本文件定义一个持续运转的测试-验证队列模式：目标是让持有的 NPU 卡始终在跑**有交付价值的下一件事**，而不是闲等到被回收。规则稳定放本文件；队列的实时状态放 `.openbitfun/sweep-verify-queue.json`（不进 git，每轮就地更新）。
 
+研发优先级只读[当前研发任务](optimization-next.json)，接续命令见 [workflow.md](../workflow.md)。本机队列只记执行进度、重试和 checkpoint；历史 pending 或已结案的服务项不是启动授权。当前项没有已评审的可执行计划就停在设计，不为占卡另取一项。
+
 ## 1. 触发与节奏
 
 | 规则 | 内容 |
 |---|---|
-| 触发 | 卡在手且空闲即启动下一轮；每轮从队列取第一个合格项开跑，不挑活 |
+| 触发 | 卡空闲且当前任务有已评审计划时才启动；只取该计划内的合格项 |
 | 单轮预算 | 默认一轮不超过一个自然日；被打断时依赖 `serving_e2e_auto.py` 的 checkpoint 续跑 |
 | 串行 | 同一时刻只跑一个队列项，NPU 独占；不并发起两个服务 |
 | 停机 | 队列取空、卡被收回或连续两项失败时停下，失败原因写回队列 |
@@ -23,7 +25,7 @@
 
 ## 3. 循环步骤（每轮）
 
-1. 取 `.openbitfun/sweep-verify-queue.json` 第一个 `status: pending` 且满足准入的项。
+1. 取 `.openbitfun/sweep-verify-queue.json` 中属于已评审计划、`status: pending` 且满足准入的第一项。不得把人工说明当作命令。
 2. 核对该项 preconditions（模板 plan 存在、环境变量、上轮冒烟结果）。
 3. 按该项 `command` 原样执行；产物落该项 `archive` 指定的仓外目录，manifest 由采集脚本自动写。
 4. 跑完把 `status` 改成 `done` / `failed`，`last_result` 写一句事实（不写结论），`updated_at` 打时间戳。
@@ -64,7 +66,7 @@
 
 ## 6. 初始队列内容
 
-队列不进 Git。新建队列时从以下来源选取已满足前置条件的任务：
+队列不进 Git。以下是可用的任务类型，不是默认排期；只有已评审计划明确要求时才加入：
 
 - 验收形态起服冒烟（关闭 `docs/acceptance-shape.json` 的 `unverified_risks`）；
 - 冻结形态热点重采（排序精化，与旧 4096/eager 表只比方向）；
