@@ -56,6 +56,7 @@ def test_all_repository_jsons_belong_to_governed_categories():
         if rel in ALLOWED_ROOT_JSONS or rel in {
             "docs/optimization-next.json",
             "docs/optimization-history/gdn-recurrent-vrows.json",
+            "docs/optimization-history/gmm1-swiglu-screen.json",
         }:
             continue
         assert any(rel.startswith(prefix) for prefix in valid_prefixes), (

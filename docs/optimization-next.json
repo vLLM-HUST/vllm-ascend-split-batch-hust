@@ -1,11 +1,12 @@
 {
-  "candidate": "GroupedMatmul：先核对现有计算热点和专家分布证据",
+  "candidate": "GroupedMatmul 第一段：补齐同工况、可按层/步/卡核验的专家分布",
   "scope": "新的选题只做静态筛选；整网热点来自本机 random 图模式长测，各轮和各 rank 分开读取。下方的长度探针回执用于核对上一项 Recurrent 的边界，不是 GroupedMatmul 的执行资格。",
-  "reason": "Recurrent 1/2 行逻辑头拆分已结案：局部数值通过，整段 L0 没有稳定收益，逐核负向，未测服务。整网长测各轮首位是 GroupedMatmul，但核名和排名不能证明可优化。",
-  "next_step": "先用背景热点归档定位 GroupedMatmul 的消费点和输入形状，再查同一窗口是否记录了真实 group_list / 专家 token 数；缺分布只记缺项，不自动重开历史调优方案或排服务 A/B。",
+  "reason": "三轮各卡已核出相同的 BF16 GMM1→SwiGLU 链；单独消掉激活的直接设备时间占该卡 Stage 不足 0.27%。第一段矩阵乘占比更高，但原窗口未采 group_list 值，不能按均匀专家负载排优化。",
+  "next_step": "先预审一轮单独的路由诊断：核对 --enable-return-routed-experts 返回逻辑 top-k 的范围，以及调度步、有效 token、层和 EP 专家映射的对账方法。缺对账不占卡、不写 kernel 或服务收益。",
   "checks": [
     "逐轮、逐卡保留形状、专家分布与调用来源；不得把另一个负载的专家数配给本窗口。",
-    "没有同工况 shape、分布和可区分的候选时不占卡、不写收益标签。"
+    "没有同工况 shape、分布和可区分的候选时不占卡、不写收益标签。",
+    "本轮逐轮逐卡记录与复核入口：docs/optimization-history/gmm1-swiglu-screen.json。"
   ],
   "skip": {
     "Chunk": "本窗口两卡都没有命中已有形状桶；所测短提示 eager 准备段未改善，不用隔离图回放替代。保持默认关闭。",

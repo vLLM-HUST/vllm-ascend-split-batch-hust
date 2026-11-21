@@ -1,0 +1,190 @@
+{
+  "status": "screened_missing_expert_counts",
+  "candidate": "同一模型图内 BF16 routed GMM1 → SwiGLU；仅 M=128，非共享专家支路。",
+  "scope": "本机双卡 TP2/EP，random，16 并发，FULL_DECODE_ONLY。三轮关闭组分别看每卡，不合并不同轮次、不代表正式数据集。",
+  "host_commits": {
+    "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+    "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+  },
+  "archive_uri": "file:///root/vllm-workspace/benchmark-archives/profile-hotspot-longrun-hotspot-20261121T031427Z",
+  "reproduce": "python -B -m tools.analysis.gmm1_swiglu_screen <archive-directory>",
+  "route": {
+    "host_files_sha256": {
+      "vllm_ascend/ops/fused_moe/routed_experts.py": "b17e5a105d59fc280f244bdc4036b4cb41efd1d5a2ff1accca4b56620cc91ab7",
+      "vllm_ascend/ops/fused_moe/moe_mlp.py": "2bf107e3287e3a4c69512e60e65495448f34a4451eab32ae3b23b5c2a46d2558",
+      "vllm_ascend/ops/fused_moe/moe_comm_method.py": "697c7ef6220387f7a43ea682d6421182ff8674ff148e8c4b292fdbfe852d8046",
+      "vllm_ascend/ops/fused_moe/dataclass/moe_mlp.py": "76ac7bc54be4f12f3b53b73c7c90d0033fdcc40cdbfb57503e8b611f44d7a818",
+      "vllm_ascend/ops/fused_moe/token_dispatcher.py": "cf4e44a06db2dd7d1a0abce35381ed270aef6b75e4d3bf6557a50b0bb7ffebb5"
+    },
+    "producer": "TokenDispatcherWithAllGather.token_dispatch: npu_moe_init_routing returns expert_tokens → INT64 group_list, type 1 (counts). EP limits active_expert_range to local experts. build_mlp_compute_input forwards the list and its encoding.",
+    "consumer": "AscendUnquantizedFusedMoEMethod.supports_fused_activation returns False. apply_moe_mlp takes apply_gmm1 → _unified_apply_activation → apply_act_quant → apply_gmm2. apply_gmm1 returns gate_up_out from npu_grouped_matmul; activation consumes it with npu_swiglu in this path. Existing quantized fused operators are not BF16 replacements.",
+    "boundary": "同一模型/流的设备任务顺序、输入输出 dtype/shape 和所测宿主源码一致；没有按 Python 栈或张量地址动态追踪每次调用，不认定插件实现或候选已接入。"
+  },
+  "budget": {
+    "gmm1": "只统计该桶的第一段。全体 GroupedMatmul 还包括第二段和其他形状。",
+    "activation": "用该卡 step_trace_time.Stage 作窗口分母。若只移除独立 SwiGLU，其累计设备时长是可讨论的直接预算；不是端到端加速，融合仍需执行激活，且会改变主核。核间 gap 不计作可省时间。",
+    "intermediate": "每次名义 [128,1024] BF16 张量 256 KiB；一次写、一次读共 512 KiB，仅是逻辑字节预算。活跃行、缓存、实际 HBM 写回与带宽未测，不折算成微秒或另加到激活预算。"
+  },
+  "expert_distribution": {
+    "status": "not_recorded_in_available_window",
+    "values": null,
+    "why": "服务启动记录 enable_return_routed_experts=False，profile 响应的 routed_experts 全空。profiler record_op_args 和 with_stack 关闭，设备导出只有 group_list 的形状/类型，未发现逐次计数 sidecar。EP 专家放置表不是负载。128 个路由槽不等于 128 个活跃专家，也不能要求每卡本地计数和等于 128。"
+  },
+  "next_diagnostic": {
+    "status": "design_only_no_reviewed_run_plan",
+    "source_files_sha256": {
+      "vllm/entrypoints/openai/completion/protocol.py": "269d5da76913280d61a8a38e3e27ae5799254dcf4e4acb3d38b0ec982e4d7cf8",
+      "vllm/model_executor/layers/fused_moe/router/base_router.py": "47fa2324bcd9b6ebdc138d69ae6b6ecc0f2463d34bda8c5988bdb0a2a76d3fae",
+      "vllm/config/vllm.py": "52c6479ac939eb99735d72dc6d47f89e8d17f17b5edf37cee70ff12ff18ddbd0"
+    },
+    "single_change": "另开诊断窗口，先验证已安装宿主公开的 --enable-return-routed-experts 在相同图路径能返回真实 top-k。不是原三轮重放，插桩窗口不用于性能判定。不要复活图捕获期间的 Python 计数 hook。",
+    "admission": "按调度步准确回连实际执行的请求/token 与层，剔除 warmup、图捕获、padding 和最后未前向的 sampled token。按同一窗口的 EP 映射把逻辑 top-k 换成本地物理专家 counts；逐卡同实际 dispatch/group_list_type 和有效路由数校验。无法唯一对账则不得当成实测 group_list。",
+    "gate": "分布被核实后，优先验证 GMM1 本体在真实分布上的可省时间；只有存在同精度 BF16 实现且保留中间舍入与布局时才对拍融合。没有验证到分布、没有候选或预计整段收益不可分辨，不排服务 A/B。"
+  },
+  "performance_verdict": "not_measured_no_candidate",
+  "observations": {
+    "per_round_rank": {
+      "round_00_off": {
+        "0": {
+          "matched": 600,
+          "graph_sites": 40,
+          "repeats_per_site": [
+            15
+          ],
+          "gmm1_mean_us": 61.9052,
+          "swiglu_mean_us": 5.6296,
+          "gap_median_us_not_attributed": 1.02,
+          "gmm1_sum_us": 37143.1,
+          "swiglu_sum_us": 3377.74,
+          "stage_us": 1296346.0,
+          "gmm1_stage_pct": 2.8652,
+          "swiglu_stage_pct": 0.2606,
+          "gmm1_share_all_groupedmatmul_us_pct": 51.8825,
+          "nominal_intermediate_write_plus_read_bytes_per_call": 524288
+        },
+        "1": {
+          "matched": 600,
+          "graph_sites": 40,
+          "repeats_per_site": [
+            15
+          ],
+          "gmm1_mean_us": 62.2866,
+          "swiglu_mean_us": 5.5041,
+          "gap_median_us_not_attributed": 1.04,
+          "gmm1_sum_us": 37371.98,
+          "swiglu_sum_us": 3302.46,
+          "stage_us": 1297049.5,
+          "gmm1_stage_pct": 2.8813,
+          "swiglu_stage_pct": 0.2546,
+          "gmm1_share_all_groupedmatmul_us_pct": 52.1153,
+          "nominal_intermediate_write_plus_read_bytes_per_call": 524288
+        }
+      },
+      "round_01_off": {
+        "0": {
+          "matched": 600,
+          "graph_sites": 40,
+          "repeats_per_site": [
+            15
+          ],
+          "gmm1_mean_us": 62.2943,
+          "swiglu_mean_us": 5.5537,
+          "gap_median_us_not_attributed": 1.01,
+          "gmm1_sum_us": 37376.58,
+          "swiglu_sum_us": 3332.22,
+          "stage_us": 1287050.75,
+          "gmm1_stage_pct": 2.904,
+          "swiglu_stage_pct": 0.2589,
+          "gmm1_share_all_groupedmatmul_us_pct": 52.0129,
+          "nominal_intermediate_write_plus_read_bytes_per_call": 524288
+        },
+        "1": {
+          "matched": 600,
+          "graph_sites": 40,
+          "repeats_per_site": [
+            15
+          ],
+          "gmm1_mean_us": 62.243,
+          "swiglu_mean_us": 5.5255,
+          "gap_median_us_not_attributed": 1.04,
+          "gmm1_sum_us": 37345.78,
+          "swiglu_sum_us": 3315.28,
+          "stage_us": 1286588.0,
+          "gmm1_stage_pct": 2.9027,
+          "swiglu_stage_pct": 0.2577,
+          "gmm1_share_all_groupedmatmul_us_pct": 52.0631,
+          "nominal_intermediate_write_plus_read_bytes_per_call": 524288
+        }
+      },
+      "round_02_off": {
+        "0": {
+          "matched": 600,
+          "graph_sites": 40,
+          "repeats_per_site": [
+            15
+          ],
+          "gmm1_mean_us": 62.1322,
+          "swiglu_mean_us": 5.6234,
+          "gap_median_us_not_attributed": 1.01,
+          "gmm1_sum_us": 37279.3,
+          "swiglu_sum_us": 3374.02,
+          "stage_us": 1261387.5,
+          "gmm1_stage_pct": 2.9554,
+          "swiglu_stage_pct": 0.2675,
+          "gmm1_share_all_groupedmatmul_us_pct": 52.1574,
+          "nominal_intermediate_write_plus_read_bytes_per_call": 524288
+        },
+        "1": {
+          "matched": 600,
+          "graph_sites": 40,
+          "repeats_per_site": [
+            15
+          ],
+          "gmm1_mean_us": 62.4452,
+          "swiglu_mean_us": 5.515,
+          "gap_median_us_not_attributed": 1.04,
+          "gmm1_sum_us": 37467.1,
+          "swiglu_sum_us": 3309.02,
+          "stage_us": 1261369.75,
+          "gmm1_stage_pct": 2.9704,
+          "swiglu_stage_pct": 0.2623,
+          "gmm1_share_all_groupedmatmul_us_pct": 52.4164,
+          "nominal_intermediate_write_plus_read_bytes_per_call": 524288
+        }
+      }
+    },
+    "sha256": {
+      "collection_manifest.json": "b1b5c2ff9c47bf142c1b754dd5cb32b0c635d8dcc8f55483a2414650a8ba026d",
+      "round_00_off/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "round_00_off/invocation.json": "22ce0cada9948798af8d4cd67fcb308e8c9a88bcf658f61ea64a6589d9a5136f",
+      "round_00_off/server.log": "5b9a33b8d9e09a4bbaf991051e107f4bb8dd01db4e6670f70bfc8b42f2487050",
+      "round_00_off/profile_responses.json": "5a2f5b2cffd2ea087e140710c46eae8baf150e0afb12a5ed9d27240c2f0ff663",
+      "round_00_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_46905_20261121032038071_ascend_pt/profiler_info_0.json": "86d6d0174b140539099e1ab95cc9ad78c45c29790e39d901c8662f9b00c55f70",
+      "round_00_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_46905_20261121032038071_ascend_pt/ASCEND_PROFILER_OUTPUT/step_trace_time.csv": "dd21861a40e6a9b0f6dc299a7ee6b1e8beb84d69b1502f9ec675f3e62271d8c2",
+      "round_00_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_46905_20261121032038071_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "69dd76a3dabaac45d782061fa8a2bb6c7dd99a131c1549fbf896846a3a102f86",
+      "round_00_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_46906_20261121032038071_ascend_pt/profiler_info_1.json": "bb07f5947d84578bf01d219771cf86253683a3fed55e4be69f8fe29f70d03865",
+      "round_00_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_46906_20261121032038071_ascend_pt/ASCEND_PROFILER_OUTPUT/step_trace_time.csv": "819ed488488a1255e857765e0298905fcb0baf81ea119a77ce4311664c6aa19f",
+      "round_00_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_46906_20261121032038071_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "79543685b8dabcca56599531639b10721fbcd0ae150b18eda87f805eab71576c",
+      "round_01_off/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "round_01_off/invocation.json": "d0ba3f08ddd770f75cec699bea32ae634d9ae4a93ab21486b61b79f4ce2dc10e",
+      "round_01_off/server.log": "33af14092110e4eb87f2eee93a389f379e7b1481e53626af8a79196e2e5bbcc9",
+      "round_01_off/profile_responses.json": "c1856a814d4644cf9665d17f4f375c63d8399cf1754efc7b5a2203a0c2d104ef",
+      "round_01_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_61455_20261121032746701_ascend_pt/profiler_info_0.json": "d0791a0746a308651a0da9a069a6b518b6b1024c0d79379fc5071b86ba25841f",
+      "round_01_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_61455_20261121032746701_ascend_pt/ASCEND_PROFILER_OUTPUT/step_trace_time.csv": "76a5cdbcfa3a43402a07c8794f98ca2dda2ca0a6acbb52e5ecde0bbc6c53723d",
+      "round_01_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_61455_20261121032746701_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "1c2346ee63e5401581329ee001e880f8eb61931befe3ed4b8b483959ada69fcc",
+      "round_01_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_61456_20261121032746701_ascend_pt/profiler_info_1.json": "a7f6a222b126c56444000bceb092aa341e4b3d05d2bd17ebdd5571e1849d380c",
+      "round_01_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_61456_20261121032746701_ascend_pt/ASCEND_PROFILER_OUTPUT/step_trace_time.csv": "77dc8d979e752a30a3e549c8447db46e6acfa491582a3b81d333a4b2b9b5cc63",
+      "round_01_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_61456_20261121032746701_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "74bf8a05eb638986dc91e5014fdff3ed8b4bcfbe8cd8d8ef042f6c76be59ee2b",
+      "round_02_off/exit.json": "7b8b7f6373bde7e96f0eb5d0562398153f4f5b05b479c24a96af7862fe100bb8",
+      "round_02_off/invocation.json": "8679a9baf85eb760010fd82e3c6889fe95d6f1b6ea6f7c2e59996f437e4b0cc8",
+      "round_02_off/server.log": "6715e873b24c99fd848ae1de0870e3488f652fe0b3237c28ddf193a553be9871",
+      "round_02_off/profile_responses.json": "ce5ac97c86457b8ff3171ec0d9afdda76c0b7f08003ac6adca9b03dc849aaf5e",
+      "round_02_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_76143_20261121033459600_ascend_pt/profiler_info_0.json": "67893c7e5a810772662f6ced43dc3a8ecb26d524326f010d662a085afaf55be2",
+      "round_02_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_76143_20261121033459600_ascend_pt/ASCEND_PROFILER_OUTPUT/step_trace_time.csv": "04358532b823b6cea6a60727ba51cfdbb47815f4f2d3b24e3ba67a74d433a9c1",
+      "round_02_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_76143_20261121033459600_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "a31f4862af552d0055138de249064d1a6c5f186cf087636c8fd30cd1adbee093",
+      "round_02_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_76144_20261121033459600_ascend_pt/profiler_info_1.json": "7fba01c9a8a7a8938372e397dc8eb56a79593aa67614726b7bd64a3c5daf7c8e",
+      "round_02_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_76144_20261121033459600_ascend_pt/ASCEND_PROFILER_OUTPUT/step_trace_time.csv": "b63dff820da306215e6042911bf142d095f587bd2fca389122cbc5f55dfa4b48",
+      "round_02_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_76144_20261121033459600_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "cfd7d605d15ec16dfae3df7f755580883c8e99112c8ff2ca879214c22b269fce"
+    }
+  }
+}
