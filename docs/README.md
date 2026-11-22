@@ -2,6 +2,8 @@
 
 本目录收录插件交付规范、架构契约、支持边界与发布检查。根目录 README 保留仓库状态、安装与证据入口；当前状态以明确的权威清单为准，历史原件只用于溯源。
 
+查实验材料直接用[实验索引](../INDEX.md)，不在本页另列实验清单。排期见[实验计划](../实验计划.md)。
+
 ## 按任务的最短路径(改第一个算子)
 
 只改一个算子时按这个顺序读,不用通读全目录:
@@ -29,8 +31,7 @@
 | 10 | [release.md](release.md) | 构建、安装、发布、启用、停止和回滚判据 |
 | 11 | [pitfalls.md](pitfalls.md) | 仍适用的运行约束与故障判据 |
 | 12 | [算子优化 Skill](../.openbitfun/skills/operator-sol-optimizer/SKILL.md) | SOL 计算、单点优化与证据交接 |
-| 13 | [delivery-inventory.md](delivery-inventory.md) | 当前各算子状态、收益证据边界 |
-| 14 | [hotspot-profile-method.md](hotspot-profile-method.md) | 整网 profile 怎么采、怎么判读，哪些结论不能从里面得出 |
+| 13 | [hotspot-profile-method.md](hotspot-profile-method.md) | 整网 profile 怎么采、怎么判读，哪些结论不能从里面得出 |
 
 ## 单一事实源分工
 

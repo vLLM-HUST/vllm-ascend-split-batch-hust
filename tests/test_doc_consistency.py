@@ -31,6 +31,8 @@ except ModuleNotFoundError:  # Python 3.10
 #: 受"关键词 + 数字"与禁语判据约束的对外规范行文。
 PROSE_SURFACE = (
     "README.md",
+    "INDEX.md",
+    "实验计划.md",
     "AGENTS.md",
     "workflow.md",
     "GLOSSARY.md",

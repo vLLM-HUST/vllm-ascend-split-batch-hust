@@ -61,6 +61,7 @@
 
 | 术语 | 定义与判据 | 锚点 | 易混项 |
 |---|---|---|---|
+| 实验索引 | 由现有研发、提案、交付与历史归档路径生成的 AVL 高度平衡搜索树；新增或移除记录后按有序键重建。只定位资料，不登记结论。 | `INDEX.md`；`tools/operator_tools/experiment_index.py` | 交付索引判断状态；实验计划跟踪任务 |
 | MOD | 在固定基础引擎上以明确开关集合启停的待测能力或组合；身份包含实现版本与依赖，发现入口不等于启用。 | `docs/mod-acceptance-standard.md`；`MOD_METADATA.json` | 单个插件入口、全部算子目录 |
 | 组合服务 A/B | 冻结实际可用的优化集合，比较同一宿主下全部目标关闭与全部目标启用；须重验组合数值和各候选调用，不向单项分摊收益。 | `docs/mod-acceptance-standard.md`；`docs/mod-acceptance/evidence.json` | 方向记录不等于已实现候选；组合诊断不等于 MOD 合格 |
 | MOD 最终验收 | 对冻结 MOD 组合分别检查测试执行完整性和各项目标，算子服务收益不能替代此验收。 | `docs/mod-acceptance/evidence.json`；`docs/mod-acceptance-standard.md` | 算子验收 |
