@@ -1,10 +1,4 @@
-"""`workloads/profile_hotspot_longrun.sh` 的默认形态必须与登记的验收形态一致。
-
-背景：冻结验收 profile 的参数来源一度只存在于会话记录里，靠翻记录才找回。
-登记进 `docs/acceptance-shape.json` 后还剩一个洞：脚本默认值与登记值之间没有
-机械绑定，改了一边不改另一边不会被发现。本测试补上这道绑定：脚本里每个
-形态参数的默认值必须逐项等于登记值，脚本或登记单边缺失也必须报红。
-"""
+"""诊断脚本跟随登记的本地配置；冻结请求范围与 MOD 合同核对。"""
 
 from __future__ import annotations
 
@@ -48,7 +42,7 @@ def registered_defaults() -> dict[str, object]:
     return data["repository_shapes"]["profile_collection_script"]["defaults_now"]
 
 
-def test_script_defaults_match_registered_acceptance_shape():
+def test_script_defaults_match_registered_collection_shape():
     defaults = script_defaults()
     registered = registered_defaults()
     violations = []
@@ -63,4 +57,20 @@ def test_script_defaults_match_registered_acceptance_shape():
         expected = str(registered[field])
         if actual != expected:
             violations.append(f"{field}: 脚本默认 {actual!r} != 登记 {expected!r}")
-    assert not violations, "采集脚本与验收形态登记漂移: " + "; ".join(violations)
+    assert not violations, "采集脚本与诊断配置登记漂移: " + "; ".join(violations)
+
+
+def test_request_profiles_match_the_frozen_mod_contract():
+    shape = json.loads(SHAPE.read_text())
+    evidence = json.loads((ROOT / "docs/mod-acceptance/evidence.json").read_text())
+    standard = shape["request_shapes_standard"]
+    assert standard["source"]["standard_id"] == evidence["sources"]["standard_id"]
+    rows = evidence["contract"]["datasets"]
+    assert standard["scopes"] == {"quick": ["mmlu"], "full": [r["id"] for r in rows]}
+    assert set(standard["datasets"]) == set(standard["scopes"]["full"])
+    for row in rows:
+        profile = standard["datasets"][row["id"]]
+        for key in ("requests_per_arm", "max_output_tokens", "seed", "temperature"):
+            assert profile[key] == row[key]
+        assert profile.get("judge_max_tokens") == row.get("judge_max_tokens")
+        assert profile["concurrency_budget"] == row["concurrency"]
