@@ -15,12 +15,10 @@
 2. **修改对比（patch.diff 或源码快照）**：清晰展示相对于官方宿主基线所做的改动代码。
 3. **结构化元数据（proposal_meta.json）**：记录宿主文件路径、哈希校验及上游状态。
 
-## 3. 现有提案状态索引
+## 3. 查提案和验证结果
 
-| 提案子目录 | 涉及功能 | 当前状态与归宿 |
-|---|---|---|
-| [GDN-qkv-norm](GDN-qkv-norm/OWNERSHIP.md) | GDN 算子的 Q/K/V 融合归一化（default-off） | 插件注册已撤回；宿主接入已提 PR，未部署到所测基线 |
-| `comm-trace-stop-gil/` | 修复 torch_npu 性能分析工具中 GIL 释放导致的崩溃 | 保留提案和源码快照；本机没有对应 torch_npu 源树，不能验证部署版本是否漂移 |
-| `W1R-gmm-tuning-config/` | GMM 算子参数调优与频次采样 | 方案冻结（因在计算图解码模式下无法通过 Python 层统计真实频次） |
+[实验索引](../INDEX.md)中的 `proposal/` 链接到各提案的原始登记。`host-proposals/` 回答“宿主要怎么改、谁负责、怎么回退”；[ops/](../ops/README.md) 回答“哪个实现在哪个工况经过验证”。提案不是服务验证，不在这里另抄状态表。
+
+例如 GDN QKV 归一化的[宿主接入条件](GDN-qkv-norm/OWNERSHIP.md)和[算子验证记录](../ops/gdn_qkv_norm/evidence.json)分别维护。
 
 已下沉或撤回的历史提案不再保留子目录：D4 连续打包与 GDN in_proj 合并已下沉至宿主 Fork，见 `ops/gdn_conv_pack/` 与 `ops/gdn_merge_inproj/`；通信机制历史证据已按 custody 政策归档，不再作为本地提案目录保留；ConcatD 零拷贝视图为早期探索，已由 D4 连续打包路径替代。

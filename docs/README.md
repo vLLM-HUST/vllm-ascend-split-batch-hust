@@ -51,7 +51,6 @@
 | MOD 当前缺项与证据核查 | [mod-acceptance-audit.md](mod-acceptance-audit.md)、[结构化记录](mod-acceptance/evidence.json) |
 | MOD 验收 Agent 流程 | [mod-acceptance skill](../.openbitfun/skills/mod-acceptance/SKILL.md) |
 | 算子测试标准、形状合同与验收报告 | [operator-benchmark-standard.md](operator-benchmark-standard.md) |
-| 各阶段测试执行手册（进入条件、执行命令、回填顺序、决策树） | [execution-workflow.md](execution-workflow.md) |
 | **热点 profile 采集口径、pipe 判读与结论边界** | [hotspot-profile-method.md](hotspot-profile-method.md) |
 | **验收形态对齐口径、并发三口径与结论适用范围** | [acceptance-shape-alignment.md](acceptance-shape-alignment.md) + [结构化对照](acceptance-shape.json) |
 | **遍测遍验模式（NPU 持卡保活循环的规则与队列 schema）** | [sweep-verify-plan.md](sweep-verify-plan.md)（实时队列在 `.openbitfun/sweep-verify-queue.json`，不进 git） |
@@ -65,6 +64,6 @@
 | 算子交付形态：编译型实现独立交付；**Triton/纯 Python 算子实现由本仓承载** | [architecture.md](architecture.md) §5 + 本仓 `src/vllm_ascend_split_batch/` |
 | 算子调度(选择)接口 | [design/operator-dispatch.md](design/operator-dispatch.md)(骨架,未接线,实现暂存 `experiments/`) |
 | 架构语义、编程规范、发布、踩坑、进度 | 本目录 |
-| 设计稿与历史记录（只读，不是仓库现状） | [design/fia-decode-demask.md](design/fia-decode-demask.md)（未实施设计稿：仓库内无实现、无入口、无开关）、[design/rope-variant-defects.md](design/rope-variant-defects.md)（宿主 fork 三个缺陷的读码结论）、[custody-direction-batch.md](custody-direction-batch.md)（方向分支证据批次的 custody 登记） |
+| 设计稿与历史记录（只读，不是仓库现状） | [design/fia-decode-demask.md](design/fia-decode-demask.md)（未实施设计稿：仓库内无实现、无入口、无开关）、[design/rope-variant-defects.md](design/rope-variant-defects.md)（宿主 fork 三个缺陷的读码结论）、[方向分支证据批次](EVIDENCE.md#direction-branch-batch) |
 
 改行为必须同步改对应权威文档;本目录只放指针,不复制内容。

@@ -10,7 +10,7 @@
 4. 新分支基于当前 `main`。分支名使用 `openbitfun/<short-name>`。
 5. 开工前确认 `git status --short --branch` 为 clean。
 
-查看[实验计划](实验计划.md)的未完成项；找旧资料直接查[实验索引](INDEX.md)，不从工作树名称推断状态。
+查看[实验计划](实验计划.md)的未完成项；找旧资料直接查[实验索引](INDEX.md)，不从工作树名称推断状态。研发结论只写在 `docs/optimization-history/` 对应记录里，未测也写明。索引仅生成链接，不改原件或指纹。增删资料后运行 `python -m tools.operator_tools.experiment_index --write`；如果补丁指纹不符，先核实原件，不用重建索引覆盖差异。
 
 **新会话收到“继续优化”**：从仓根运行只读入口，不用复制本机队列或恢复聊天历史。
 
