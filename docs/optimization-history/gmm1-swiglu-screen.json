@@ -31,7 +31,7 @@
     "why": "服务启动记录 enable_return_routed_experts=False，profile 响应的 routed_experts 全空。profiler record_op_args 和 with_stack 关闭，设备导出只有 group_list 的形状/类型，未发现逐次计数 sidecar。EP 专家放置表不是负载。128 个路由槽不等于 128 个活跃专家，也不能要求每卡本地计数和等于 128。"
   },
   "next_diagnostic": {
-    "status": "design_only_no_reviewed_run_plan",
+    "status": "isolated_count_control_passed_service_start_incomplete",
     "source_files_sha256": {
       "vllm/entrypoints/openai/completion/protocol.py": "269d5da76913280d61a8a38e3e27ae5799254dcf4e4acb3d38b0ec982e4d7cf8",
       "vllm/model_executor/layers/fused_moe/router/base_router.py": "47fa2324bcd9b6ebdc138d69ae6b6ecc0f2463d34bda8c5988bdb0a2a76d3fae",
@@ -39,7 +39,57 @@
     },
     "single_change": "另开诊断窗口，先验证已安装宿主公开的 --enable-return-routed-experts 在相同图路径能返回真实 top-k。不是原三轮重放，插桩窗口不用于性能判定。不要复活图捕获期间的 Python 计数 hook。",
     "admission": "按调度步准确回连实际执行的请求/token 与层，剔除 warmup、图捕获、padding 和最后未前向的 sampled token。按同一窗口的 EP 映射把逻辑 top-k 换成本地物理专家 counts；逐卡同实际 dispatch/group_list_type 和有效路由数校验。无法唯一对账则不得当成实测 group_list。",
-    "gate": "分布被核实后，优先验证 GMM1 本体在真实分布上的可省时间；只有存在同精度 BF16 实现且保留中间舍入与布局时才对拍融合。没有验证到分布、没有候选或预计整段收益不可分辨，不排服务 A/B。"
+    "gate": "分布被核实后，优先验证 GMM1 本体在真实分布上的可省时间；只有存在同精度 BF16 实现且保留中间舍入与布局时才对拍融合。没有验证到分布、没有候选或预计整段收益不可分辨，不排服务 A/B。",
+    "progress": {
+      "archive_uri": "file:///root/vllm-workspace/benchmark-archives/worktree-validation-20261121T142506Z-nPgp",
+      "device_control": "BF16 行宽 2048，16 个合成 token、每个 8 路，连续两个本地专家区间；逐卡单独运行 npu_moe_init_routing_v2，128 项 count 向量与 CPU bincount 完全一致。不是 TP2 服务采样，不是原窗口的实际分布。",
+      "controls": [
+        {
+          "logical_device": 0,
+          "physical_device": 4,
+          "balanced": {
+            "valid_local_routes": 64,
+            "active_local_experts": 64
+          },
+          "skewed": {
+            "valid_local_routes": 120,
+            "active_local_experts": 8
+          }
+        },
+        {
+          "logical_device": 1,
+          "physical_device": 6,
+          "balanced": {
+            "valid_local_routes": 64,
+            "active_local_experts": 64
+          },
+          "skewed": {
+            "valid_local_routes": 8,
+            "active_local_experts": 8
+          }
+        }
+      ],
+      "service": {
+        "last_recorded_stage": "starting_native_service",
+        "request_topk_verified": false,
+        "per_step_rank_group_list_verified": false,
+        "collector_exit": null,
+        "reason": "启动后现场中断，未取得请求响应或退出回执；不能判为推理成功或宿主缺陷。"
+      },
+      "sha256": {
+        "diagnostic-plan.json": "89f9e0b29c666bfd0b6df1d59139aabde9885a07632b7b023ca78d0aa59a7f9b",
+        "config.json": "8d3353eb328e450d67f4b323ad6ba90e47a08b8300f62d0acb3e3dee997d4aa7",
+        "host_preflight.json": "59dd86045f4a8076e827a3d43157206542fb7386bc15644073e31ebe959c2ff3",
+        "device-mapping.txt": "f823b10aa45e6ab885dbf5a63bb0c2dff6e0c7fcf0c4d61abd763f4d3aa76b70",
+        "dispatch.py": "b41c12ce45b23563cbc5c4000bc9ed242fceeef3cfc062530225aa4563cfed2d",
+        "diagnose.py": "369f676762dd92c6e9c12b0b58c6f6c07433c87fc7b32f011fff0e87679a45d2",
+        "dispatch-device0.json": "7db8a8b5e50eca22fb5e330812334c06b9255d586b69672e0cf3afa9f5265cc1",
+        "dispatch-device1.json": "9c093b04e79ac823c31a7654466a55a1086da72e724829dc5648e6104505cb08",
+        "route-status.json": "a7229803c546f1876d6e0e8541f6730394ebb8ed6d6f76cf5e0647f3ea20ad2a",
+        "native/invocation.json": "e3a0aaec04c6887d6bd9faa8bdccea5d8b049f5e69b320721dea6cb589431b2b",
+        "native/server.log": "1b7fb5d9bead75fc5e6d0b1cf44fcc680311b26990342c110813b180659d14a2"
+      }
+    }
   },
   "performance_verdict": "not_measured_no_candidate",
   "observations": {
