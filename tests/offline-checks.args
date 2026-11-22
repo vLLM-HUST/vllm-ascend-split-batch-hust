@@ -13,6 +13,7 @@ tests/test_artifact_contract.py
 tests/test_optimization_handoff.py
 tests/test_recurrent_closeout.py
 tests/test_gmm1_swiglu_screen.py
+tests/test_gmm_route_reconciliation.py
 tests/test_experiment_index.py
 tests/test_hotspot_rounds.py
 tests/test_verifier_layout.py

@@ -1,0 +1,310 @@
+{
+  "status": "designed_synthetic_cpu_pass_and_ambiguity_reject",
+  "candidate": "GroupedMatmul 第一段：路由对账字段表与纯 CPU 合成样例（无卡准备）",
+  "scope": "本记录只交付对账设计：字段表、一个合成通过样例、一个必须拒绝的歧义样例，配套 tools/analysis/gmm_route_reconciliation.py 做纯 CPU 门禁。样例全部为手写合成值，运行环境为纯 CPU；不是任何真实服务窗口的采样，不能外推为服务证据、专家分布或性能结论。对不上时只报告逐请求逻辑 top-k，不启动性能实验。真实窗口的实测来源仍缺，见 missing_real_sources。",
+  "cohort": {
+    "device": "none_pure_cpu_synthetic",
+    "phase": "prefill_plus_decode_synthetic",
+    "service_claim": "none_synthetic_only",
+    "boundary": "样例不测 NPU、不接入运行时；数字只描述样例自身，不构成 GroupedMatmul 或 MoE 路由的工况结论。真实窗口对账通过前，不得把本记录当成已有 group_list。"
+  },
+  "decision": {
+    "conclusion": "合成对账链路已定义并通过 CPU 自检：期望键按每个 in_cohort 步 × 每层 × 每个已登记物理 rank 完整枚举，零路由 rank 必须实报全零 counts、缺整份即拒；counts 逐元素严验非负 int（bool/float 不当作 1）；总和相等但分布不同同样拒绝；真实负载含 padding/warmup/capture 贡献时逐槽位必然失配并被拒绝，没有抹除后重试的选项。歧义样例按登记码 fail closed。真实服务窗口尚未对账。",
+    "service_claim": "none_synthetic_only",
+    "next": "有卡时先跑已评审的请求探针，再按本字段表逐卡对账；逐卡对账全部通过前，不安排 GroupedMatmul 服务对比。"
+  },
+  "host_commits": {
+    "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+    "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+  },
+  "archives": [
+    "file:///root/vllm-workspace/benchmark-archives/worktree-validation-20261121T142506Z-nPgp",
+    "file:///root/vllm-workspace/benchmark-archives/profile-hotspot-longrun-hotspot-20261121T031427Z"
+  ],
+  "anchors": {
+    "producer": "docs/optimization-history/gmm1-swiglu-screen.json:19 —— npu_moe_init_routing 的 type-1 group_list 为逐专家 counts，EP 按 active_expert_range 限本卡专家。",
+    "admission": "docs/optimization-history/gmm1-swiglu-screen.json:41 —— 按调度步回连请求/token 与层，剔除 warmup、图捕获、padding 与末位未前向 token；无法唯一对账不得当成实测。",
+    "missing_counts": "docs/optimization-history/gmm1-swiglu-screen.json:31 —— 原窗口 record_op_args/with_stack 关闭，设备导出只有 group_list 形状与类型。",
+    "probe_state": "docs/optimization-history/gmm1-swiglu-screen.json:72-78 —— 请求级 top-k 与逐卡 group_list 均未取回，服务停在启动阶段。",
+    "device_mapping": "docs/optimization-history/gmm1-swiglu-screen.json:48-49,60-61 —— 逻辑卡 0/1 对物理设备 4/6；对账键用物理 rank，另以 rank_device 登记设备号，两者不得混用。",
+    "real_shape": "ops/moe_gating_routing/evidence.json:19-20 —— 真实工况 num_experts=256、top_k=8；样例用缩小值，不冒充真实工况。",
+    "batch_rule": "docs/acceptance-shape-alignment.md:17 —— 每次调度步的序列数 N 与 token 行数 T 必须取自该次调用，不能从并发预算推断。",
+    "type1_semantics": "worktree-validation-20261121T142506Z-nPgp/dispatch.py:14-16 —— type-1 counts 与 CPU torch.bincount 按 active_expert_range 切片逐值一致（该档案 SHA256 已登记在 gmm1-swiglu-screen.json:84-87）。",
+    "response_shape": "worktree-validation-20261121T142506Z-nPgp/diagnose.py:30-35 —— 响应数组形状 (prompt+completion-1, 层数, top_k)；末位 sampled token 不前向故少一行；同 token 同层重复专家视为缓冲未填满并拒绝。",
+    "join_gap": "worktree-validation-20261121T142506Z-nPgp/diagnose.py:49 —— 无事件级 join 时逐卡 group_list 仍未知，这正是本字段表要补的缺口。"
+  },
+  "fields": [
+    {
+      "name": "window.window_id",
+      "type": "string",
+      "source": "诊断窗口标识（采集配置与回执）",
+      "rule": "必须为非空字符串（null 或空串不得关联任何数据块）；所有数据块（requests、ep_map、steps、group_lists）必须携带且相等；不等即 window_mismatch。"
+    },
+    {
+      "name": "window.host_commits",
+      "type": "object{vllm, vllm-ascend}",
+      "source": "服务采集配置的两份宿主提交；由 tools/operator_tools/host_runtime.py 核验",
+      "rule": "必须两键齐全且为 40 位 hex 提交；ep_map 块独立携带且必须与窗口相等；缺失、非 hex 或不一致即 host_mismatch。"
+    },
+    {
+      "name": "window.moe_layers / num_experts / top_k / ep_size",
+      "type": "int",
+      "source": "模型形状事实；真实值 40 / 256 / 8 / 2",
+      "rule": "全部必填、严格 int 且 ≥1；ep_size 必须等于登记的物理 rank 数；缺失、类型不符或不一致即 bad_window。"
+    },
+    {
+      "name": "window.in_cohort_phases",
+      "type": "string[]",
+      "source": "调度器对每个调度步记录的相位字段，逐步取值；不得由 FULL_DECODE_ONLY 之类配置标签推断",
+      "rule": "非空且不得包含 warmup 与 capture；列入即 phase_forbidden。"
+    },
+    {
+      "name": "window.rank_device",
+      "type": "object{physical_rank: device_id}",
+      "source": "起服日志的物理设备号",
+      "rule": "physical_rank 是 EP rank 序号，device_id 是 Ascend 物理设备号，两者不得混用；本表必须覆盖每个已登记 rank 且键精确为 str(rank)，值为非负 int 且互不重复（一 rank 一物理设备；真实窗口逻辑 0/1 对物理 4/6）；不符即 bad_window。"
+    },
+    {
+      "name": "requests[].request_id / prompt_tokens / completion_tokens",
+      "type": "string / int",
+      "source": "服务请求标识与 completion 响应 usage 字段",
+      "rule": "窗口内唯一；前向位置为 0..prompt+completion-2，末位 sampled token 位置 prompt+completion-1 不前向；非法即 bad_request。"
+    },
+    {
+      "name": "requests[].routed_experts",
+      "type": "int[positions][moe_layers][top_k]",
+      "source": "--enable-return-routed-experts 响应 choices[0].routed_experts（逐请求逻辑 top-k）",
+      "rule": "第 1 维必须等于 prompt+completion-1；专家值为 [0,num_experts) 内严格 int；同 token 同层不得重复；形状、值域或重复专家即 bad_request。"
+    },
+    {
+      "name": "steps[].step_id / phase",
+      "type": "int / string",
+      "source": "调度步标识与调度器逐步相位",
+      "rule": "step_id 唯一（重复即 bad_window）；相位不在 in_cohort_phases 的步整体排除，其行不得引用请求（row_outside_cohort），其 group_list 记录只计入排除清单。"
+    },
+    {
+      "name": "steps[].rows[]",
+      "type": "kind=forwarded|padded，forwarded 行带 request_id 与 token_position",
+      "source": "该次调用的批次组成；N/T 取自该次调用",
+      "rule": "padded 行不得携带请求绑定（bad_row）；forwarded 行位置必须在 0..prompt+completion-2（row_out_of_range，含末位未前向 token）；(request_id, token_position) 同步内不得重复、跨步不得重复归属（duplicate_token）；每请求全部前向位置必须恰好覆盖一次（tokens_not_covered）。"
+    },
+    {
+      "name": "ep_map.ranks[].physical_rank / local_experts / log2phy",
+      "type": "int / object{logical_id: local_slot}",
+      "source": "同窗口 EP 映射；宿主 log2phy / ascend_expert_map",
+      "rule": "只认显式表，physical_rank 必须为非负严格 int；禁止按连续区间推断；log2phy 必须恰好覆盖全体逻辑专家各一次，缺项或多映射即 expert_unmapped，槽位越界/重复或逻辑专家双归属即 bad_ep_map；本例按逐层不变的静态映射处理，不支持动态 EPLB 重映射与冗余/重复专家，遇到即拒绝。"
+    },
+    {
+      "name": "group_lists[].(step_id, layer, physical_rank, group_list_type)",
+      "type": "调用键",
+      "source": "本卡 dispatch 的真实编码：type 1 为逐专家 counts",
+      "rule": "step_id/编码/层号/rank 均须严格 int，bool/float 不得与整数键混同；仅支持 type 1，其他编码不做换算（bad_group_list）；layer 在 [0,moe_layers)、rank 已登记；每键至多一条记录（duplicate_call_record）；引用不存在的步即 orphan_group_list。"
+    },
+    {
+      "name": "group_lists[].counts",
+      "type": "int[local_experts]",
+      "source": "本卡逐专家计数（语义 = 对 active_expert_range 切片的逐专家 bincount）",
+      "rule": "逐元素必须为非负严格 int，bool/float 不得当作 1（bad_counts_value）；与期望逐槽位比较，总和相等分布不同同样拒绝（count_mismatch）；期望键含零路由 rank，缺整份记录即 missing_group_list。"
+    }
+  ],
+  "exclusion_rules": {
+    "warmup_capture": "步级排除（相位不在 in_cohort_phases）；其行不得引用请求，其 group_list 记录计入排除清单、不参与比较。warmup 与图捕获前向强制均衡路由，static kernel 编译+捕获双前向使层号需取模，不得并入目标相位。",
+    "padding": "padded 行不参与期望计数。真实窗口的 dispatch 若把 padding 行也送进路由，其贡献留在实测 counts 里原样参与逐槽位比较，必然 count_mismatch 并被拒绝。本设计没有任何扣除 padding 后重试的选项：不能替真实负载抹掉 padding 再假称 GroupedMatmul 对账成功；此时只能报告逐请求逻辑 top-k。",
+    "trailing_sampled_token": "每请求最后一个 sampled token（位置 prompt+completion-1）不前向：不在响应数组内，也不得出现在任何前向行；出现即 row_out_of_range。",
+    "coverage": "每请求 0..prompt+completion-2 必须恰好被 in_cohort 步各前向一次；缺失即 tokens_not_covered，重复归属即 duplicate_token，不做补齐。"
+  },
+  "reject_codes": {
+    "window_mismatch": "数据块 window_id 与窗口不一致。",
+    "host_mismatch": "宿主提交缺失、不完整、非 40 位 hex 或与 EP 映射块不一致。",
+    "bad_window": "窗口字段非法：window_id 为空或非字符串、形状值缺失或类型不符、ep_size 与 rank 数不符、rank_device 缺失/键不精确/设备号重复或为负、step_id 重复。",
+    "phase_forbidden": "in_cohort_phases 把 warmup 或 capture 列入目标。",
+    "empty_window": "请求、步、in_cohort 步或有效前向 token 为空。",
+    "bad_request": "请求字段非法：token 数、routed_experts 形状/值域/层内重复专家、request_id 重复。",
+    "bad_ep_map": "EP 映射字段非法：rank 重复或为负、槽位越界或重复、逻辑专家双归属。",
+    "expert_unmapped": "逻辑专家未恰好覆盖一次（缺失或多映射）。",
+    "bad_row": "行类型未知、padded 行带请求绑定、forwarded 行缺绑定。",
+    "unknown_request": "行引用的请求不存在。",
+    "row_out_of_range": "行位置越过最后前向位置（含末位 sampled token）。",
+    "duplicate_token": "同一 (request_id, token_position) 同步内重复或跨步重复归属。",
+    "row_outside_cohort": "排除相位的行引用了请求。",
+    "tokens_not_covered": "请求的前向位置未被恰好覆盖一次。",
+    "orphan_group_list": "group_list 记录引用不存在的调度步。",
+    "duplicate_call_record": "同一 (step, layer, rank) 出现两条 group_list。",
+    "bad_group_list": "group_list 结构非法：step_id/编码/层号/rank 非严格 int、编码非 type 1、层号越界、rank 未登记、counts 长度不符。",
+    "bad_counts_value": "counts 含 bool/float/负数/非整数。",
+    "count_mismatch": "逐槽位计数不相等；总和相等分布不同同样拒绝。"
+  },
+  "samples": {
+    "pass": {
+      "note": "合成窗口：单请求 R0，一次 prefill（2 个 prompt token）后普通 decode 每步至多一个生成行；2 层、6 个逻辑专家、top_k=2、EP2。EP 映射为乱序非连续表（rank0 管 0/3/5，rank1 管 1/2/4），证明不依赖连续区间。步 0/1 为 warmup/capture 排除；步 2 含 1 个 padded 行；位置 4 为末位 sampled token 不前向。步 3 只打 rank1、步 4 只打 rank0，四个键的 counts 为全零仍须实报——零路由 rank 不得漏报。counts 为手写合成值，语义同 type-1 逐专家计数。",
+      "window": {
+        "window_id": "wr-sample-000",
+        "host_commits": {
+          "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+          "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+        },
+        "moe_layers": 2,
+        "num_experts": 6,
+        "top_k": 2,
+        "ep_size": 2,
+        "in_cohort_phases": ["prefill", "decode"],
+        "rank_device": {"0": 4, "1": 6}
+      },
+      "requests": [
+        {
+          "window_id": "wr-sample-000",
+          "request_id": "R0",
+          "prompt_tokens": 2,
+          "completion_tokens": 3,
+          "routed_experts": [
+            [[0, 5], [3, 0]],
+            [[2, 4], [1, 4]],
+            [[1, 2], [4, 1]],
+            [[0, 3], [5, 0]]
+          ]
+        }
+      ],
+      "ep_map": {
+        "window_id": "wr-sample-000",
+        "host_commits": {
+          "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+          "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+        },
+        "ranks": [
+          {
+            "physical_rank": 0,
+            "local_experts": 3,
+            "log2phy": {"0": 0, "3": 1, "5": 2}
+          },
+          {
+            "physical_rank": 1,
+            "local_experts": 3,
+            "log2phy": {"1": 0, "2": 1, "4": 2}
+          }
+        ]
+      },
+      "steps": [
+        {"window_id": "wr-sample-000", "step_id": 0, "phase": "warmup", "rows": []},
+        {"window_id": "wr-sample-000", "step_id": 1, "phase": "capture", "rows": []},
+        {
+          "window_id": "wr-sample-000",
+          "step_id": 2,
+          "phase": "prefill",
+          "rows": [
+            {"request_id": "R0", "token_position": 0, "kind": "forwarded"},
+            {"request_id": "R0", "token_position": 1, "kind": "forwarded"},
+            {"kind": "padded"}
+          ]
+        },
+        {
+          "window_id": "wr-sample-000",
+          "step_id": 3,
+          "phase": "decode",
+          "rows": [
+            {"request_id": "R0", "token_position": 2, "kind": "forwarded"}
+          ]
+        },
+        {
+          "window_id": "wr-sample-000",
+          "step_id": 4,
+          "phase": "decode",
+          "rows": [
+            {"request_id": "R0", "token_position": 3, "kind": "forwarded"}
+          ]
+        }
+      ],
+      "group_lists": [
+        {"window_id": "wr-sample-000", "step_id": 2, "layer": 0, "physical_rank": 0, "group_list_type": 1, "counts": [1, 0, 1]},
+        {"window_id": "wr-sample-000", "step_id": 2, "layer": 0, "physical_rank": 1, "group_list_type": 1, "counts": [0, 1, 1]},
+        {"window_id": "wr-sample-000", "step_id": 2, "layer": 1, "physical_rank": 0, "group_list_type": 1, "counts": [1, 1, 0]},
+        {"window_id": "wr-sample-000", "step_id": 2, "layer": 1, "physical_rank": 1, "group_list_type": 1, "counts": [1, 0, 1]},
+        {"window_id": "wr-sample-000", "step_id": 3, "layer": 0, "physical_rank": 0, "group_list_type": 1, "counts": [0, 0, 0]},
+        {"window_id": "wr-sample-000", "step_id": 3, "layer": 0, "physical_rank": 1, "group_list_type": 1, "counts": [1, 1, 0]},
+        {"window_id": "wr-sample-000", "step_id": 3, "layer": 1, "physical_rank": 0, "group_list_type": 1, "counts": [0, 0, 0]},
+        {"window_id": "wr-sample-000", "step_id": 3, "layer": 1, "physical_rank": 1, "group_list_type": 1, "counts": [1, 0, 1]},
+        {"window_id": "wr-sample-000", "step_id": 4, "layer": 0, "physical_rank": 0, "group_list_type": 1, "counts": [1, 1, 0]},
+        {"window_id": "wr-sample-000", "step_id": 4, "layer": 0, "physical_rank": 1, "group_list_type": 1, "counts": [0, 0, 0]},
+        {"window_id": "wr-sample-000", "step_id": 4, "layer": 1, "physical_rank": 0, "group_list_type": 1, "counts": [1, 0, 1]},
+        {"window_id": "wr-sample-000", "step_id": 4, "layer": 1, "physical_rank": 1, "group_list_type": 1, "counts": [0, 0, 0]}
+      ]
+    },
+    "must_reject": {
+      "expected_reject_code": "duplicate_token",
+      "note": "歧义样例：同一 (请求, token) 在同一步出现两行。实测 counts 故意写成双计后的自洽值——只看计数是否自洽的工具会错误放行；本设计把键唯一性当前置门禁，先拒绝。",
+      "sample": {
+        "window": {
+          "window_id": "wr-sample-001-ambiguous",
+          "host_commits": {
+            "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+            "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+          },
+          "moe_layers": 1,
+          "num_experts": 2,
+          "top_k": 1,
+          "ep_size": 1,
+          "in_cohort_phases": ["prefill"],
+          "rank_device": {"0": 4}
+        },
+        "requests": [
+          {
+            "window_id": "wr-sample-001-ambiguous",
+            "request_id": "R0",
+            "prompt_tokens": 2,
+            "completion_tokens": 1,
+            "routed_experts": [
+              [[0]],
+              [[1]]
+            ]
+          }
+        ],
+        "ep_map": {
+          "window_id": "wr-sample-001-ambiguous",
+          "host_commits": {
+            "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+            "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+          },
+          "ranks": [
+            {
+              "physical_rank": 0,
+              "local_experts": 2,
+              "log2phy": {"0": 0, "1": 1}
+            }
+          ]
+        },
+        "steps": [
+          {
+            "window_id": "wr-sample-001-ambiguous",
+            "step_id": 2,
+            "phase": "prefill",
+            "rows": [
+              {"request_id": "R0", "token_position": 0, "kind": "forwarded"},
+              {"request_id": "R0", "token_position": 0, "kind": "forwarded"}
+            ]
+          }
+        ],
+        "group_lists": [
+          {
+            "window_id": "wr-sample-001-ambiguous",
+            "step_id": 2,
+            "layer": 0,
+            "physical_rank": 0,
+            "group_list_type": 1,
+            "counts": [2, 0]
+          }
+        ]
+      }
+    }
+  },
+  "self_check_expected": "pass 样例逐调用逐专家期望=实测（含 4 个全零键，valid_tokens=4、padded_rows=1、排除步 [0,1]、trailing R0=4）；must_reject 样例以 duplicate_token 拒绝，且拒绝发生在键唯一性检查，计数自洽救不了。",
+  "reproduce": "env -u PYTHONPATH python -B -m tools.analysis.gmm_route_reconciliation docs/optimization-history/gmm-route-reconciliation.json",
+  "tests": "env -u PYTHONPATH pytest -q tests/test_gmm_route_reconciliation.py",
+  "missing_real_sources": [
+    "逐请求 routed_experts 实测返回：--enable-return-routed-experts 的服务探针停在启动阶段，从未取回响应数组（gmm1-swiglu-screen.json:72-78）。",
+    "逐步批次组成：每次调度步的序列数 N、token 行数 T、行归属与 padded 行数；现有 step_trace_time.csv 只有 Stage 汇总（docs/acceptance-shape-alignment.md:17 的口径）。",
+    "同窗口 EP 映射实际值：宿主 log2phy / ascend_expert_map 在服务窗口的取值没有归档；本例按逐层不变静态映射设计，动态 EPLB 重映射与冗余专家不支持。",
+    "逐卡真实 group_list：type-1 逐专家 counts；原窗口 record_op_args/with_stack 关闭，设备导出只有形状与类型（gmm1-swiglu-screen.json:31）。",
+    "调度器逐步相位字段：相位须逐步记录并由 in_cohort_phases 登记，不得由 FULL_DECODE_ONLY 配置标签推断；尚无采集字段。",
+    "rank_device 对照：起服日志里物理 rank 与 Ascend 设备号的对照表；尚无采集字段。"
+  ],
+  "limits": "本记录是设计件：字段表与两个合成样例。它不执行对账之外的任何采集，不占用设备，不改变运行时行为；不构成 MOD 或算子交付证据，不得据此写服务收益标签。真实窗口对账须待 missing_real_sources 列出的来源齐备后按 实验计划.md:15-16 的有卡流程执行。"
+}

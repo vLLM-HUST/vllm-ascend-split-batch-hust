@@ -1,0 +1,102 @@
+{
+  "candidate": "旧 trace 备份核查：找回 gdn-native-shapes 双卡长度探针缺失的两份 trace_view.json 原件",
+  "status": "checked_scope_no_backup_match",
+  "scope": "只读备份核查：无卡、不改源归档、不读凭据。目标为 gdn-recurrent-vrows 记录的双卡长度探针归档；核查范围限本机可读的 benchmark-archives、/root 与 /root/vllm-workspace 相邻备份目录、本仓 .openbitfun 与已挂载共享/备份目录；其中 5 份网络候选按精确文件名与目录定位后流式核对，未扩大搜索范围。未核查位置不外推为不可恢复。",
+  "host_commits": {
+    "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+    "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+  },
+  "decision": "本机可读与网络挂载区共发现同名 trace_view.json 29 份（本机 24 份 + NFS 共享区 5 份），已全部按两枚登记 SHA256 流式哈希，0 命中。归档登记成员核对 4/4 命中，缺口仅两份 trace_view.json。双 rank 原件未同时命中并完整通过回执链前维持拒绝重放；kernel_details.csv 与新采样窗口不作替代。本结论仅覆盖 checks 所列位置。",
+  "archive_uri": "file:///root/vllm-workspace/benchmark-archives/gdn-native-shapes-20261121T120955Z",
+  "checked_at": "2026-11-22T06:19:58Z",
+  "repo_head": "6b2c958cec9dea42ac6d4ba88e0a04c506a3cba9",
+  "registered": {
+    "source": "目标两枚指纹出自归档 result.json 的 source_sha256；result.json 与 final-receipt.json 的指纹另由 docs/optimization-history/gdn-chunk-prep.json、gdn-recurrent-vrows.json 登记",
+    "missing_originals": {
+      "native_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_1666957_20261121121632952_ascend_pt/ASCEND_PROFILER_OUTPUT/trace_view.json": "ebb432ec0c035c7a52fa13daf86ccff67c51bbfca22f4ee257a64a3600f2a4f3",
+      "native_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_1666958_20261121121632952_ascend_pt/ASCEND_PROFILER_OUTPUT/trace_view.json": "d04e48f3aace39fbb8e0ac05a996c8f7019f406b1af5584090b4400205cbaa1f"
+    },
+    "verified_present": {
+      "final-receipt.json": "9d515bf76d12e9fe797d133a00e9e73b9d2a93e603097af4cbca882738e87219",
+      "result.json": "ddac1176b1d657e1ef22e3f4ea70d46173ac2bcac2b193eaca8031edc58fb0a2",
+      "native_off/profile/dp0_pp0_tp0_dcp0_ep0_rank0_1666957_20261121121632952_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "a209c4274fcdd0ba137c44fca7da4086022e51ddca425f6b14e144efed018e74",
+      "native_off/profile/dp0_pp0_tp1_dcp0_ep1_rank1_1666958_20261121121632952_ascend_pt/ASCEND_PROFILER_OUTPUT/kernel_details.csv": "064f61cb2b018ec15af94689f3e65f6d9d659f6b21ed87e7365560717f7338d4"
+    }
+  },
+  "hash_results": {
+    "targets": [
+      "ebb432ec0c035c7a52fa13daf86ccff67c51bbfca22f4ee257a64a3600f2a4f3",
+      "d04e48f3aace39fbb8e0ac05a996c8f7019f406b1af5584090b4400205cbaa1f"
+    ],
+    "hashed_readable_same_name": 29,
+    "matches": 0,
+    "where": "6 份在 benchmark-archives/profile-hotspot-longrun-hotspot-20261121T031427Z（round_00/01/02 双 rank）；18 份在 /root/prof 旧采集目录（l4_attrib_d4d1、qwen_split_qkv_eval、gate_fp32_outer）；5 份在 NFS 共享挂载区 /data/shared_upload/hust-phr/workload-observation-cpu-export-20261103-001/002/003/004/006",
+    "network_budget": "NFS 5 份逐份 timeout 180s 顺序流式哈希，合计实跑约 6s；均为常规文件、namei 全路径无软链；未发生挂载拒绝、I/O 错误或超时"
+  },
+  "checks": [
+    {
+      "where": "目标归档登记成员",
+      "method": "sha256sum",
+      "result": "final-receipt.json、result.json、双卡 kernel_details.csv 共 4 枚指纹全部命中登记；仅两份 trace_view.json 在归档内缺失，缺失本身不推断删除者与原因。"
+    },
+    {
+      "where": "benchmark-archives（38 个归档目录）",
+      "method": "find -name 'trace_view*'；压缩后缀名过滤；find -size +400M",
+      "result": "同名仅 6 份（热点长测窗口），已逐份哈希 0 命中；无压缩档、无 >400M 文件。"
+    },
+    {
+      "where": "/root 全树（-xdev 名过滤定位，命中后逐份哈希）",
+      "method": "timeout 240 find /root -xdev -name 'trace_view*' -print0 | xargs -0 sha256sum",
+      "result": "同名共 24 份，全部已哈希，0 命中；除上述 6 份外均位于 /root/prof 旧采集目录。"
+    },
+    {
+      "where": "本仓 .openbitfun、host-worktrees 与仓内工作树",
+      "method": "名过滤 find",
+      "result": "同名 0。"
+    },
+    {
+      "where": "/root/vllm-workspace/local-cleanup-archives 与 /root/backups",
+      "method": "tar -tf / tar -tzf 成员名过滤（不解包）",
+      "result": "5 份恢复小档成员名均无 trace_view、无 ascend_pt。"
+    },
+    {
+      "where": "tools/bench-ladder.sh:96 登记的抢救根 /root/包体恢复/records/ladder",
+      "method": "ls 与名过滤 find",
+      "result": "records/ 与 logs/ 为空，无抢救副本。"
+    },
+    {
+      "where": "/data/backups 与 /data/home",
+      "method": "名过滤 find",
+      "result": "同名 0。"
+    },
+    {
+      "where": "NFS 共享挂载区 5 份候选（按名精确定位，非盲扫）",
+      "method": "stat -c '%F' 与 namei 确认常规文件且全路径无软链；timeout 180 sha256sum 逐份顺序流式（不复制、不改权限）",
+      "result": "5 份全部核完，0 命中：001/003/004 同指纹 514564b9394efab33256060a1ae2774d299a448f16eab06b0b1210ae45e47067，002=6f1fdb34417e0de6d39cd6ed21317ff1a8b8100cd5486a232785ebc2f54792f5，006=d3acddfc29586f39f6391654f79a2c5d2bf4bc27b6778cb48b06401596f0ddf1。"
+    }
+  ],
+  "not_checked": [
+    "/data 本地卷的 docker、containerd、datasets、longhorn、actions-runners、cache、experiments 深层目录未遍历（与目标无登记关联，不做全盘盲扫）。",
+    "NFS 共享区深于 5 层未扫。",
+    "改名后不含 trace_view 字样的副本未做全盘逐文件哈希；登记 SHA256 是唯一验收判据。",
+    "他机与离线介质上的副本不可达、未核验。",
+    "凭据类目录未读取。"
+  ],
+  "replay_gate": {
+    "next_exit": 2,
+    "rule": "双 rank 原件均命中登记 SHA256 且 tools/operator_tools/next.py 回执链全绿才可恢复重放；kernel_details.csv 与新采样窗口不作替代。门禁原文见 docs/optimization-next.json 与 实验计划.md。"
+  },
+  "raw_data_note": "归档内两卡的 PROF_* 原始目录与 ascend_pytorch_profiler_0/1.db 仍在；未执行重新导出，其产物不作为本核查的证据。",
+  "next_steps": [
+    "出现该归档的异地或挂载副本时：python3 -B -m tools.operator_tools.next --archive <副本目录>，双 rank 命中登记指纹即恢复重放资格。",
+    "确认无副本前不判全局不可恢复；需要同类数据时另立新归档、新回执与新指纹登记，不用新采样填本窗口。"
+  ],
+  "reproduce": [
+    "sha256sum /root/vllm-workspace/benchmark-archives/gdn-native-shapes-20261121T120955Z/final-receipt.json /root/vllm-workspace/benchmark-archives/gdn-native-shapes-20261121T120955Z/result.json",
+    "sha256sum /root/vllm-workspace/benchmark-archives/gdn-native-shapes-20261121T120955Z/native_off/profile/*/ASCEND_PROFILER_OUTPUT/kernel_details.csv",
+    "timeout 240 find /root -xdev -name 'trace_view*' -print0 | xargs -0 sha256sum",
+    "timeout 120 find /data/shared_upload -maxdepth 5 -name 'trace_view*'",
+    "for d in 001 002 003 004 006; do timeout 180 sha256sum /data/shared_upload/hust-phr/workload-observation-cpu-export-20261103-$d/rank0_2781579_20261103120841358_ascend_pt/ASCEND_PROFILER_OUTPUT/trace_view.json; done",
+    "cd /root/vllm-workspace/vllm-ascend-split-batch-hust && python3 -B -m tools.operator_tools.next"
+  ]
+}

@@ -2,17 +2,18 @@
   "candidate": "GroupedMatmul 第一段：补齐同工况、可按层/步/卡核验的专家分布",
   "scope": "新的选题只做静态筛选；整网热点来自本机 random 图模式长测，各轮和各 rank 分开读取。下方的长度探针回执用于核对上一项 Recurrent 的边界，不是 GroupedMatmul 的执行资格。",
   "reason": "三轮各卡已核出相同的 BF16 GMM1→SwiGLU 链；单独消掉激活的直接设备时间占该卡 Stage 不足 0.27%。第一段矩阵乘占比更高，但原窗口未采 group_list 值，不能按均匀专家负载排优化。",
-  "next_step": "两卡的合成路由计数已与 CPU 对齐，不必重跑。服务停在启动阶段，没有请求或退出回执。下次有卡，新建归档、重新核验双宿主和设备映射，只续做原生 --enable-return-routed-experts 请求探针；先核对逐请求 top-k，再对账调度步、有效 token、层和 EP 专家映射。没有实际调用的逐卡专家计数，不安排服务对比。",
+  "next_step": "无卡先编制原生 --enable-return-routed-experts 请求探针的独立命令与执行计划，评审通过前不申请占卡、不做新采集；旧仓外脚本硬编码历史输入路径、卡号/端口并重跑已过合成对照，不直接复用，旧档只读。",
   "checks": [
-    "逐轮、逐卡保留形状、专家分布与调用来源；不得把另一个负载的专家数配给本窗口。",
-    "没有同工况 shape、分布和可区分的候选时不占卡、不写收益标签。",
-    "本轮逐轮逐卡记录与复核入口：docs/optimization-history/gmm1-swiglu-screen.json。",
-    "停卡后只读复核：上项长度探针的两个 rank 均缺 trace_view.json。next 应拒绝重放；仅在找回匹配已登记 SHA256 的原件后恢复，不用现有 CSV 替代。"
+    "逐轮逐卡形状、专家分布与调用来源的复核入口：docs/optimization-history/gmm1-swiglu-screen.json；不得把另一个负载的专家数配给本窗口。",
+    "没有同工况 shape、分布和可区分的候选时不占卡做性能对比、不写收益标签；诊断探针不要求已有优化候选，但仍须通过计划评审、宿主和设备预检。",
+    "旧长度探针窗口维持拒绝重放：两枚登记指纹在已核备份范围内未检得（docs/optimization-history/gdn-trace-recovery.json），原件按登记指纹命中前不用现有 CSV 或新采样替代；该缺口不阻塞新探针另立新档。",
+    "路由对账目前只有纯 CPU 合成样例（docs/optimization-history/gmm-route-reconciliation.json），真实窗口未对账，不得当成已有 group_list。"
   ],
   "skip": {
     "Chunk": "本窗口两卡都没有命中已有形状桶；所测短提示 eager 准备段未改善，不用隔离图回放替代。保持默认关闭。",
     "gdn_split_ba": "PR #81 已回填，三个负载均为 within_noise，保持默认关闭；不自动复测。",
-    "Recurrent V 行拆分整段复测": "已结案，不重跑；完整结论、原件指纹和重开条件见研发结案记录。"
+    "Recurrent V 行拆分整段复测": "已结案，不重跑；完整结论、原件指纹和重开条件见研发结案记录。",
+    "调度 padding 策略改造": "既有三轮×双卡长测窗口没有显式调度步键，不可按相位分桶；不据此改调度策略、不排服务对比，重开条件与最小采样键见 docs/optimization-history/scheduler-padding-screen.json。"
   },
   "hotspot_archive": "/root/vllm-workspace/benchmark-archives/profile-hotspot-longrun-hotspot-20261121T031427Z",
   "reviewed_plan": null,

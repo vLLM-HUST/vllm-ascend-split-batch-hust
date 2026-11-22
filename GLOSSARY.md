@@ -109,6 +109,7 @@
 | 短路评估 | 数值检查失败后不接受该候选的性能结论。 | `.openbitfun/skills/operator-sol-optimizer/SKILL.md` | — |
 | 泳道图 | 由 timeline 折叠出的高层级子图片段可视化，供人工审阅。 | `tools/operator_tools/timeline_insight.py` | 不能自动推定计算语义 |
 | SNR 预筛 | 用算子份额估算是否值得投入服务实验，不构成服务收益判定；已知墙钟构成时按设备时间占比缩放。 | `tools/operator_tools/serving_loop.py` 的 `evaluate_e2e_snr_gate`（参数 `device_share`） | 全核份额不等于墙钟关键路径 |
+| 路由对账 | 在同一诊断窗口内，把请求与有效 token、调度步、层的逻辑 top-k 与经 EP 映射换算的逐卡逐槽位真实分发唯一对上，区分逻辑 top-k 与本卡真实分发；对不上只报逐请求逻辑 top-k，不启动性能实验。 | `docs/optimization-history/gmm-route-reconciliation.json` | 合成计数样例不是真实对账；不同诊断窗口不得混算 |
 | 负载（workload） | 主测、动态压力和跨相位诊断输入，按算子生效条件配对。 | `tools/operator_tools/workloads.py`；`workloads/README.md` | MOD 冻结任务 |
 | `primary_workload` / `stress_workload` | 主测对比负载与动态形状压力负载，缺一即证据不完整。 | `workloads/README.md` | — |
 | 载体状态快照（`carriers.env`） | 一次起服窗口里被核验的开关与入口点状态集合，唯一来源是与 serve 日志同名的环境记录。 | `tools/bench-ladder.sh` | 插件载体 |

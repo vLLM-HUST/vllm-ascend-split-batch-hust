@@ -1,0 +1,77 @@
+{
+  "candidate": "调度 padding 是否值得改：无卡筛查既有长测窗口能否按相位×有效行数×实际图档位分桶",
+  "status": "screened_not_bucketable_missing_explicit_step_keys",
+  "decision": "不可分桶，不据此估算 padding 收益，不改调度策略，不排服务对比。目标与备选归档均无显式调度步键：可信可配对步为零是缺输入，不是测得零；总步数与未配对步数未知。FULL_DECODE_ONLY 只描述图回放策略，窗口内混合步是否存在不可判定。先按采样键补最小同窗采集并验证显式键传播，再重判分桶。",
+  "scope": "无卡只读筛查：不起服、不占卡、不改归档、不新增测量。目标窗口为本机双卡 TP2、启用 EP（EP 是启用标志，不据此推断 EP size 或 world size）、random 负载、16 并发、graph FULL_DECODE_ONLY、chunked prefill 开、关闭组三轮。结论只对该归档成立，不外推其他负载、图模式或宿主版本，不构成任何性能或收益结论。",
+  "host_commits": {
+    "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+    "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+  },
+  "archive_uri": "file:///root/vllm-workspace/benchmark-archives/profile-hotspot-longrun-hotspot-20261121T031427Z",
+  "question": "实验计划.md「调度备选：估算 padding 是否值得改」：用已有逐步记录按相位、有效行数、图档位分桶，分开混合步与普通解码，交付逐卡覆盖表与未能配对的步；只有周期汇总时先设计采样键。",
+  "step_key_search": {
+    "step_trace_time_csv": "六份（三轮×双 rank）均只有表头加一行数据，Step 列值为空；该行是窗口汇总，不是逐步记录。",
+    "kernel_details_and_task_time": "逐次调用表与逐任务表均无 step 列；按时间戳或形状切步属推测，不作配对依据。",
+    "trace_and_profiler": "trace_view.json 无 ProfilerStep 事件；profiler_info_0.json 的 schedule 为空对象，未启用 step 标记。",
+    "framework_marks": "FRAMEWORK/torch.op_mark 与 torch.op_range 为二进制，可读标记只有 aten/acl/通信原语与一条 vllm::moe_forward_shared，无调度步注记。",
+    "server_log": "无逐调度步输出；enable_logging_iteration_details、cudagraph_metrics、kv_cache_metrics 均为 False；图捕获只有启动期进度条，无逐步实际回放档位；无 Added request 行。",
+    "request_level_files": "responses.json 与 profile_responses.json 只有请求级 token 用量，没有到调度步的映射。"
+  },
+  "coverage_by_round_rank": {
+    "rounds": ["round_00_off", "round_01_off", "round_02_off"],
+    "ranks": ["rank0", "rank1"],
+    "every_cell": {
+      "pairable_steps": 0,
+      "pairable_steps_basis": "missing_input_not_measured_zero",
+      "total_steps": null,
+      "unpaired_steps": null
+    }
+  },
+  "unpaired_reasons": [
+    "设备侧无步身份：CSV 与 trace 均无显式 step 键。",
+    "宿主侧无逐步输出：逐迭代日志与图档指标开关均关闭，仅有周期统计。",
+    "档位与有效行无字段：capture 配置档位不等于逐步实际档位；Input Shapes 只有 padded 形状；请求级 usage 无逐步组成。",
+    "相位无证据：图策略描述不能判定预填充、混合或空闲步。"
+  ],
+  "not_bucketable": {
+    "phase": "不可判定：辨别混合步需要每步 prefill 与 decode token 量，本归档没有。",
+    "valid_rows": "不可判定：无有效行字段，padded 形状与请求级 token 用量都不能还原每步有效行。",
+    "actual_graph_tier": "不可判定：只有启动期配置档位，无逐步实际回放档位或无图标记。",
+    "verdict": "不可按相位×有效行数×实际图档位分桶，不报步级数，也不据此推断窗口有无混合步。"
+  },
+  "periodic_summaries_only": "归档能给的只有周期汇总：step_trace_time.csv 单行窗口汇总、每轮两行十秒周期引擎统计、op_statistic.csv 按算子聚合。已登记的逐轮逐卡聚合见 gmm1-swiglu-screen.json；另一长度探针窗口的行数计数见 gdn-recurrent-vrows.json（窗口不同，只作方向参考，按 docs/optimization-next.json 拒绝重放）。",
+  "archives_checked": {
+    "profile-hotspot-longrun-shape-graph-verified-20261117T115535Z": "双 rank 单行空 Step；iteration 开关同样关闭。",
+    "profile-hotspot-longrun-scan-longout-20261117T121128Z": "双 rank 单行空 Step。",
+    "profile-hotspot-longrun-pc2-off-20261117T131521Z": "双 rank 单行空 Step。",
+    "gdn-native-shapes-20261121T120955Z": "双 rank 单行空 Step；无 trace_view.json，按 docs/optimization-next.json 拒绝重放。",
+    "pending-longrun-20261121T033735Z": "无 server.log，服务未起。",
+    "worktree-validation-20261121T142506Z-nPgp": "native/server.log 无调度、步或图捕获行。"
+  },
+  "next_window_minimal_sampling": {
+    "requirement": "先验证候选采集点显式传播同一步键并核对真实字段；不同计数器、独立编号或相近时间戳不能配对。",
+    "sampling_keys": [
+      "(round_id, rank_id, scheduler_step_id)：同一调度步在宿主与设备两侧显式携带同一键。",
+      "phase：每步 prefill 与 decode token 量，用于辨别混合步，不能只凭标签或图策略。",
+      "valid_rows 与 padded_rows：分开记录有效行与实际补齐行；估算额外行须涵盖实际回退模式，含无图（eager）情形。",
+      "actual_graph_tier：逐步实际回放档位，或明确的无图标记。"
+    ],
+    "candidate_collection_points": [
+      "enable_logging_iteration_details 与 cudagraph_metrics：宿主既有开关（归档 server.log 配置回显为证）；开启不保证输出共享步键或逐步实际图档，可能仍是聚合或独立编号，先核实字段。",
+      "torch_npu profiler step schedule：本归档未启用；启用后 Step 编号是否与宿主步号同键也须先验证。",
+      "collection_manifest.json 的 collection_shape 字段：沿用，登记 capture sizes、并发、负载与图模式。"
+    ]
+  },
+  "limits": [
+    "只读筛查，无新增测量；不写收益标签；混合步存在性未证实也未证伪。",
+    "trace 与 .db 只做流式或有界核对，未整载。"
+  ],
+  "verify": {
+    "step_trace": "对每轮每 rank：wc -l ASCEND_PROFILER_OUTPUT/step_trace_time.csv 得 2；tail -n +2 同文件 cut -d, -f2 排序去重只剩空值。",
+    "csv_columns": "head -1 kernel_details.csv 的 46 列无 step 命名列；task_time.csv 同法核对。",
+    "trace_steps": "LC_ALL=C grep -ao ProfilerStep trace_view.json | wc -l 得 0；profiler_info_0.json 的 schedule 为空对象。",
+    "server_log": "grep -o 'enable_logging_iteration_details=[A-Za-z]*' server.log 得 False，cudagraph_metrics 与 kv_cache_metrics 同法；grep -c 'Engine 000' 每轮得 2；grep -c 'Added request' 为 0。",
+    "request_level": "responses.json 与 profile_responses.json 的字段核对显示只有请求级 usage。",
+    "alternatives": "对 archives_checked 所列归档重复 step_trace 与 server_log 两步核对。"
+  }
+}
