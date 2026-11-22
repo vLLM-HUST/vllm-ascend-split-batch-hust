@@ -26,7 +26,9 @@ def run_next(archive):
 def test_clean_checkout_without_archive(tmp_path):
     run = run_next(tmp_path / "absent")
     assert run.returncode == 2, run.stderr
-    assert "Recurrent" in run.stdout and "1/2" in run.stdout
+    record = json.loads((ROOT / "docs/optimization-next.json").read_bytes())
+    assert run.stdout.startswith(f"下一项：{record['candidate']}\n")
+    assert record["last_closed"] in run.stdout
     assert "Chunk" in run.stdout and "gdn_split_ba" in run.stdout
     assert "只可静态设计" in run.stdout and "final-receipt.json" in run.stdout
     assert list(tmp_path.iterdir()) == []

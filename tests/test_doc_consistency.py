@@ -212,7 +212,7 @@ def test_glossary_is_reachable_from_the_entry_documents():
 def test_prose_surface_has_no_measured_metric_pairs():
     """对外规范行文不得出现"关键词 + 数字"同段（组织基准数据政策判据）。"""
     violations = []
-    for name in PROSE_SURFACE:
+    for name in (*PROSE_SURFACE, "docs/optimization-next.json"):
         path = ROOT / name
         assert path.is_file(), f"PROSE_SURFACE 里的文件不存在: {name}"
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):

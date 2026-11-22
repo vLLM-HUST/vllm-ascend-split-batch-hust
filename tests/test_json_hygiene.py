@@ -53,7 +53,11 @@ def test_all_repository_jsons_belong_to_governed_categories():
             or ".egg-info" in rel
         ):
             continue
-        if rel in ALLOWED_ROOT_JSONS or rel == "docs/optimization-next.json":
+        if rel in ALLOWED_ROOT_JSONS or rel in {
+            "docs/optimization-next.json",
+            "docs/optimization-history/gdn-recurrent-vrows.json",
+            "docs/optimization-history/gmm1-swiglu-screen.json",
+        }:
             continue
         assert any(rel.startswith(prefix) for prefix in valid_prefixes), (
             f"未分类的 JSON 文件: {rel}"
