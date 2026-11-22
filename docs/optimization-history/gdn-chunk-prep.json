@@ -1,0 +1,109 @@
+{
+  "candidate": "GDN Chunk 初始状态准备段：聚合状态读取、清零和 BF16 转换",
+  "status": "closed_isolated_experiment",
+  "decision": "保留不可执行的源码差异，不采用当前 eager 候选。只比较准备段，不是整个 Chunk、请求或服务计时。",
+  "host_repository": "vLLM-HUST/vllm-ascend-hust",
+  "host_base": "320eced8c1bba71c0329bf59caa721a2382e7499",
+  "host_commits": {
+    "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+    "vllm-ascend": "320eced8c1bba71c0329bf59caa721a2382e7499"
+  },
+  "patch": "experiments/gdn-chunk-prep/candidate.patch",
+  "patch_sha256": "a074d17fd9577779de0b73613c3e9975a84d2eba6fbf0b646a9b00e4ad868f83",
+  "source_sha256": {
+    "vllm_ascend/ops/gdn.py": "fa46d5cb600f123c680043d3f5543b1815e7abfb689308d4e79dc865d54db9d2",
+    "vllm_ascend/ops/gdn_chunk_prep.py": "26ccc0ce70e8b644714d8b305480bd117bd45f32530e0f028c218327d5e4be2e"
+  },
+  "scope": "isolated single Ascend910B2, GDN fused prefill, synthetic input values; no service or MOD",
+  "gate": "VLLM_HUST_GDN_CHUNK_PREP=1",
+  "deployed": false,
+  "verification": {
+    "kernel_bitwise_cases": 5,
+    "two_step_site_cases": 8,
+    "site_fast_calls": 10,
+    "unseen_T_fallback_cases": 3,
+    "extra_fallback_probes": 4,
+    "tests": "contiguous BF16 initial state, real installed Chunk adapter, attention, final state, native writeback, untouched slots and second use; PCP fallback and predicate compared statically only"
+  },
+  "timing_protocol": "synthetic length/mask/slot values, 846-slot FP32 pool, strided int32 index, 10 warmups + 100 samples/arm/metric, balanced order, microseconds; concurrent service not tested",
+  "preparation_median_sync_wall_us": [
+    {
+      "case": "T10_N1_fresh",
+      "eager": {
+        "native": 410.472,
+        "candidate": 489.9325
+      },
+      "graph_replay": {
+        "native": 69.9605,
+        "candidate": 63.67
+      }
+    },
+    {
+      "case": "T10_N1_resume",
+      "eager": {
+        "native": 414.9075,
+        "candidate": 494.21299999999997
+      },
+      "graph_replay": {
+        "native": 70.2305,
+        "candidate": 61.8855
+      }
+    },
+    {
+      "case": "T156_N15_fresh",
+      "eager": {
+        "native": 385.387,
+        "candidate": 460.097
+      },
+      "graph_replay": {
+        "native": 258.902,
+        "candidate": 74.0
+      }
+    },
+    {
+      "case": "T156_N15_resume",
+      "eager": {
+        "native": 382.51750000000004,
+        "candidate": 457.3375
+      },
+      "graph_replay": {
+        "native": 256.1515,
+        "candidate": 74.0955
+      }
+    },
+    {
+      "case": "T156_N15_mixed",
+      "eager": {
+        "native": 382.452,
+        "candidate": 457.3925
+      },
+      "graph_replay": {
+        "native": 259.00649999999996,
+        "candidate": 76.63550000000001
+      }
+    }
+  ],
+  "interpretation": "所有记录的 eager 准备段均更慢；隔离图回放的较大桶明显更快。不能把回放结果当成 eager 或服务改进。",
+  "service_ab": null,
+  "service_shape_check": {
+    "scope": "本机已安装宿主，合成长度探针，并发 8，输出最多 8 token；非参照配置，不判断服务收益或 MOD。",
+    "eligible_chunk_calls_by_rank": {
+      "0": 0,
+      "1": 0
+    },
+    "boundary": "独立长度探针的形状准入，不是启用候选后的 L4。两份完整 trace 当前不可重放。",
+    "source_uri": "file:///root/vllm-workspace/benchmark-archives/gdn-native-shapes-20261121T120955Z/result.json",
+    "sha256": "ddac1176b1d657e1ef22e3f4ea70d46173ac2bcac2b193eaca8031edc58fb0a2"
+  },
+  "reopen_when": "目标请求窗口在实际相位逐卡命中形状和布局，且在相同执行方式下，含索引安全校验的准备段仍有可区分的收益。",
+  "archive_uri": "file:///root/vllm-workspace/benchmark-archives/gdn-chunk-prep-20261121T114410Z/checked-Z1dyV72V",
+  "archive_sha256": {
+    "result.json": "a396ce1eb99c5977bd84fa3c8a9187f66909158ffda57ac3a650c2ae59774097",
+    "bench-samples.json": "1084589ab37b71af063959bbcdec782eb99af3b914521b7442b0a829fc0c03f1",
+    "bench-summary.json": "606f5544ff449aab50d9011fe92b4254e385898360081fe82a05e1a508553245",
+    "chain-cases.json": "87bd9e7a871a5d0b7dc90b54b27a4ffd9f986ecbb92df90e460fccf981310d04",
+    "bench.py": "21dd5673cd181922832f78fbfe5d0ff3089ab5427e41c784c6675405ae792153",
+    "strict-inventory.json": "e13a69d536d4dd0f7994e92230b138e0780775d9488110aafcf412fc6b64c057",
+    "host.json": "a304572a555a95ebd81dc7f33c4bd356dc2599922954459a607c54d8a2f3d0db"
+  }
+}

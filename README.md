@@ -41,6 +41,8 @@ host-upgrade checklist on the target build (§4).
 
 ## Documentation
 
+[实验索引](INDEX.md) links to experiment records and patches; [实验计划](实验计划.md) lists the next questions and their stop conditions.
+
 Normative knowledge (architecture & contracts, coding rules for humans and
 agents, release process, pitfall history, progress log) lives in
 [docs/](docs/README.md) — start there. Repo-level agent rules:

@@ -1,0 +1,113 @@
+diff --git a/vllm_ascend/ops/gdn.py b/vllm_ascend/ops/gdn.py
+index 33d0048608924dd6e7eda8b2b357434bd213d74e..d96aaf9992b4eb7d7111cc315b944dd0a2344a86 100644
+--- a/vllm_ascend/ops/gdn.py
++++ b/vllm_ascend/ops/gdn.py
+@@ -62,6 +62,38 @@ _MERGE_GDN_INPROJ = os.environ.get("VLLM_HUST_GDN_MERGE_INPROJ", "0") == "1"
+ # instead of depending on a traced shape.
+ _GDN_UNPACK_FUSED = os.environ.get("VLLM_HUST_GDN_UNPACK_FUSED", "0") == "1"
+
++_GDN_CHUNK_PREP = os.environ.get("VLLM_HUST_GDN_CHUNK_PREP", "0") == "1"
++
++
++def _chunk_initial_state(pool, indices, has_state, tokens):
++    if (
++        _GDN_CHUNK_PREP
++        and pool.device.type == "npu"
++        and pool.device == indices.device == has_state.device
++        and pool.dtype == torch.float32
++        and not pool.requires_grad
++        and pool.ndim == 4
++        and pool.shape[0] > 0
++        and pool.shape[1:] == (16, 128, 128)
++        and pool.stride()[1:] == (16384, 128, 1)
++        and pool.stride(0) >= 262144
++        and indices.dtype == torch.int32
++        and has_state.dtype == torch.bool
++        and indices.ndim == has_state.ndim == 1
++        and indices.shape == has_state.shape
++        and (tokens, indices.numel()) in ((10, 1), (156, 15))
++        and has_state.is_contiguous()
++        and all(torch_npu.get_npu_format(x) in (0, 2) for x in (pool, indices, has_state))
++    ):
++        from vllm_ascend.ops.gdn_chunk_prep import prepare_chunk_initial_state
++
++        # Native indexing validates the IDs (including negative IDs) before any raw pool read.
++        rows = torch.arange(pool.shape[0], device=pool.device, dtype=torch.int32)[indices]
++        return prepare_chunk_initial_state(pool, rows, has_state)
++    initial_state = pool[indices]
++    clear_ssm_states(initial_state, has_state)
++    return initial_state
++
+
+ _PACKED_CONV_WEIGHT_NAME = "ascend_conv1d_weight_packed"
+ _PACK_CONV_ENV = "VLLM_HUST_D4_CONV_PACK"
+@@ -652,8 +684,9 @@ class AscendGatedDeltaNetAttention(GatedDeltaNetAttention, HpcModule):
+                 # The fused op's state layout [N, Nv, Dv, Dk] matches ssm_state
+                 # directly, so no transpose is needed. Advanced indexing already
+                 # returns a copy, safe to clear in place.
+-                initial_state = ssm_state[prefill_state_indices]
+-                clear_ssm_states(initial_state, prefill_has_initial_state)
++                initial_state = _chunk_initial_state(
++                    ssm_state, prefill_state_indices, prefill_has_initial_state, query_non_spec.shape[1]
++                )
+                 core_attn_out_non_spec, last_recurrent_state = (
+                     AscendGatedDeltaNetAttention._chunk_gated_delta_rule_fused(
+                         q=query_non_spec,
+diff --git a/vllm_ascend/ops/gdn_chunk_prep.py b/vllm_ascend/ops/gdn_chunk_prep.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d3bf9603591672cc1bbeafdbad365011c0574e6d
+--- /dev/null
++++ b/vllm_ascend/ops/gdn_chunk_prep.py
+@@ -0,0 +1,52 @@
++#
++# Copyright (c) 2026 Huawei Technologies Co., Ltd. All Rights Reserved.
++# This file is a part of the vllm-ascend project.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++"""Gather checked state rows into the BF16 initial state consumed by fused Chunk."""
++
++import torch
++import triton
++import triton.language as tl
++
++
++@triton.jit(do_not_specialize=["inner_size", "pool_stride"])
++def _gdn_chunk_prep_kernel(
++    pool_ptr,
++    idx_ptr,
++    has_ptr,
++    out_ptr,
++    inner_size,
++    pool_stride,
++    BLOCK: tl.constexpr,
++):
++    slot = tl.program_id(0)
++    cols = tl.program_id(1) * BLOCK + tl.arange(0, BLOCK)
++    mask = cols < inner_size
++    src_slot = tl.load(idx_ptr + slot).to(tl.int64)
++    has_state = tl.load(has_ptr + slot).to(tl.int1)
++    val = tl.load(pool_ptr + src_slot * pool_stride + cols, mask=mask, other=0.0)
++    val = tl.where(has_state, val, 0.0)
++    tl.store(out_ptr + slot * inner_size + cols, val.to(tl.bfloat16), mask=mask)
++
++
++def prepare_chunk_initial_state(ssm_state, checked_rows, has_state):
++    rows = checked_rows.numel()
++    inner_size = 16 * 128 * 128
++    out = torch.empty((rows, 16, 128, 128), dtype=torch.bfloat16, device=ssm_state.device)
++    block = 4096
++    _gdn_chunk_prep_kernel[(rows, triton.cdiv(inner_size, block))](
++        ssm_state, checked_rows, has_state, out, inner_size, ssm_state.stride(0), BLOCK=block
++    )
++    return out

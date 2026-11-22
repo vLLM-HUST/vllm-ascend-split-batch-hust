@@ -53,11 +53,13 @@ def test_all_repository_jsons_belong_to_governed_categories():
             or ".egg-info" in rel
         ):
             continue
-        if rel in ALLOWED_ROOT_JSONS or rel in {
-            "docs/optimization-next.json",
-            "docs/optimization-history/gdn-recurrent-vrows.json",
-            "docs/optimization-history/gmm1-swiglu-screen.json",
-        }:
+        if p.parent == ROOT / "docs/optimization-history":
+            record = json.loads(p.read_bytes())
+            assert all(record.get(k) for k in ("candidate", "scope", "status")), rel
+            assert set(record["host_commits"]) == {"vllm", "vllm-ascend"}, rel
+            assert record.get("archive_uri") or record.get("archives"), rel
+            continue
+        if rel in ALLOWED_ROOT_JSONS or rel == "docs/optimization-next.json":
             continue
         assert any(rel.startswith(prefix) for prefix in valid_prefixes), (
             f"未分类的 JSON 文件: {rel}"
