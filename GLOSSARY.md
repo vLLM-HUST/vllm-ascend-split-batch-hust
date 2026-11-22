@@ -65,7 +65,8 @@
 | MOD | 在固定基础引擎上以明确开关集合启停的待测能力或组合；身份包含实现版本与依赖，发现入口不等于启用。 | `docs/mod-acceptance-standard.md`；`MOD_METADATA.json` | 单个插件入口、全部算子目录 |
 | 组合服务 A/B | 冻结实际可用的优化集合，比较同一宿主下全部目标关闭与全部目标启用；须重验组合数值和各候选调用，不向单项分摊收益。 | `docs/mod-acceptance-standard.md`；`docs/mod-acceptance/evidence.json` | 方向记录不等于已实现候选；组合诊断不等于 MOD 合格 |
 | MOD 最终验收 | 对冻结 MOD 组合分别检查测试执行完整性和各项目标，算子服务收益不能替代此验收。 | `docs/mod-acceptance/evidence.json`；`docs/mod-acceptance-standard.md` | 算子验收 |
-| B0 / B1 | MOD 配对实验的关闭组与启用组；基础引擎及其他条件相同，网站参考组合不自动成为本仓身份。 | `docs/mod-acceptance-standard.md` | 不固定指某个历史 Engine |
+| B0 / B1 | 待测 MOD 配对时指同一基础引擎关闭 / 启用目标 MOD；课题送测时指方案固定的基线 / 送测冻结的候选引擎。必须注明比较对象。 | `docs/mod-acceptance-standard.md` | 整套引擎的差异不归因给单项 MOD |
+| quick / full | 冻结数据集的测试范围；前者只测固定 MMLU-Pro 子集，后者测全部指定范围。 | `docs/acceptance-shape-alignment.md` | 不是图模式、服务配置或验收通过状态 |
 | 同工况参考效率（η_ref） | 完成同工况必要工作的独立参考时间与被测时间之比；设备忙碌度和相对基线速率不是此指标。 | `docs/mod-acceptance-standard.md` | 单算子 MFU、设备忙碌度、基线加速比 |
 | 算子（operator） | 在明确 callsite 上进行的等价替换或融合优化，以 `ops/<operator>/` 为一个交付单元。 | `ops/`；`DELIVERY_INDEX.json` 的 `operators[]` | — |
 | callsite | 算子被真实调用处的宿主位置（文件、方法、调用点）。可达性只认 callsite 证据。 | `ops/<operator>/evidence.json` 的 `callsite` | 宿主接缝，见 §2 |
