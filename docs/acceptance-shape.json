@@ -1,7 +1,7 @@
 {
   "schema": "acceptance-shape-alignment/v1",
-  "recorded_at": "2026-11-20",
-  "purpose": "冻结验收形态与本仓采集/测量形态的参数对照与来源登记。只登记形状事实与判据，不登记任何服务收益结论。",
+  "recorded_at": "2026-11-21",
+  "purpose": "对照冻结请求范围、B0 客户端参考配置与本地诊断形态。服务 profile 不定义五数据集的统一引擎配置。",
   "acceptance_service_profile": {
     "source": {
       "repository": "vLLM-HUST/hust-eval-client-mmlu-pro",
@@ -35,6 +35,13 @@
     "distinct_caliber_note": "引擎 B1 r6 组合形态独立维护于 vLLM-HUST/vllm-hust-engine engines/b1-r4.json（叠加 engines/b1-r6-overlay.json）：max_model_len 65536、max_num_seqs 24、max_num_batched_tokens 4096、resident_seats 36、mtp_tokens 2、cudagraph_mode FULL。它与本条 B0 35B 客户端期望配置不是同一口径，禁止混用或互相佐证。"
   },
   "request_shapes_standard": {
+    "run_guide": {
+      "id": "five-datasets-run-guide-20261116-v2",
+      "url": "https://vllm-hust.sage.org.ai/data/dataset-run-guide-v1.json",
+      "snapshot": "https://github.com/vLLM-HUST/vllm-hust-benchmark/blob/a96d0e07196ee2147d4870ac910732f7c01fa2dc/website-publication/data/dataset-run-guide-v1.json",
+      "publisher_sha256": "1f8305a89b44fd82fe5cf44be6a930fd33ef537cb8630dc1646f9a7fec68781e"
+    },
+    "scopes": {"quick": ["mmlu"], "full": ["mmlu", "hle", "frontier", "swe", "terminal"]},
     "source": {
       "url": "https://vllm-hust.sage.org.ai/data/dataset-standard-v1/standard.json",
       "standard_id": "five-datasets-20261113-v1",
@@ -137,7 +144,7 @@
         "file:///root/vllm-workspace/benchmark-archives/npu-retest-20261115T041855Z/attributed-e2e-resumable/gdn_conv_pack/config.json",
         "file:///root/vllm-workspace/benchmark-archives/pending-longrun-20261116T091816Z"
       ],
-      "scope_statement": "索引内全部 within_noise 服务结论的测量形态是本条记录；结论只在该形态内成立，不能外推到冻结验收形态。"
+      "scope_statement": "本条仅描述所列历史归档；各算子的实际负载、图模式与噪声结论以对应 evidence.json 为准，不代表冻结数据集。"
     },
     "profile_collection_script": {
       "script": "workloads/profile_hotspot_longrun.sh",
@@ -175,8 +182,8 @@
   ],
   "conclusion_scope_rules": [
     "跨形态只比方向，不比数字；batch 维度的方向推演只能使用已记录的 shape_buckets 桶数据。",
-    "图回放形态下 host 下发开销被摊薄，eager 形态中由下发/同步主导的小算子排名会下降。",
-    "上下文从 4096 提升到 32768 时预填充占比上升，decode-only 收益被稀释，prefill 侧算子权重上升。",
+    "是否受益于图回放须核对目标相位的实际执行记录；不从配置名推断预填充命中。",
+    "最大上下文是上限，不是实际输入长度。预填充与解码占比按目标请求与调度步核对。",
     "并发三口径（标准预算/客户端默认/plan 契约）不一致时，采集配置必须显式记录所用口径。"
   ]
 }
