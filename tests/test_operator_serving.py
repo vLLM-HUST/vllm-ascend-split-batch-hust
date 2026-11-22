@@ -130,6 +130,23 @@ def test_longrun_records_failure_and_continues(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "progress.json").read_text()) == results
 
 
+def test_analyse_profile_preserves_per_rank_timelines(tmp_path, monkeypatch):
+    def fake_analyse(cmd, **kwargs):
+        for rank in range(2):
+            out = Path(cmd[-1]) / f"rank_{rank}" / "ASCEND_PROFILER_OUTPUT"
+            out.mkdir(parents=True)
+            (out / "profiler.db").touch()
+            (out / "trace_view.json").write_bytes(f"[{rank}]\n".encode())
+
+    monkeypatch.delenv("SERVING_SLIM", raising=False)
+    monkeypatch.setattr(longrun.collector.subprocess, "run", fake_analyse)
+    longrun.collector.analyse_profile({"python": sys.executable}, tmp_path)
+    views = sorted(
+        (tmp_path / "profile").glob("rank_*/ASCEND_PROFILER_OUTPUT/trace_view.json")
+    )
+    assert [view.read_bytes() for view in views] == [b"[0]\n", b"[1]\n"]
+
+
 def test_server_records_requested_shutdown_and_early_exit(tmp_path, monkeypatch):
     import pytest
 
