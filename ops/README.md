@@ -8,4 +8,4 @@
 - **`bench_l0.py`**（或对应测试工具）：单算子无卡/有卡复现微基准脚本。
 - **`evidence.json`**：符合 `operator-benchmark-evidence/v1` 标准模式的机器可读评测数据。L0 计时入账由 [`../tools/operator_tools/l0_trace_record.py`](../tools/operator_tools/l0_trace_record.py) 机械追加到 `l0_traces`，禁止手抄度量数字。
 
-根目录通过 [DELIVERY_INDEX.json](../DELIVERY_INDEX.json) 与 [docs/delivery-inventory.md](../docs/delivery-inventory.md) 对本目录下所有算子统一索引。
+[交付索引](../DELIVERY_INDEX.json)记录各算子的归属与状态，字段判据见[交付规范](../docs/delivery-inventory.md)。[实验索引](../INDEX.md)可按主题查找证据和[宿主提案](../host-proposals/README.md)；宿主补丁和回滚条件只在提案目录维护。

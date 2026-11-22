@@ -97,11 +97,8 @@ def test_pairing_mismatch_fails_closed(tmp_path):
 
 
 def test_repo_withdrawal_and_paired_evidence():
-    """撤回套组已按 custody 迁 frozen benchmark(见 docs/custody-direction-batch.md);
-    此处守护记录恒量与登记指针, 逐文件校验由内层 manifest 机械化承担。"""
-    pointer = (
-        Path(__file__).resolve().parents[1] / "docs" / "custody-direction-batch.md"
-    ).read_text()
+    """检查方向分支批次的冻结指针；逐文件校验由归档 manifest 承担。"""
+    pointer = (Path(__file__).resolve().parents[1] / "docs" / "EVIDENCE.md").read_text()
     assert "archive/dev-hub-20261022/split-batch-direction" in pointer
     assert "02add2a27be84b106dd5e8c589b0a5bc3f928bff" in pointer
     assert "13212eccec831dbb7ba8c0cc2dafb43967118a890f5b02f01e35b6e534f06ce3" in pointer

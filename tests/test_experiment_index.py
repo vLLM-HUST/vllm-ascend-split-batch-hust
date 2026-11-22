@@ -55,6 +55,94 @@ def test_find_reads_only_the_rendered_index(tmp_path, monkeypatch, capsys):
     assert exc.value.code == 1
 
 
+@pytest.fixture
+def catalog(tmp_path, monkeypatch):
+    for directory in ("docs/evidence", "docs/optimization-history", "experiments/demo"):
+        (tmp_path / directory).mkdir(parents=True)
+    (tmp_path / "DELIVERY_INDEX.json").write_text('{"operators": []}')
+    monkeypatch.setattr(index, "ROOT", tmp_path)
+
+    def run(*args):
+        monkeypatch.setattr(sys, "argv", ["experiment_index", *args])
+        index.main()
+
+    return tmp_path, run
+
+
+def test_changes_require_refresh_but_conclusions_are_not_copied(catalog):
+    root, run = catalog
+    output = root / "INDEX.md"
+    record = root / "docs/optimization-history/demo.json"
+    run("--write")
+    empty = output.read_bytes()
+    record.write_text('{"decision":"first result"}')
+    source = record.read_bytes()
+    with pytest.raises(SystemExit):
+        run()
+    run("--write")
+    run()
+    linked = output.read_bytes()
+    assert (
+        linked != empty and b"history/demo" in linked and b"first result" not in linked
+    )
+    assert record.read_bytes() == source
+    record.write_text('{"decision":"revised result"}')
+    revised = record.read_bytes()
+    run()
+    run("--write")
+    assert output.read_bytes() == linked and record.read_bytes() == revised
+    output.write_bytes(linked + b"handwritten verdict\n")
+    with pytest.raises(SystemExit):
+        run()
+    run("--write")
+    assert output.read_bytes() == linked
+    record.unlink()
+    with pytest.raises(SystemExit):
+        run()
+    run("--write")
+    run()
+    assert output.read_bytes() == empty
+
+
+@pytest.mark.parametrize(
+    "record", [{}, {"decision": " "}, {"verdict": {}}, {"verdict": {"service": None}}]
+)
+def test_history_without_a_conclusion_cannot_be_indexed(catalog, record):
+    root, run = catalog
+    (root / "docs/optimization-history/demo.json").write_text(json.dumps(record))
+    with pytest.raises(ValueError, match="demo.json"):
+        run("--write")
+    assert not (root / "INDEX.md").exists()
+
+
+def test_orphan_or_changed_patch_is_not_silently_resealed(catalog):
+    root, run = catalog
+    path = "experiments/demo/candidate.patch"
+    patch = root / path
+    patch.write_bytes(b"archived diff")
+    with pytest.raises(ValueError, match="candidate.patch"):
+        run("--write")
+    source = root / "docs/optimization-history/demo.json"
+    source.write_text(
+        json.dumps(
+            {
+                "decision": "not measured",
+                "patch": path,
+                "patch_sha256": hashlib.sha256(patch.read_bytes()).hexdigest(),
+            }
+        )
+    )
+    run("--write")
+    before = (source.read_bytes(), (root / "INDEX.md").read_bytes())
+    patch.write_bytes(b"altered diff")
+    with pytest.raises(ValueError, match="candidate.patch"):
+        run("--write")
+    assert (source.read_bytes(), (root / "INDEX.md").read_bytes()) == before
+    patch.unlink()
+    with pytest.raises(ValueError, match="candidate.patch"):
+        run()
+
+
 def test_retired_chunk_patch_is_only_an_archive():
     record = json.loads(
         (ROOT / "docs/optimization-history/gdn-chunk-prep.json").read_bytes()

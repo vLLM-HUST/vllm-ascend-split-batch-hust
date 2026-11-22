@@ -1,11 +1,17 @@
 """Generate a balanced directory from canonical experiment records."""
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _has_conclusion(value):
+    parts = value.values() if isinstance(value, dict) else (value,)
+    return bool(parts) and all(isinstance(v, str) and v.strip() for v in parts)
 
 
 def entries(root):
@@ -18,14 +24,33 @@ def entries(root):
 
     for op in json.loads((root / "DELIVERY_INDEX.json").read_bytes())["operators"]:
         add("op/" + op["id"], root / op["evidence"])
+    patches = {}
+    for path in root.glob("experiments/*/*.patch"):
+        add("patch/" + path.parent.name + "/" + path.stem, path)
+        patches[path.relative_to(root).as_posix()] = path
+    referenced = set()
     for path in sorted((root / "docs/optimization-history").glob("*.json")):
         add("history/" + path.stem, path)
+        record = json.loads(path.read_bytes())
+        if not any(
+            _has_conclusion(record.get(key))
+            for key in ("decision", "verdict", "performance_verdict")
+        ):
+            raise ValueError(f"研发记录缺少结论（未测也须明示）：{path.name}")
+        if "patch" in record or "patch_sha256" in record:
+            name = record.get("patch")
+            if not isinstance(name, str) or name not in patches:
+                raise ValueError(f"研发记录引用的补丁不存在：{path.name}: {name}")
+            digest = hashlib.sha256(patches[name].read_bytes()).hexdigest()
+            if digest != record.get("patch_sha256"):
+                raise ValueError(f"补丁与研发记录指纹不符：{name}")
+            referenced.add(name)
+    if missing := patches.keys() - referenced:
+        raise ValueError(f"补丁缺少研发记录：{', '.join(sorted(missing))}")
     for path in sorted(root.glob("host-proposals/*/proposal_meta.json")):
         add("proposal/" + path.parent.name, path)
     for path in sorted(root.glob("experiments/*/EXPERIMENT_PLAN.md")):
         add("plan/" + path.parent.name, path)
-    for path in sorted(root.glob("experiments/*/*.patch")):
-        add("patch/" + path.parent.name + "/" + path.stem, path)
     for path in sorted((root / "docs/evidence").iterdir()):
         if path.is_dir() and not path.name.startswith((".", "_")):
             add("archive/" + path.name, path)
