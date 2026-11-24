@@ -13,7 +13,7 @@
 | vLLM HUST 源码 | `/root/host-trees/vllm-hust` |
 | Ascend HUST 源码 | `/root/host-trees/vllm-ascend` |
 | vLLM 提交 | `f18cf803c5f63625e2c71253ddaf8b0bad0bad1a` |
-| Ascend 提交 | `e59aaeef26788e9f895aefa568d779ad84cc7842` |
+| Ascend 提交 | 以 `/root/host-trees/vllm-ascend` 当前 `based/split-batch-baseline` HEAD 为准（每次执行由 `host_runtime.py` 核验，不沿用旧快照哈希） |
 | PyTorch / torch-npu | `2.13.0+cpu` / `2.13.0rc1` |
 | CANN 环境入口 | `/usr/local/Ascend/ascend-toolkit/set_env.sh` |
 | Ascend 扩展 | 宿主包内 `vllm_ascend_C.cpython-312-aarch64-linux-gnu.so` |

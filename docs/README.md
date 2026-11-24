@@ -19,7 +19,7 @@
 只改一个算子时按这个顺序读,不用通读全目录:
 
 1. [ops/README.md](../ops/README.md) — 一个算子目录里必须放哪几个文件、目录指纹怎么来;
-2. [ops/gdn_norm_gate/README.md](../ops/gdn_norm_gate/README.md) 配同目录 `evidence.json` — 照着现成交付目录填结构;
+2. [ops/gdn_output_norm_fusion/README.md](../ops/gdn_output_norm_fusion/README.md) 配同目录 `evidence.json` — 照着已合入宿主的现役交付目录填结构（旧 `ops/gdn_norm_gate` 已由宿主替代，仅作归档）;
 3. [operator-benchmark-standard.md](operator-benchmark-standard.md) — 四级阶梯、形状事实合同、报告模板与交付合规门禁;
 4. [npu-benchmark-execution-guide.md](npu-benchmark-execution-guide.md) — 带卡怎么跑、结果怎么回填;
 5. [delivery-inventory.md](delivery-inventory.md) 的「性能证据最小字段与评测阶梯」节与 [../DELIVERY_INDEX.json](../DELIVERY_INDEX.json) — 结论标签怎么写、状态怎么登记;
