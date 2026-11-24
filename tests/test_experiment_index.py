@@ -156,3 +156,41 @@ def test_retired_chunk_patch_is_only_an_archive():
         if line.startswith("diff --git ")
     } == set(record["source_sha256"])
     assert record["deployed"] is False and record["service_ab"] is None
+
+
+def test_group_renders_human_readable_sections_without_writing_index(catalog, capsys):
+    root, run = catalog
+    (root / "ops/demo_op").mkdir(parents=True)
+    (root / "ops/demo_op/evidence.json").write_text("{}")
+    (root / "DELIVERY_INDEX.json").write_text(
+        json.dumps(
+            {"operators": [{"id": "demo_op", "evidence": "ops/demo_op/evidence.json"}]}
+        )
+    )
+    (root / "experiments/demo/EXPERIMENT_PLAN.md").write_text("# plan\n")
+    (root / "docs/optimization-history/demo.json").write_text('{"decision":"done"}')
+    (root / "host-proposals/demo-prop").mkdir(parents=True)
+    (root / "host-proposals/demo-prop/proposal_meta.json").write_text("{}")
+    (root / "docs/evidence/demo-arch").mkdir(parents=True)
+    (root / "provenance/legacy-patches/demo-pr").mkdir(parents=True)
+    (root / "provenance/legacy-patches/demo-pr/a.patch").write_text("diff\n")
+
+    run("--group")
+    out = capsys.readouterr().out
+    assert not (root / "INDEX.md").exists()
+    expected_order = [
+        "## 实验计划（进行中或参考）",
+        "- [`plan/demo`](experiments/demo/EXPERIMENT_PLAN.md)",
+        "## 算子交付证据（以 DELIVERY_INDEX.json 为准）",
+        "- [`op/demo_op`](ops/demo_op/evidence.json)",
+        "## 研发记录（阶段性结论）",
+        "- [`history/demo`](docs/optimization-history/demo.json)",
+        "## 宿主修改提案",
+        "- [`proposal/demo-prop`](host-proposals/demo-prop/proposal_meta.json)",
+        "## 历史证据归档（只读溯源）",
+        "- [`archive/demo-arch`](docs/evidence/demo-arch)",
+        "## 早期上游 PR 留痕（只读溯源）",
+        "- [`legacy/demo-pr`](provenance/legacy-patches/demo-pr)",
+    ]
+    positions = [out.index(token) for token in expected_order]
+    assert positions == sorted(positions)

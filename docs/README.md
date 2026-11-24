@@ -4,6 +4,16 @@
 
 查实验材料直接用[实验索引](../INDEX.md)，不在本页另列实验清单。排期见[实验计划](../实验计划.md)。
 
+## 日常核心入口速查表（现役 vs 只读溯源区）
+
+| 分类 | 核心文件 | 用途说明 |
+|---|---|---|
+| **现役：下一步与排期** | [optimization-next.json](optimization-next.json)、[../实验计划.md](../实验计划.md) | 唯一选题依据、停止条件与当前推进待办（命令行只读入口：`python -B -m tools.operator_tools.next`） |
+| **现役：算子交付总账** | [../DELIVERY_INDEX.json](../DELIVERY_INDEX.json)、[../ops/README.md](../ops/README.md) | 全部已登记算子的归属层、门控开关、数值护栏与服务结论 |
+| **现役：规范与流程** | [../AGENTS.md](../AGENTS.md)、[../workflow.md](../workflow.md)、[../GLOSSARY.md](../GLOSSARY.md) | 工作契约、参考执行流程与统一术语表 |
+| **现役：资料检索** | [../INDEX.md](../INDEX.md) | 自动生成的全仓资料索引（关键词查找：`--find <词>`；按分组查看：`--group`） |
+| **只读溯源区** | [../EVIDENCE_AVAILABILITY.json](../EVIDENCE_AVAILABILITY.json)、[../EVIDENCE_SOURCES.json](../EVIDENCE_SOURCES.json)、[../MOD_METADATA.json](../MOD_METADATA.json)、[evidence/](evidence/)、[../provenance/legacy-patches/](../provenance/legacy-patches/) | 历史归档与组织审计留痕，仅作溯源，不代表当前能力或收益 |
+
 ## 按任务的最短路径(改第一个算子)
 
 只改一个算子时按这个顺序读,不用通读全目录:
