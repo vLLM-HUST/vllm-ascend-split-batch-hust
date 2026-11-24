@@ -2,7 +2,7 @@
   "candidate": "GroupedMatmul 第一段：补齐同工况、可按层/步/卡核验的专家分布",
   "scope": "新的选题只做静态筛选；整网热点来自本机 random 图模式长测，各轮和各 rank 分开读取。下方的长度探针回执用于核对上一项 Recurrent 的边界，不是 GroupedMatmul 的执行资格。",
   "reason": "三轮各卡已核出相同的 BF16 GMM1→SwiGLU 链；单独消掉激活的直接设备时间占该卡 Stage 不足 0.27%。第一段矩阵乘占比更高，但原窗口未采 group_list 值，不能按均匀专家负载排优化。",
-  "next_step": "已评审 experiments/native-route-probe/EXPERIMENT_PLAN.md 并登记 reviewed_plan；在干净权威 checkout 上执行 /root/venvs/split-batch-runtime/bin/python -B -m tools.operator_tools.native_route_probe --run 完成一次请求级原生路由探针并仓外归档。",
+  "next_step": "原生路由请求探针已完成并仓外归档（/root/vllm-workspace/benchmark-archives/native-route-probe-20261124T085322963538Z-p82106）：仅请求级逻辑 top-k 与贪心文本全部通过校验，退出回执齐全，per_step_rank_verified=false，无服务收益结论。下一步：在 CPU 侧按 docs/optimization-history/gmm-route-reconciliation.json 的剩余缺口（逐步批次组成、同窗口 EP 映射、逐卡真实 group_list、逐步相位与 rank_device）设计并评审逐卡对账采集方案；逐卡对账通过前不安排 GroupedMatmul 服务对比。",
   "checks": [
     "逐轮逐卡形状、专家分布与调用来源的复核入口：docs/optimization-history/gmm1-swiglu-screen.json；不得把另一个负载的专家数配给本窗口。",
     "没有同工况 shape、分布和可区分的候选时不占卡做性能对比、不写收益标签；诊断探针不要求已有优化候选，但仍须通过计划评审、宿主和设备预检。",
