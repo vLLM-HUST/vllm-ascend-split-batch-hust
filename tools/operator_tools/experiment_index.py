@@ -99,13 +99,55 @@ def render(root):
     return "\n".join(lines) + "\n"
 
 
+GROUP_ORDER = (
+    ("plan", "实验计划（进行中或参考）"),
+    ("op", "算子交付证据（以 DELIVERY_INDEX.json 为准）"),
+    ("history", "研发记录（阶段性结论）"),
+    ("proposal", "宿主修改提案"),
+    ("patch", "历史补丁（不代表当前生效）"),
+    ("archive", "历史证据归档（只读溯源）"),
+    ("legacy", "早期上游 PR 留痕（只读溯源）"),
+)
+
+
+def render_grouped(root):
+    """Render entries grouped by category for human-readable terminal viewing."""
+    buckets = {}
+    for key, path in entries(root):
+        prefix = key.split("/", 1)[0]
+        buckets.setdefault(prefix, []).append((key, path))
+    lines = ["# 实验索引（按类别分组视图，只读）", ""]
+    seen = set()
+    for prefix, title in GROUP_ORDER:
+        items = buckets.get(prefix)
+        if not items:
+            continue
+        seen.add(prefix)
+        lines.append(f"## {title}")
+        for key, path in items:
+            lines.append(f"- [`{key}`]({quote(path)})")
+        lines.append("")
+    for prefix in sorted(buckets.keys() - seen):
+        lines.append(f"## 其他（{prefix}）")
+        for key, path in buckets[prefix]:
+            lines.append(f"- [`{key}`]({quote(path)})")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--find", metavar="TOPIC", help="只在已生成的索引中查找主题")
+    mode.add_argument(
+        "--group", action="store_true", help="按类别分组打印人类可读视图（只读）"
+    )
     args = parser.parse_args()
     index = ROOT / "INDEX.md"
+    if args.group:
+        print(render_grouped(ROOT), end="")
+        return
     if args.find is not None:
         query = args.find.strip().casefold()
         if not query or not index.is_file():
