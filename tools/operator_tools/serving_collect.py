@@ -136,9 +136,11 @@ def server(config, output, arm, profile=False):
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
-        save(output / "owner.json", {"pid": proc.pid})
         collection_completed = False
         try:
+            # Popen 成功后立即留 owner 回执；该写入失败也必须进入 finally 清理，
+            # 否则已启动的服务进程会带着锁和设备无人看管。
+            save(output / "owner.json", {"pid": proc.pid})
             deadline = time.monotonic() + config.get("startup_timeout", 900)
             while True:
                 if proc.poll() is not None:
@@ -210,13 +212,38 @@ def build_profile_prompts(count: int, shared_prefix: str) -> list[str]:
     ]
 
 
-def run_profile_requests(config, prompts, tokens, concurrency):
-    """Send the profile-window requests, optionally several at a time."""
+def run_profile_requests(config, prompts, tokens, concurrency, sink=None):
+    """Send the profile-window requests, optionally several at a time.
+
+    ``sink(index, response)`` is called once per finished request, in
+    completion order, so a partial failure still leaves the finished
+    responses wherever ``sink`` put them. With a ``sink`` an interrupt
+    cancels the queued requests and returns fast; without one the pool
+    drains first, exactly as it did before this parameter existed.
+    """
+
+    def one(item):
+        index, prompt = item
+        response = completion(config, prompt, tokens)
+        if sink is not None:
+            sink(index, response)
+        return response
+
     if concurrency <= 1 or len(prompts) <= 1:
-        return [completion(config, prompt, tokens) for prompt in prompts]
-    workers = min(concurrency, len(prompts))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(lambda p: completion(config, p, tokens), prompts))
+        return [one(item) for item in enumerate(prompts)]
+    pool = ThreadPoolExecutor(max_workers=min(concurrency, len(prompts)))
+    try:
+        results = list(pool.map(one, enumerate(prompts)))
+    except BaseException:
+        # 取消未启动请求的快速返回只用于带 sink 的留档路径（本探针）；
+        # 既有调用方（sink=None）保持原行为：等池内请求跑完再交还异常。
+        if sink is None:
+            pool.shutdown(wait=True)
+        else:
+            pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+    return results
 
 
 def collect_guard(config, output, arm):

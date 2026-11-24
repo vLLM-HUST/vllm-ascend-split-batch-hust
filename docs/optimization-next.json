@@ -2,7 +2,7 @@
   "candidate": "GroupedMatmul 第一段：补齐同工况、可按层/步/卡核验的专家分布",
   "scope": "新的选题只做静态筛选；整网热点来自本机 random 图模式长测，各轮和各 rank 分开读取。下方的长度探针回执用于核对上一项 Recurrent 的边界，不是 GroupedMatmul 的执行资格。",
   "reason": "三轮各卡已核出相同的 BF16 GMM1→SwiGLU 链；单独消掉激活的直接设备时间占该卡 Stage 不足 0.27%。第一段矩阵乘占比更高，但原窗口未采 group_list 值，不能按均匀专家负载排优化。",
-  "next_step": "无卡先编制原生 --enable-return-routed-experts 请求探针的独立命令与执行计划，评审通过前不申请占卡、不做新采集；旧仓外脚本硬编码历史输入路径、卡号/端口并重跑已过合成对照，不直接复用，旧档只读。",
+  "next_step": "已评审 experiments/native-route-probe/EXPERIMENT_PLAN.md 并登记 reviewed_plan；在干净权威 checkout 上执行 /root/venvs/split-batch-runtime/bin/python -B -m tools.operator_tools.native_route_probe --run 完成一次请求级原生路由探针并仓外归档。",
   "checks": [
     "逐轮逐卡形状、专家分布与调用来源的复核入口：docs/optimization-history/gmm1-swiglu-screen.json；不得把另一个负载的专家数配给本窗口。",
     "没有同工况 shape、分布和可区分的候选时不占卡做性能对比、不写收益标签；诊断探针不要求已有优化候选，但仍须通过计划评审、宿主和设备预检。",
@@ -16,7 +16,10 @@
     "调度 padding 策略改造": "既有三轮×双卡长测窗口没有显式调度步键，不可按相位分桶；不据此改调度策略、不排服务对比，重开条件与最小采样键见 docs/optimization-history/scheduler-padding-screen.json。"
   },
   "hotspot_archive": "/root/vllm-workspace/benchmark-archives/profile-hotspot-longrun-hotspot-20261121T031427Z",
-  "reviewed_plan": null,
+  "reviewed_plan": {
+    "path": "experiments/native-route-probe/EXPERIMENT_PLAN.md",
+    "sha256": "8023c7699d6a0a7deb30d77e0bf089a3bfa1526029f86e17d204472a48eb86a4"
+  },
   "archive_uri": "file:///root/vllm-workspace/benchmark-archives/gdn-native-shapes-20261121T120955Z",
   "receipt_sha256": "9d515bf76d12e9fe797d133a00e9e73b9d2a93e603097af4cbca882738e87219",
   "host_commits": {
