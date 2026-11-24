@@ -1,0 +1,87 @@
+{
+  "status": "screened_all_python_level_candidates_rejected_or_within_noise",
+  "candidate": "GroupedMatmul 第一段（BF16）：基于真实双卡 910B2 稀疏分布的候选筛选",
+  "scope": "在 Ascend 910B2 单卡（npu:0，对应物理 NPU 2）上，直接取自双卡真实服务对账归档（gmm-route-reconcile-20261124T122756702090Z-p145346）无 padding 步的真实 group_list 分布，对 Qwen3.5-35B-A3B BF16 GMM1 形状（E_local=128, K=2048, N=1024）做同精度数值对拍与配对交错隔离计时（eager 与 NPUGraph 回放）。仅用于候选筛选，不是服务 A/B，不构成服务收益结论。",
+  "cohort": {
+    "device": "Ascend 910B2 (npu:0 = physical NPU 2)",
+    "phase": "isolated_microbenchmark_real_decode_and_mixed_group_list",
+    "service_claim": "none_isolated_screen_only",
+    "boundary": "隔离算子与 routing+GMM1 两算子图回放，不包含整网调度与通信；结果只用于淘汰无效候选，不得外推为服务加速。"
+  },
+  "host_commits": {
+    "vllm": "f18cf803c5f63625e2c71253ddaf8b0bad0bad1a",
+    "vllm-ascend": "78d0ab43ffa27f161efc1ba55073949718219a5f"
+  },
+  "archives": [
+    "file:///root/vllm-workspace/benchmark-archives/gmm-route-reconcile-20261124T122756702090Z-p145346",
+    "file:///root/vllm-workspace/benchmark-archives/gmm1-sparse-candidates-20261124"
+  ],
+  "archive_sha256": {
+    "benchmark_results.json": "9fa342b706c39a67aeebe61343f26ae0289e694dfc3af78963f8aaaebb0cb46a",
+    "routing_plus_gmm1_type0_vs_type1.json": "4643fc3b2723441443650135af2a7e36d21ad42885cb78987ebe4f3781ef2602",
+    "selected_samples.json": "ebc5b67042a83ed1bf72914a1b57b9c3618c599970174affb3969348aa77523f",
+    "distribution_analysis.json": "4200fa11f76920266bbd9ff3aca826ee1a5f0e001362f14eb81f43284d0a9cf7"
+  },
+  "candidates_screened": {
+    "tuning_config_1_2_8": {
+      "verdict": "rejected_unsafe_and_no_gain",
+      "reason": "在真实 M=0 decode 步全值触发 aclnnGroupedMatmulV5 error 161002 崩溃，且当 tuning_config[0] > M（如 M=6 时 tuning_config=[8]）同样崩溃；未崩溃工况在 NPUGraph 回放中为 -0.48% 至 +0.09%（噪声内/无收益），eager 慢 -0.56% 至 -6.13%。旧 W1R-gmm-tuning-config 提案在当前 CANN 9.1.0 + 910B2 真实稀疏分布下被证伪。"
+    },
+    "compact_active_gmm_with_gather": {
+      "verdict": "rejected_regressed",
+      "reason": "按非零专家动态 index_select 聚合权重在 eager 下慢 -386.55% 至 -414.37%（82~87us -> 403~422us）；即便扣除全部权重拷贝的理想核内上界，decode NPUGraph 最多仅省约 7.2~7.4us，且 mixed（M=580）反慢 -34.77%，权重 HBM 拷贝代价远大于空专家跳过开销。"
+    },
+    "per_token_bmm_gather": {
+      "verdict": "rejected_regressed",
+      "reason": "按 token 聚合权重再走 torch.bmm 在 NPUGraph 回放中全面退化（-32.13% 至 -2470.41%）。"
+    },
+    "group_list_type_0_cumsum": {
+      "verdict": "within_noise_end_to_end",
+      "reason": "单测 GMM1 时 decode NPUGraph 快 +4.44% 至 +5.45%（约 1.6~2.3us），但与上游 npu_moe_init_routing_v2(expert_tokens_num_type=0) 同图配对实测后，bs=16 端到端仅 +0.08%（158.23us vs 158.10us，std=0.6us，纯噪声/边界转移），不具服务优化价值。",
+      "routing_plus_gmm1_npu_graph": {
+        "decode_bs1_sparse": {
+          "max_abs": 2.8125,
+          "type1_counts": {
+            "median_us": 52.92,
+            "p90_us": 53.33,
+            "std_us": 0.37,
+            "iqr_us": 0.41
+          },
+          "type0_cumsum": {
+            "median_us": 51.44,
+            "p90_us": 51.79,
+            "std_us": 0.26,
+            "iqr_us": 0.34
+          },
+          "speedup_pct": 2.8
+        },
+        "decode_bs16_sparse": {
+          "max_abs": 0.0,
+          "type1_counts": {
+            "median_us": 158.23,
+            "p90_us": 159.03,
+            "std_us": 0.62,
+            "iqr_us": 0.8
+          },
+          "type0_cumsum": {
+            "median_us": 158.1,
+            "p90_us": 158.84,
+            "std_us": 0.61,
+            "iqr_us": 0.56
+          },
+          "speedup_pct": 0.08
+        }
+      }
+    },
+    "zero_count_shortcircuit": {
+      "verdict": "skipped_graph_incompatible_and_negligible",
+      "reason": "FULL_DECODE_ONLY 图回放无法按设备端 group_list 做 Python 分支；原生图回放 M=0 仅耗时 13.0us，且全零调用仅占 decode 调用约 0.46%（30/6560）。"
+    }
+  },
+  "decision": {
+    "conclusion": "基于真实双卡 910B2 稀疏分布（decode 每卡每层平均仅约 4.9/128 活跃专家）的五类 PyTorch/接口级 BF16 GMM1 候选已全部完成数值对拍与配对计时筛查：均被淘汰（崩溃、显著退化或端到端噪声内）。不启动 BF16 GMM1 Python 层稀疏改写或 W1R tuning_config 的服务 A/B。",
+    "service_claim": "none_isolated_screen_only",
+    "next": "停止在 PyTorch/接口层围绕 BF16 npu_grouped_matmul 做稀疏改写；若继续优化 MoE/GMM1 须转向自定义 AscendC/BiSheng 核（无需拷贝权重的稀疏跳零或融合 GMM1+SwiGLU），或转向非 GMM1 热点（如调度/图捕获/通信路径）。"
+  },
+  "limits": "隔离单卡微基准与两算子图回放，仅用于候选淘汰与防踩坑，不构成服务交付证据。"
+}
